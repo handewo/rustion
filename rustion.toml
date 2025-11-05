@@ -1,0 +1,57 @@
+# Rustion Server Configuration
+
+# Listen address and port
+# Supported formats:
+# - "localhost:2222"
+# - "*:2222" (binds to all interfaces)
+# - "2222" (binds to all interfaces on port 2222)
+# - "192.168.1.1:2222"
+listen = "127.0.0.1:2222"
+
+# Path to the server private key file
+# If the file doesn't exist, a random key will be generated
+server_key = "server_key.pem"
+
+# Maximum number of authentication attempts per client
+max_auth_attempts_per_conn = 5
+
+# Log level for the application
+# Valid levels: error, warn, info, debug, trace
+log_level = "info"
+
+# Global ip attempts count
+max_ip_attempts = 100
+
+# Global user attempts count
+max_user_attempts = 30
+
+# Used to unban global ip and user
+unban_duration = "15m"
+
+# Enable re-use target connection
+reuse_target_connection = true
+
+# Max idle time that the target connection should be removed 
+# Idle time range is between 1 minute and 24 hours
+target_cache_duration = "30m"
+
+inactivity_timeout = "1h"
+
+# Important key, don't share and lose
+secret_key = "2MMVPJvaDcwBecSOwvG1/fJueEmJHdNuJq3DoyUQ5I0="
+
+# Enable recording interactive with targets, this only work
+# if pty requested
+# Default: false
+enable_record = false
+
+# Enable recording input from user
+record_input = false
+
+# Record path for store asciinema file
+# Default: ./record
+record_path = "./record"
+
+[database]
+type = "sqlite"
+path = "rustion.db"
