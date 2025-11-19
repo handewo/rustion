@@ -62,10 +62,9 @@ impl SqliteRepository {
                 server_public_key TEXT NOT NULL,
                 description TEXT,
                 is_active BOOLEAN NOT NULL CHECK (is_active IN (0, 1)),
-                created_by TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
+                updated_by TEXT NOT NULL,
                 updated_at INTEGER NOT NULL,
-                FOREIGN KEY (created_by) REFERENCES users (id)
+                FOREIGN KEY (updated_by) REFERENCES users (id)
             )
             "#,
         )
@@ -103,10 +102,9 @@ impl SqliteRepository {
                 target_id TEXT NOT NULL,
                 secret_id TEXT NOT NULL,
                 is_active BOOLEAN NOT NULL CHECK (is_active IN (0, 1)),
-                created_by TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
+                updated_by TEXT NOT NULL,
                 updated_at INTEGER NOT NULL,
-                FOREIGN KEY (created_by) REFERENCES users (id)
+                FOREIGN KEY (updated_by) REFERENCES users (id)
                 FOREIGN KEY (secret_id) REFERENCES secrets (id)
                 FOREIGN KEY (target_id) REFERENCES targets (id)
                 UNIQUE(target_id, secret_id)
@@ -323,8 +321,8 @@ impl DatabaseRepository for SqliteRepository {
         sqlx::query(
             r#"
             INSERT INTO targets
-            (id, name, hostname, port, server_public_key, description, is_active, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, name, hostname, port, server_public_key, description, is_active, updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&target.id)
@@ -334,8 +332,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&target.server_public_key)
         .bind(&target.description)
         .bind(target.is_active)
-        .bind(&target.created_by)
-        .bind(target.created_at)
+        .bind(&target.updated_by)
         .bind(target.updated_at)
         .execute(&self.pool)
         .await
@@ -346,7 +343,7 @@ impl DatabaseRepository for SqliteRepository {
 
     async fn get_target_by_id(&self, id: &str, active_only: bool) -> Result<Option<Target>, Error> {
         let mut query = r#"SELECT id, name, hostname, port, server_public_key, description,
-            is_active, created_by, created_at, updated_at FROM targets WHERE id = ?"#
+            is_active, updated_by, updated_at FROM targets WHERE id = ?"#
             .to_string();
         if active_only {
             query.push_str(" AND is_active = 1");
@@ -367,7 +364,7 @@ impl DatabaseRepository for SqliteRepository {
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         let sql = format!(
             r#"SELECT id, name, hostname, port, server_public_key, description,
-            is_active, created_by, created_at, updated_at FROM targets WHERE id IN ({placeholders})"#
+            is_active, updated_by, updated_at FROM targets WHERE id IN ({placeholders})"#
         );
 
         let mut query = sqlx::query_as::<_, Target>(&sql);
@@ -394,7 +391,7 @@ impl DatabaseRepository for SqliteRepository {
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         let mut sql = format!(
             r#"SELECT t.id, t.name, t.hostname, t.port, t.server_public_key, t.description,
-            t.is_active, t.created_by, t.created_at, t.updated_at FROM target_secrets ts
+            t.is_active, t.updated_by, t.updated_at FROM target_secrets ts
             INNER JOIN targets t ON ts.target_id = t.id
             WHERE ts.id IN ({placeholders})"#
         );
@@ -418,7 +415,7 @@ impl DatabaseRepository for SqliteRepository {
     async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, Error> {
         let row = sqlx::query_as::<_, Target>(
             r#"SELECT id, name, hostname, port, server_public_key, description,
-            is_active, created_by, created_at, updated_at FROM targets WHERE name = ?"#,
+            is_active, updated_by, updated_at FROM targets WHERE name = ?"#,
         )
         .bind(name)
         .fetch_optional(&self.pool)
@@ -431,7 +428,7 @@ impl DatabaseRepository for SqliteRepository {
     async fn get_target_by_hostname(&self, hostname: &str) -> Result<Option<Target>, Error> {
         let row = sqlx::query_as::<_, Target>(
             r#"SELECT id, name, hostname, port, server_public_key, description,
-            is_active, created_by, created_at, updated_at FROM targets WHERE hostname = ?"#,
+            is_active, updated_by, updated_at FROM targets WHERE hostname = ?"#,
         )
         .bind(hostname)
         .fetch_optional(&self.pool)
@@ -449,7 +446,7 @@ impl DatabaseRepository for SqliteRepository {
             r#"
             UPDATE targets 
             SET name = ?, hostname = ?, port = ?, server_public_key = ?, description = ?,
-            is_active = ?, updated_at = ?
+            is_active = ?, updated_by = ?, updated_at = ?
             WHERE id = ?
             "#,
         )
@@ -459,6 +456,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&updated_target.server_public_key)
         .bind(&updated_target.description)
         .bind(updated_target.is_active)
+        .bind(&updated_target.updated_by)
         .bind(updated_target.updated_at)
         .bind(&updated_target.id)
         .execute(&self.pool)
@@ -481,7 +479,7 @@ impl DatabaseRepository for SqliteRepository {
     async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, Error> {
         let mut query = String::from(
             r#"SELECT id, name, hostname, port, server_public_key, description,
-                  is_active, created_by, created_at, updated_at
+                  is_active, updated_by, updated_at
            FROM targets"#,
         );
 
@@ -953,13 +951,13 @@ impl DatabaseRepository for SqliteRepository {
         }
 
         let rows = (0..targets.len())
-            .map(|_| "(?,?,?,?,?,?,?,?,?,?)")
+            .map(|_| "(?,?,?,?,?,?,?,?,?)")
             .collect::<Vec<_>>()
             .join(",");
         let query = format!(
             r"INSERT INTO targets
           (id, name, hostname, port, server_public_key, description,
-           is_active, created_by, created_at, updated_at)
+           is_active, updated_by, updated_at)
           VALUES {rows}"
         );
         let mut q = sqlx::query(&query);
@@ -973,8 +971,7 @@ impl DatabaseRepository for SqliteRepository {
                 .bind(&t.server_public_key)
                 .bind(&t.description)
                 .bind(t.is_active)
-                .bind(&t.created_by)
-                .bind(t.created_at)
+                .bind(&t.updated_by)
                 .bind(t.updated_at);
         }
 
@@ -987,7 +984,7 @@ impl DatabaseRepository for SqliteRepository {
 
     async fn list_target_secrets(&self, active_only: bool) -> Result<Vec<TargetSecret>, Error> {
         let mut query = String::from(
-            r#"SELECT id, target_id, secret_id, is_active, created_by, created_at, updated_at
+            r#"SELECT id, target_id, secret_id, is_active, updated_by, updated_at
            FROM target_secrets"#,
         );
 
@@ -1008,16 +1005,15 @@ impl DatabaseRepository for SqliteRepository {
         sqlx::query(
             r#"
             INSERT INTO target_secrets
-            (id, target_id, secret_id, is_active, created_by, created_at, updated_at)  
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (id, target_id, secret_id, is_active, updated_by, updated_at)  
+            VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&target_secret.id)
         .bind(&target_secret.target_id)
         .bind(&target_secret.secret_id)
         .bind(target_secret.is_active)
-        .bind(&target_secret.created_by)
-        .bind(target_secret.created_at)
+        .bind(&target_secret.updated_by)
         .bind(target_secret.updated_at)
         .execute(&self.pool)
         .await
@@ -1196,13 +1192,13 @@ impl DatabaseRepository for SqliteRepository {
         }
 
         let rows = (0..secrets.len())
-            .map(|_| "(?,?,?,?,?,?,?)")
+            .map(|_| "(?,?,?,?,?,?)")
             .collect::<Vec<_>>()
             .join(",");
 
         let query = format!(
             r#"INSERT INTO target_secrets
-            (id, target_id, secret_id, is_active, created_by, created_at, updated_at)
+            (id, target_id, secret_id, is_active, updated_by, updated_at)
             VALUES  {rows}"#,
         );
 
@@ -1214,8 +1210,7 @@ impl DatabaseRepository for SqliteRepository {
                 .bind(&s.target_id)
                 .bind(&s.secret_id)
                 .bind(s.is_active)
-                .bind(&s.created_by)
-                .bind(s.created_at)
+                .bind(&s.updated_by)
                 .bind(s.updated_at);
         }
 
@@ -1282,7 +1277,7 @@ impl DatabaseRepository for SqliteRepository {
         let targets = sqlx::query_as::<_, Target>(
             r#"
             SELECT id, name, hostname, port, server_public_key, description,
-            is_active, created_by, created_at, updated_at
+            is_active, updated_by, updated_at
             FROM targets 
             WHERE name LIKE ? OR hostname LIKE ? OR description LIKE ?
             ORDER BY name

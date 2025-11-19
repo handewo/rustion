@@ -8,8 +8,7 @@ pub struct TargetSecret {
     pub target_id: String,
     pub secret_id: String,
     pub is_active: bool,
-    pub created_by: String,
-    pub created_at: i64,
+    pub updated_by: String,
     pub updated_at: i64,
 }
 
@@ -29,15 +28,14 @@ pub struct Secret {
 }
 
 impl TargetSecret {
-    pub fn new(target_id: String, secret_id: String, created_by: String) -> Self {
+    pub fn new(target_id: String, secret_id: String, updated_by: String) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
             id: Uuid::new_v4().to_string(),
             target_id,
             secret_id,
             is_active: true,
-            created_by,
-            created_at: now,
+            updated_by,
             updated_at: now,
         }
     }

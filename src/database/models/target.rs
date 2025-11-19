@@ -17,8 +17,7 @@ pub struct Target {
     pub server_public_key: String,
     pub description: Option<String>,
     pub is_active: bool,
-    pub created_by: String, // User ID who created this target
-    pub created_at: i64,
+    pub updated_by: String, // User ID who last updated this target
     pub updated_at: i64,
 }
 
@@ -28,7 +27,7 @@ impl Target {
         hostname: String,
         port: u16,
         server_public_key: String,
-        created_by: String,
+        updated_by: String,
     ) -> Self {
         let now = Utc::now();
         Self {
@@ -39,8 +38,7 @@ impl Target {
             server_public_key,
             description: None,
             is_active: true,
-            created_by,
-            created_at: now.timestamp_millis(),
+            updated_by,
             updated_at: now.timestamp_millis(),
         }
     }
