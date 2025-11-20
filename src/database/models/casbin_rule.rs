@@ -15,8 +15,7 @@ pub struct CasbinRule {
     pub v3: String,
     pub v4: String,
     pub v5: String,
-    pub created_by: String, // User ID who created this target
-    pub created_at: i64,
+    pub updated_by: String, // User ID who last updated this rule
     pub updated_at: i64,
 }
 
@@ -30,7 +29,7 @@ impl CasbinRule {
         v3: String,
         v4: String,
         v5: String,
-        created_by: String,
+        updated_by: String,
     ) -> Self {
         let now = Utc::now();
         Self {
@@ -42,8 +41,7 @@ impl CasbinRule {
             v3,
             v4,
             v5,
-            created_by,
-            created_at: now.timestamp_millis(),
+            updated_by,
             updated_at: now.timestamp_millis(),
         }
     }

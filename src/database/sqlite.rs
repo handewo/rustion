@@ -126,10 +126,9 @@ impl SqliteRepository {
                 v3 VARCHAR(256) NOT NULL,
                 v4 VARCHAR(256) NOT NULL,
                 v5 VARCHAR(256) NOT NULL,
-                created_by TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
+                updated_by TEXT NOT NULL,
                 updated_at INTEGER NOT NULL,
-                FOREIGN KEY (created_by) REFERENCES users (id)
+                FOREIGN KEY (updated_by) REFERENCES users (id)
                 CONSTRAINT unique_key_sqlx_adapter UNIQUE(ptype, v0, v1, v2, v3, v4, v5)
             );
             "#,
@@ -638,7 +637,7 @@ impl DatabaseRepository for SqliteRepository {
 
     async fn list_casbin_rules(&self) -> Result<Vec<CasbinRule>, Error> {
         let query = r#"
-        SELECT id, ptype, v0, v1, v2, v3, v4, v5, created_by, created_at, updated_at
+        SELECT id, ptype, v0, v1, v2, v3, v4, v5, updated_by, updated_at
         FROM casbin_rule
     "#;
 
@@ -650,7 +649,7 @@ impl DatabaseRepository for SqliteRepository {
 
     async fn list_casbin_rules_by_ptype(&self, ptype: &str) -> Result<Vec<CasbinRule>, Error> {
         let query = r#"
-        SELECT id, ptype, v0, v1, v2, v3, v4, v5, created_by, created_at, updated_at
+        SELECT id, ptype, v0, v1, v2, v3, v4, v5, updated_by, updated_at
         FROM casbin_rule
         WHERE ptype = ?
     "#;
@@ -666,8 +665,8 @@ impl DatabaseRepository for SqliteRepository {
         sqlx::query(
             r#"
             INSERT INTO casbin_rule
-            (id, ptype, v0, v1, v2, v3, v4, v5, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, ptype, v0, v1, v2, v3, v4, v5, updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&rule.id)
@@ -678,8 +677,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&rule.v3)
         .bind(&rule.v4)
         .bind(&rule.v5)
-        .bind(&rule.created_by)
-        .bind(rule.created_at)
+        .bind(&rule.updated_by)
         .bind(rule.updated_at)
         .execute(&self.pool)
         .await
@@ -696,7 +694,7 @@ impl DatabaseRepository for SqliteRepository {
             r#"
         UPDATE casbin_rule
         SET ptype = ?, v0 = ?, v1 = ?, v2 = ?, v3 = ?, v4 = ?, v5 = ?,
-            updated_at = ?
+            updated_by = ?, updated_at = ?
         WHERE id = ?
         "#,
         )
@@ -707,6 +705,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&updated_rule.v3)
         .bind(&updated_rule.v4)
         .bind(&updated_rule.v5)
+        .bind(&updated_rule.updated_by)
         .bind(updated_rule.updated_at)
         .bind(&updated_rule.id)
         .execute(&self.pool)
@@ -874,13 +873,13 @@ impl DatabaseRepository for SqliteRepository {
         // Build “VALUES (?,?,?,?,…), (?,?,?,?,…), …”
         let rows = rules
             .iter()
-            .map(|_| "(?,?,?,?,?,?,?,?,?,?,?)")
+            .map(|_| "(?,?,?,?,?,?,?,?,?,?)")
             .collect::<Vec<_>>()
             .join(",");
 
         let query = format!(
             r"INSERT INTO casbin_rule
-              (id, ptype, v0, v1, v2, v3, v4, v5, created_by, created_at, updated_at)
+              (id, ptype, v0, v1, v2, v3, v4, v5, updated_by, updated_at)
               VALUES {rows}"
         );
 
@@ -895,8 +894,7 @@ impl DatabaseRepository for SqliteRepository {
                 .bind(&r.v3)
                 .bind(&r.v4)
                 .bind(&r.v5)
-                .bind(&r.created_by)
-                .bind(r.created_at)
+                .bind(&r.updated_by)
                 .bind(r.updated_at);
         }
 
