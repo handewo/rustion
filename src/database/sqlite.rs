@@ -143,7 +143,7 @@ impl SqliteRepository {
             CREATE TABLE IF NOT EXISTS internal_objects (
                 name TEXT PRIMARY KEY,
                 is_active BOOLEAN NOT NULL CHECK (is_active IN (0, 1)),
-                created_at INTEGER NOT NULL,
+                updated_by TEXT NOT NULL,
                 updated_at INTEGER NOT NULL
             )
             "#,
@@ -1067,7 +1067,7 @@ impl DatabaseRepository for SqliteRepository {
 
     async fn list_internal_objects(&self, active_only: bool) -> Result<Vec<InternalObject>, Error> {
         let mut query = String::from(
-            r#"SELECT name, is_active, created_at, updated_at
+            r#"SELECT name, is_active, updated_by, updated_at
            FROM internal_objects"#,
         );
 
@@ -1088,11 +1088,12 @@ impl DatabaseRepository for SqliteRepository {
         sqlx::query(
             r#"
             UPDATE internal_objects 
-            SET is_active = ?, updated_at = ?
+            SET is_active = ?, updated_by = ?, updated_at = ?
             WHERE name = ?
             "#,
         )
         .bind(obj.is_active)
+        .bind(&obj.updated_by)
         .bind(obj.updated_at)
         .bind(&obj.name)
         .execute(&self.pool)
@@ -1106,13 +1107,13 @@ impl DatabaseRepository for SqliteRepository {
         sqlx::query(
             r#"
             INSERT INTO internal_objects
-            (name, is_active, created_at, updated_at)  
+            (name, is_active, updated_by, updated_at)  
             VALUES (?, ?, ?, ?)
             "#,
         )
         .bind(&obj.name)
         .bind(obj.is_active)
-        .bind(obj.created_at)
+        .bind(&obj.updated_by)
         .bind(obj.updated_at)
         .execute(&self.pool)
         .await
@@ -1239,7 +1240,7 @@ impl DatabaseRepository for SqliteRepository {
 
         let query = format!(
             r"INSERT INTO internal_objects
-              (name, is_active, created_at, updated_at)
+              (name, is_active, updated_by, updated_at)
               VALUES {rows}"
         );
         let mut q = sqlx::query(&query);
@@ -1248,7 +1249,7 @@ impl DatabaseRepository for SqliteRepository {
             q = q
                 .bind(&s.name)
                 .bind(s.is_active)
-                .bind(s.created_at)
+                .bind(&s.updated_by)
                 .bind(s.updated_at);
         }
 

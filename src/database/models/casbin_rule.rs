@@ -87,17 +87,17 @@ impl fmt::Display for Action {
 pub struct InternalObject {
     pub name: String,
     pub is_active: bool,
-    pub created_at: i64,
+    pub updated_by: String,
     pub updated_at: i64,
 }
 
 impl InternalObject {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: String, updated_by: String) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
             name,
             is_active: true,
-            created_at: now,
+            updated_by,
             updated_at: now,
         }
     }

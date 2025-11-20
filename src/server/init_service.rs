@@ -65,7 +65,7 @@ pub async fn init_service(config: Config) {
     // init built-in policy
     let internal_objs = INTERNAL_OBJECTS
         .iter()
-        .map(|o| InternalObject::new(o.to_string()))
+        .map(|o| InternalObject::new(o.to_string(), u.id.clone()))
         .collect::<Vec<_>>();
     db.repository()
         .create_internal_objects_batch(&internal_objs)
