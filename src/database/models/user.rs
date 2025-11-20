@@ -21,12 +21,12 @@ pub struct User {
     pub(in crate::database) authorized_keys: StringArray,
     pub force_init_pass: bool,
     pub is_active: bool,
-    pub created_at: i64,
+    pub updated_by: String,
     pub updated_at: i64,
 }
 
 impl User {
-    pub fn new(username: String) -> Self {
+    pub fn new(username: String, updated_by: String) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
             id: Uuid::new_v4().to_string(),
@@ -36,7 +36,7 @@ impl User {
             authorized_keys: StringArray(Vec::new()),
             force_init_pass: true,
             is_active: true,
-            created_at: now,
+            updated_by,
             updated_at: now,
         }
     }

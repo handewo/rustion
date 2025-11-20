@@ -57,7 +57,9 @@ pub async fn init_service(config: Config) {
         .unwrap();
 
     // init admin user
-    let u = User::new("admin".to_string());
+    let admin_id = uuid::Uuid::new_v4().to_string();
+    let mut u = User::new("admin".to_string(), admin_id.clone());
+    u.id = admin_id;
     let u = db.repository().create_user(&u).await.unwrap();
 
     // init built-in policy

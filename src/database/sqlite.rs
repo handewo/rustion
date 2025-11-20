@@ -41,7 +41,7 @@ impl SqliteRepository {
                 authorized_keys TEXT,  -- Stores JSON array
                 force_init_pass BOOLEAN NOT NULL CHECK (force_init_pass IN (0, 1)),
                 is_active BOOLEAN NOT NULL CHECK (is_active IN (0, 1)),
-                created_at INTEGER NOT NULL,
+                updated_by TEXT NOT NULL,
                 updated_at INTEGER NOT NULL,
                 CHECK (json_valid(authorized_keys) OR authorized_keys IS NULL)
             )
@@ -207,7 +207,7 @@ impl DatabaseRepository for SqliteRepository {
     async fn create_user(&self, user: &User) -> Result<User, Error> {
         sqlx::query(
             r#"
-            INSERT INTO users (id, username, email, password_hash, authorized_keys, force_init_pass, is_active, created_at, updated_at)
+            INSERT INTO users (id, username, email, password_hash, authorized_keys, force_init_pass, is_active, updated_by, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
@@ -218,7 +218,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&user.authorized_keys)
         .bind(user.force_init_pass)
         .bind(user.is_active)
-        .bind(user.created_at)
+        .bind(&user.updated_by)
         .bind(user.updated_at)
         .execute(&self.pool)
         .await
@@ -230,7 +230,7 @@ impl DatabaseRepository for SqliteRepository {
     async fn get_user_by_id(&self, id: &str) -> Result<Option<User>, Error> {
         let row = sqlx::query_as::<_, User>(
             r#"SELECT id, username, email, password_hash, authorized_keys, force_init_pass, is_active,
-            created_at, updated_at
+            updated_by, updated_at
             FROM users WHERE id = ?"#
         )
         .bind(id)
@@ -246,8 +246,11 @@ impl DatabaseRepository for SqliteRepository {
         username: &str,
         active_only: bool,
     ) -> Result<Option<User>, Error> {
-        let mut query = r#"SELECT id, username, email, password_hash, authorized_keys, force_init_pass, is_active, created_at, updated_at
-            FROM users WHERE username = ?"#.to_string();
+        let mut query =
+            r#"SELECT id, username, email, password_hash, authorized_keys, force_init_pass,
+        is_active, updated_by, updated_at
+            FROM users WHERE username = ?"#
+                .to_string();
         if active_only {
             query.push_str(" AND is_active = 1");
         }
@@ -268,7 +271,7 @@ impl DatabaseRepository for SqliteRepository {
             r#"
             UPDATE users 
             SET username = ?, email = ?, password_hash = ?, authorized_keys = ?, force_init_pass = ?,
-            is_active = ?, updated_at = ? WHERE id = ?
+            is_active = ?, updated_by = ?, updated_at = ? WHERE id = ?
             "#,
         )
         .bind(&updated_user.username)
@@ -277,6 +280,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&updated_user.authorized_keys)
         .bind(updated_user.force_init_pass)
         .bind(updated_user.is_active)
+        .bind(&updated_user.updated_by)
         .bind(updated_user.updated_at)
         .bind(&updated_user.id)
         .execute(&self.pool)
@@ -299,7 +303,7 @@ impl DatabaseRepository for SqliteRepository {
     async fn list_users(&self, active_only: bool) -> Result<Vec<User>, Error> {
         let mut query = String::from(
             r#"SELECT id, username, email, password_hash, authorized_keys,
-                 force_init_pass, is_active, created_at, updated_at
+                 force_init_pass, is_active, updated_by, updated_at
           FROM users"#,
         );
 
@@ -918,7 +922,7 @@ impl DatabaseRepository for SqliteRepository {
         let query = format!(
             r"INSERT INTO users
           (id, username, email, password_hash, authorized_keys,
-           force_init_pass, is_active, created_at, updated_at)
+           force_init_pass, is_active, updated_by, updated_at)
           VALUES {rows}"
         );
         let mut q = sqlx::query(&query);
@@ -932,7 +936,7 @@ impl DatabaseRepository for SqliteRepository {
                 .bind(&u.authorized_keys)
                 .bind(u.force_init_pass)
                 .bind(u.is_active)
-                .bind(u.created_at)
+                .bind(&u.updated_by)
                 .bind(u.updated_at);
         }
 
@@ -1256,7 +1260,7 @@ impl DatabaseRepository for SqliteRepository {
         let search_pattern = format!("%{}%", query);
         let users = sqlx::query_as::<_, User>(
             r#"
-            SELECT id, username, email, password_hash, force_init_pass, is_active, created_at, updated_at 
+            SELECT id, username, email, password_hash, force_init_pass, is_active, updated_by, updated_at
             FROM users 
             WHERE username LIKE ? OR email LIKE ?
             ORDER BY username
