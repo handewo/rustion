@@ -83,10 +83,9 @@ impl SqliteRepository {
                 private_key TEXT,
                 public_key TEXT,
                 is_active BOOLEAN NOT NULL CHECK (is_active IN (0, 1)),
-                created_by TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
+                updated_by TEXT NOT NULL,
                 updated_at INTEGER NOT NULL,
-                FOREIGN KEY (created_by) REFERENCES users (id)
+                FOREIGN KEY (updated_by) REFERENCES users (id)
             )
             "#,
         )
@@ -730,7 +729,7 @@ impl DatabaseRepository for SqliteRepository {
     async fn list_secrets(&self, active_only: bool) -> Result<Vec<Secret>, Error> {
         let mut query = String::from(
             r#"SELECT id, name, user, password, private_key, public_key,
-            is_active, created_by, created_at, updated_at
+            is_active, updated_by, updated_at
             FROM secrets"#,
         );
 
@@ -748,8 +747,8 @@ impl DatabaseRepository for SqliteRepository {
         sqlx::query(
             r#"
             INSERT INTO secrets
-            (id, name, user, password, private_key, public_key, is_active, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, name, user, password, private_key, public_key, is_active, updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&secret.id)
@@ -759,8 +758,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&secret.private_key)
         .bind(&secret.public_key)
         .bind(secret.is_active)
-        .bind(&secret.created_by)
-        .bind(secret.created_at)
+        .bind(&secret.updated_by)
         .bind(secret.updated_at)
         .execute(&self.pool)
         .await
@@ -774,8 +772,8 @@ impl DatabaseRepository for SqliteRepository {
         id: &str,
         active_only: bool,
     ) -> Result<Option<Secret>, Error> {
-        let mut query = r#"SELECT s.id, s.name, s.user, s.password, s.private_key, s.public_key, s.is_active, s.created_by,
-            s.created_at, s.updated_at FROM target_secrets ts
+        let mut query = r#"SELECT s.id, s.name, s.user, s.password, s.private_key, s.public_key, s.is_active, s.updated_by,
+            s.updated_at FROM target_secrets ts
             INNER JOIN secrets s ON ts.secret_id = s.id
             WHERE ts.id = ?"#
             .to_string();
@@ -793,7 +791,7 @@ impl DatabaseRepository for SqliteRepository {
 
     async fn get_secret_by_id(&self, id: &str) -> Result<Option<Secret>, Error> {
         let row = sqlx::query_as::<_, Secret>(
-            r#"SELECT id, name, user, password, private_key, public_key, is_active, created_by, created_at,
+            r#"SELECT id, name, user, password, private_key, public_key, is_active, updated_by,
             updated_at FROM secrets WHERE id = ?"#,
         )
         .bind(id)
@@ -810,7 +808,7 @@ impl DatabaseRepository for SqliteRepository {
         }
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         let sql = format!(
-            r#"SELECT id, name, user, password, private_key, public_key, is_active, created_by, created_at,
+            r#"SELECT id, name, user, password, private_key, public_key, is_active, updated_by,
             updated_at FROM secrets WHERE id IN ({placeholders})"#,
         );
 
@@ -834,7 +832,8 @@ impl DatabaseRepository for SqliteRepository {
         sqlx::query(
             r#"
             UPDATE secrets 
-            SET name = ?, user = ?, password = ?, private_key = ?, public_key = ?, is_active = ?, updated_at = ?
+            SET name = ?, user = ?, password = ?, private_key = ?, public_key = ?,
+            is_active = ?, update_by = ?, updated_at = ?
             WHERE id = ?
             "#,
         )
@@ -844,6 +843,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&updated_secret.private_key)
         .bind(&updated_secret.public_key)
         .bind(updated_secret.is_active)
+        .bind(&updated_secret.updated_by)
         .bind(updated_secret.updated_at)
         .bind(&updated_secret.id)
         .execute(&self.pool)
@@ -1035,6 +1035,7 @@ impl DatabaseRepository for SqliteRepository {
         SET target_id  = ?,
             secret_id  = ?,
             is_active  = ?,
+            updated_by = ?,
             updated_at = ?
         WHERE id = ?
         "#,
@@ -1042,6 +1043,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&updated.target_id)
         .bind(&updated.secret_id)
         .bind(updated.is_active)
+        .bind(&updated.updated_by)
         .bind(updated.updated_at)
         .bind(&updated.id)
         .execute(&self.pool)
@@ -1154,13 +1156,13 @@ impl DatabaseRepository for SqliteRepository {
         }
 
         let rows = (0..secrets.len())
-            .map(|_| "(?,?,?,?,?,?,?,?,?,?)")
+            .map(|_| "(?,?,?,?,?,?,?,?,?)")
             .collect::<Vec<_>>()
             .join(",");
 
         let query = format!(
             r"INSERT INTO secrets
-              (id, name, user, password, private_key, public_key, is_active, created_by, created_at, updated_at)
+              (id, name, user, password, private_key, public_key, is_active, updated_by, updated_at)
               VALUES {rows}"
         );
         let mut q = sqlx::query(&query);
@@ -1174,8 +1176,7 @@ impl DatabaseRepository for SqliteRepository {
                 .bind(&s.private_key)
                 .bind(&s.public_key)
                 .bind(s.is_active)
-                .bind(&s.created_by)
-                .bind(s.created_at)
+                .bind(&s.updated_by)
                 .bind(s.updated_at);
         }
 

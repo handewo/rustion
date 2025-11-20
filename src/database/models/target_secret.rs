@@ -22,8 +22,7 @@ pub struct Secret {
     pub(in crate::database) private_key: Option<String>,
     pub(in crate::database) public_key: Option<String>,
     pub is_active: bool,
-    pub created_by: String,
-    pub created_at: i64,
+    pub updated_by: String,
     pub updated_at: i64,
 }
 
@@ -42,7 +41,7 @@ impl TargetSecret {
 }
 
 impl Secret {
-    pub fn new(name: String, user: String, created_by: String) -> Self {
+    pub fn new(name: String, user: String, updated_by: String) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
             id: Uuid::new_v4().to_string(),
@@ -52,8 +51,7 @@ impl Secret {
             private_key: None,
             public_key: None,
             is_active: true,
-            created_by,
-            created_at: now,
+            updated_by,
             updated_at: now,
         }
     }
