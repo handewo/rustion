@@ -836,7 +836,7 @@ impl DatabaseRepository for SqliteRepository {
             r#"
             UPDATE secrets 
             SET name = ?, user = ?, password = ?, private_key = ?, public_key = ?,
-            is_active = ?, update_by = ?, updated_at = ?
+            is_active = ?, updated_by = ?, updated_at = ?
             WHERE id = ?
             "#,
         )
