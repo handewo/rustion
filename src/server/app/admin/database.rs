@@ -511,7 +511,7 @@ impl TableData {
                     Constraint::Length(15),
                     Constraint::Length(15),
                     Constraint::Length(9),
-                    Constraint::Length(LENGTH_TIMSTAMP),
+                    Constraint::Length(LENGTH_UUID),
                     Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
@@ -555,7 +555,6 @@ impl TableData {
                     Constraint::Length(9), // is_active
                     Constraint::Length(LENGTH_UUID),
                     Constraint::Length(LENGTH_TIMSTAMP),
-                    Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
 
@@ -566,7 +565,6 @@ impl TableData {
                     Constraint::Length(LENGTH_UUID), // secret_id
                     Constraint::Length(9),           // is_active
                     Constraint::Length(LENGTH_UUID), // created_by
-                    Constraint::Length(LENGTH_TIMSTAMP),
                     Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
@@ -597,7 +595,6 @@ impl TableData {
                     Constraint::Length(9),  // is_active
                     Constraint::Length(LENGTH_UUID), // created_by
                     Constraint::Length(LENGTH_TIMSTAMP),
-                    Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
             Self::InternalObjects(ref data) => {
@@ -612,7 +609,7 @@ impl TableData {
                 vec![
                     Constraint::Length(name_len as u16),
                     Constraint::Length(9), // is_active
-                    Constraint::Length(LENGTH_TIMSTAMP),
+                    Constraint::Length(LENGTH_UUID),
                     Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
@@ -671,7 +668,6 @@ impl TableData {
                     Constraint::Length(v5_len as u16),
                     Constraint::Length(LENGTH_UUID),
                     Constraint::Length(LENGTH_TIMSTAMP),
-                    Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
             Self::Logs(ref data) => {
@@ -711,7 +707,7 @@ impl TableData {
                     "authorized_keys",
                     "force_init_pass",
                     "is_active",
-                    "created_at",
+                    "updated_by",
                     "updated_at",
                 ]
             }
@@ -724,8 +720,7 @@ impl TableData {
                     "server_public_key",
                     "description",
                     "is_active",
-                    "created_by",
-                    "created_at",
+                    "updated_by",
                     "updated_at",
                 ]
             }
@@ -735,8 +730,7 @@ impl TableData {
                     "target_id",
                     "secret_id",
                     "is_active",
-                    "created_by",
-                    "created_at",
+                    "updated_by",
                     "updated_at",
                 ]
             }
@@ -749,13 +743,12 @@ impl TableData {
                     "private_key",
                     "public_key",
                     "is_active",
-                    "created_by",
-                    "created_at",
+                    "updated_by",
                     "updated_at",
                 ]
             }
             Self::InternalObjects(_) => {
-                vec!["name", "is_active", "created_at", "updated_at"]
+                vec!["name", "is_active", "updated_by", "updated_at"]
             }
             Self::CasbinRule(_) => {
                 vec![
@@ -767,8 +760,7 @@ impl TableData {
                     "p3",
                     "p4",
                     "p5",
-                    "created_by",
-                    "created_at",
+                    "updated_by",
                     "updated_at",
                 ]
             }
@@ -799,7 +791,7 @@ impl FieldsToArray for User {
             self.print_authorized_keys(),
             self.force_init_pass.to_string(),
             self.is_active.to_string(),
-            self.created_at.to_string(),
+            self.updated_by.clone(),
             self.updated_at.to_string(),
         ]
     }
@@ -815,8 +807,7 @@ impl FieldsToArray for Target {
             self.server_public_key.clone(),
             self.description.clone().unwrap_or_default(),
             self.is_active.to_string(),
-            self.created_by.clone(),
-            self.created_at.to_string(),
+            self.updated_by.clone(),
             self.updated_at.to_string(),
         ]
     }
@@ -829,8 +820,7 @@ impl FieldsToArray for TargetSecret {
             self.target_id.clone(),
             self.secret_id.clone(),
             self.is_active.to_string(),
-            self.created_by.clone(),
-            self.created_at.to_string(),
+            self.updated_by.clone(),
             self.updated_at.to_string(),
         ]
     }
@@ -846,8 +836,7 @@ impl FieldsToArray for Secret {
             self.print_private_key(),
             self.print_public_key(),
             self.is_active.to_string(),
-            self.created_by.clone(),
-            self.created_at.to_string(),
+            self.updated_by.clone(),
             self.updated_at.to_string(),
         ]
     }
@@ -858,7 +847,7 @@ impl FieldsToArray for InternalObject {
         vec![
             self.name.clone(),
             self.is_active.to_string(),
-            self.created_at.to_string(),
+            self.updated_by.clone(),
             self.updated_at.to_string(),
         ]
     }
@@ -875,8 +864,7 @@ impl FieldsToArray for CasbinRule {
             self.v3.clone(),
             self.v4.clone(),
             self.v5.clone(),
-            self.created_by.clone(),
-            self.created_at.to_string(),
+            self.updated_by.clone(),
             self.updated_at.to_string(),
         ]
     }
