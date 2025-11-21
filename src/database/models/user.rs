@@ -67,9 +67,9 @@ impl User {
 
     pub fn print_authorized_keys(&self) -> String {
         if self.authorized_keys.0.is_empty() {
-            return "********".to_string();
+            return String::new();
         }
-        String::new()
+        "********".to_string()
     }
 
     pub fn print_password(&self) -> String {
