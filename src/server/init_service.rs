@@ -88,6 +88,18 @@ pub async fn init_service(config: Config) {
         u.id.clone(),
     );
     db.repository().create_casbin_rule(&p).await.unwrap();
+
+    let p = CasbinRule::new(
+        "p".to_string(),
+        u.id.clone(),
+        OBJ_ADMIN.to_string(),
+        Action::Login.to_string(),
+        ext.to_string(),
+        String::new(),
+        String::new(),
+        u.id.clone(),
+    );
+    db.repository().create_casbin_rule(&p).await.unwrap();
     // for ipv6
     let ext = casbin::ExtendPolicy {
         ip_policy: Some(casbin::IpPolicy::Allow("::1/128".parse().unwrap())),
@@ -107,6 +119,17 @@ pub async fn init_service(config: Config) {
     );
     db.repository().create_casbin_rule(&p).await.unwrap();
 
+    let p = CasbinRule::new(
+        "p".to_string(),
+        u.id.clone(),
+        OBJ_ADMIN.to_string(),
+        Action::Login.to_string(),
+        ext.to_string(),
+        String::new(),
+        String::new(),
+        u.id.clone(),
+    );
+    db.repository().create_casbin_rule(&p).await.unwrap();
     // add login_group
     let ext = casbin::ExtendPolicy {
         ip_policy: None,
