@@ -1,5 +1,5 @@
 /target
 server_key.pem
 bastion.db
-test*
+test
 /record
