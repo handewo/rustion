@@ -99,6 +99,7 @@ impl Completer for BastionCompleter {
                                         extra: None,
                                         span,
                                         append_whitespace: false,
+                                        match_indices: None,
                                     }
                                 })
                                 .filter(|t| t.value.len() > (t.span.end - t.span.start))
@@ -123,6 +124,7 @@ impl Completer for BastionCompleter {
                             extra: None,
                             span,
                             append_whitespace: false,
+                            match_indices: None,
                         }
                     })
                     .filter(|t| t.value.len() > (t.span.end - t.span.start))
