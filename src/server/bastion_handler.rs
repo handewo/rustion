@@ -749,6 +749,7 @@ impl<B: HandlerBackend + Send + Clone> Drop for BastionHandler<B> {
         tokio::spawn(async move {
             log(LOG_TYPE.into(), "logout".into()).await;
         });
+        trace!("[{}] drop BastionHandler", self.id);
     }
 }
 
