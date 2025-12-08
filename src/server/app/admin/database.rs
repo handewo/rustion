@@ -25,7 +25,7 @@ const INFO_TEXT: [&str; 2] = [
     "(Tab) next tab | (Shift Tab) previous tab | (+) zoom in | (-) zoom out | (PgUp) page up | (PgDn) page down",
 ];
 
-const LENGTH_UUID: u16 = 32;
+const LENGTH_UUID: u16 = 36;
 const LENGTH_TIMSTAMP: u16 = 14;
 
 pub(super) fn query_table<B, W: Write>(
