@@ -5,7 +5,7 @@ use crate::server::{casbin, common as srv_common};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use crossterm::event::NoTtyEvent;
-use log::{debug, warn};
+use log::{debug, trace, warn};
 use tokio::sync::mpsc;
 
 use russh::server as ru_server;
@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 mod common;
 mod database;
+mod manage;
 mod shell;
 
 const LOG_TYPE: &str = "admin";
@@ -165,6 +166,7 @@ impl Admin {
             .take()
             .unwrap_or_else(|| panic!("[{}] user should not be none", self.handler_id));
         let username = user.username.clone();
+        let user_id = user.id.clone();
         let handle_session = session.handle();
         let (send_to_session, mut recv_from_shell) = mpsc::channel::<Vec<u8>>(1);
         let (send_status, mut recv_status) = mpsc::channel(1);
@@ -224,6 +226,7 @@ impl Admin {
                 tty,
                 send_to_session,
                 send_status,
+                user_id,
                 handler_id,
                 backend,
                 tokio_handle,
@@ -237,6 +240,12 @@ impl Admin {
         )
         .await;
         Ok(())
+    }
+}
+
+impl Drop for Admin {
+    fn drop(&mut self) {
+        trace!("[{}] drop Admin", self.handler_id);
     }
 }
 

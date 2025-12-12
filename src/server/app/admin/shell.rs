@@ -8,13 +8,14 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use super::common::*;
-use super::{database, Status};
+use super::{database, manage, Status};
 use crossterm::event::{NoTtyEvent, SenderWriter};
 
 pub(super) fn shell<B>(
     tty: NoTtyEvent,
     send_to_session: mpsc::Sender<Vec<u8>>,
     send_status: mpsc::Sender<Status>,
+    user_id: String,
     handler_id: String,
     backend: Arc<B>,
     t_handle: tokio::runtime::Handle,
@@ -67,6 +68,16 @@ pub(super) fn shell<B>(
                         let _ = database::query_table(
                             tty.clone(),
                             SenderWriter::new(send_to_session.clone()),
+                            backend.clone(),
+                            t_handle.clone(),
+                        );
+                    }
+                    CMD_MANAGE => {
+                        let _ = manage::manage(
+                            tty.clone(),
+                            SenderWriter::new(send_to_session.clone()),
+                            user_id.clone(),
+                            handler_id.clone(),
                             backend.clone(),
                             t_handle.clone(),
                         );
