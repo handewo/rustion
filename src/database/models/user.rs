@@ -26,11 +26,11 @@ pub struct User {
 }
 
 impl User {
-    pub fn new(username: String, updated_by: String) -> Self {
+    pub fn new(updated_by: String) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
             id: Uuid::new_v4().to_string(),
-            username,
+            username: String::new(),
             email: None,
             password_hash: None,
             authorized_keys: StringArray(Vec::new()),

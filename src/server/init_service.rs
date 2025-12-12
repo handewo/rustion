@@ -58,7 +58,8 @@ pub async fn init_service(config: Config) {
 
     // init admin user
     let admin_id = uuid::Uuid::new_v4().to_string();
-    let mut u = User::new("admin".to_string(), admin_id.clone());
+    let mut u = User::new(admin_id.clone());
+    u.username = "admin".into();
     u.id = admin_id;
     let u = db.repository().create_user(&u).await.unwrap();
 
