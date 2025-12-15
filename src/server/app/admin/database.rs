@@ -39,6 +39,8 @@ where
 {
     let tty_backend = NottyBackend::new(tty.clone(), w);
     let mut terminal = Terminal::new(tty_backend)?;
+    terminal.hide_cursor()?;
+    terminal.flush()?;
     App::new(backend, t_handle).run(tty, &mut terminal)?;
     Ok(())
 }

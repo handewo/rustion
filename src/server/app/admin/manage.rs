@@ -46,6 +46,8 @@ where
 {
     let tty_backend = NottyBackend::new(tty.clone(), w);
     let mut terminal = Terminal::new(tty_backend)?;
+    terminal.hide_cursor()?;
+    terminal.flush()?;
     App::new(backend, t_handle, user_id).run(tty, &mut terminal)?;
     Ok(())
 }
@@ -539,9 +541,6 @@ where
                 frame.render_widget(Clear, popup_area);
                 frame.render_widget(popup, popup_area);
                 frame.render_widget(&mut self.editor, popup_area);
-                if let Some((x, y)) = self.editor.cursor_position() {
-                    frame.set_cursor_position(Position::new(x, y));
-                };
             }
             Popup::Edit => {}
             Popup::None => {}
@@ -1043,17 +1042,6 @@ impl Widget for &mut Editor {
             Editor::Target(ref e) => {
                 e.render(area, buf);
             }
-            _ => {
-                unreachable!()
-            }
-        }
-    }
-}
-
-impl Editor {
-    pub fn cursor_position(&self) -> Option<(u16, u16)> {
-        match self {
-            Editor::User(ref e) => e.cursor_position,
             _ => {
                 unreachable!()
             }
