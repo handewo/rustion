@@ -4153,7 +4153,7 @@ dependencies = [
 [[package]]
 name = "tui-textarea"
 version = "0.7.0"
-source = "git+https://github.com/handewo/tui-textarea.git#a768d1d14ebf36bab9ccb38bea1fb23e0654a8de"
+source = "git+https://github.com/handewo/tui-textarea.git#9d8f4c0f2cd6268ea0a57c846f8b464b9d1049e4"
 dependencies = [
  "crossterm 0.29.0 (git+https://github.com/handewo/crossterm.git)",
  "ratatui",
