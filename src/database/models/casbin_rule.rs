@@ -67,7 +67,7 @@ impl FromStr for Action {
             "login" => Ok(Action::Login),
             "open_direct_tcpip" => Ok(Action::OpenDirectTcpip),
             "pty" => Ok(Action::Pty),
-            _ => Err(error::Error::Database(format!("Unknown action: {}", s))),
+            _ => Err(error::Error::Casbin(format!("Unknown action: {}", s))),
         }
     }
 }

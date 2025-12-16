@@ -19,9 +19,7 @@ impl SqliteRepository {
         let database_url = format!("sqlite:{}", database_path);
         info!("Connecting to SQLite database: {}", database_path);
 
-        let pool = SqlitePool::connect(&database_url)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to connect to SQLite database: {}", e)))?;
+        let pool = SqlitePool::connect(&database_url).await?;
 
         let repo = Self { pool };
         repo.initialize().await?;
@@ -48,8 +46,7 @@ impl SqliteRepository {
             "#,
         )
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create users table: {}", e)))?;
+        .await?;
 
         // Create targets table
         sqlx::query(
@@ -69,8 +66,7 @@ impl SqliteRepository {
             "#,
         )
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create targets table: {}", e)))?;
+        .await?;
 
         // Create secrets table
         sqlx::query(
@@ -90,8 +86,7 @@ impl SqliteRepository {
             "#,
         )
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create secrets table: {}", e)))?;
+        .await?;
 
         // Create target_secrets table
         sqlx::query(
@@ -111,8 +106,7 @@ impl SqliteRepository {
             "#,
         )
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create target_secrets table: {}", e)))?;
+        .await?;
 
         // Create casbin_rule table
         sqlx::query(
@@ -134,8 +128,7 @@ impl SqliteRepository {
             "#,
         )
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create log table: {}", e)))?;
+        .await?;
 
         // Create internal_objects table
         sqlx::query(
@@ -149,8 +142,7 @@ impl SqliteRepository {
             "#,
         )
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create internal_objects table: {}", e)))?;
+        .await?;
 
         // Create log table
         sqlx::query(
@@ -166,30 +158,20 @@ impl SqliteRepository {
             "#,
         )
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create log table: {}", e)))?;
+        .await?;
 
         // Create indexes for better performance
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_users_username ON users (username)")
             .execute(&self.pool)
-            .await
-            .map_err(|e| {
-                Error::Database(format!("Failed to create users username index: {}", e))
-            })?;
+            .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_targets_hostname ON targets (hostname)")
             .execute(&self.pool)
-            .await
-            .map_err(|e| {
-                Error::Database(format!("Failed to create targets hostname index: {}", e))
-            })?;
+            .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs (created_at)")
             .execute(&self.pool)
-            .await
-            .map_err(|e| {
-                Error::Database(format!("Failed to create logs created_at index: {}", e))
-            })?;
+            .await?;
 
         info!("Database tables and indexes created successfully");
         Ok(())
@@ -221,8 +203,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&user.updated_by)
         .bind(user.updated_at)
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create user: {}", e)))?;
+        .await?;
 
         Ok(user.clone())
     }
@@ -235,8 +216,7 @@ impl DatabaseRepository for SqliteRepository {
         )
         .bind(id)
         .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to get user by id: {}", e)))?;
+        .await?;
 
         Ok(row)
     }
@@ -257,8 +237,7 @@ impl DatabaseRepository for SqliteRepository {
         let row = sqlx::query_as::<_, User>(&query)
             .bind(username)
             .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to get user by username: {}", e)))?;
+            .await?;
 
         Ok(row)
     }
@@ -284,8 +263,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(updated_user.updated_at)
         .bind(&updated_user.id)
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to update user: {}", e)))?;
+        .await?;
 
         Ok(updated_user)
     }
@@ -294,8 +272,7 @@ impl DatabaseRepository for SqliteRepository {
         let result = sqlx::query("DELETE FROM users WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to delete user: {}", e)))?;
+            .await?;
 
         Ok(result.rows_affected() > 0)
     }
@@ -315,7 +292,7 @@ impl DatabaseRepository for SqliteRepository {
         sqlx::query_as::<_, User>(&query)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| Error::Database(format!("Failed to list users: {}", e)))
+            .map_err(Error::Sqlx)
     }
 
     // Target operations
@@ -337,8 +314,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&target.updated_by)
         .bind(target.updated_at)
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create target: {}", e)))?;
+        .await?;
 
         Ok(target.clone())
     }
@@ -353,8 +329,7 @@ impl DatabaseRepository for SqliteRepository {
         let row = sqlx::query_as::<_, Target>(&query)
             .bind(id)
             .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to get target by id: {}", e)))?;
+            .await?;
 
         Ok(row)
     }
@@ -374,10 +349,7 @@ impl DatabaseRepository for SqliteRepository {
         for id in ids {
             query = query.bind(id);
         }
-        let rows = query
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to get target by ids: {}", e)))?;
+        let rows = query.fetch_all(&self.pool).await?;
 
         Ok(rows)
     }
@@ -407,9 +379,7 @@ impl DatabaseRepository for SqliteRepository {
         for id in ids {
             query = query.bind(id);
         }
-        let rows = query.fetch_all(&self.pool).await.map_err(|e| {
-            Error::Database(format!("Failed to get target by target secret ids: {}", e))
-        })?;
+        let rows = query.fetch_all(&self.pool).await?;
 
         Ok(rows)
     }
@@ -421,8 +391,7 @@ impl DatabaseRepository for SqliteRepository {
         )
         .bind(name)
         .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to get target by name: {}", e)))?;
+        .await?;
 
         Ok(row)
     }
@@ -434,8 +403,7 @@ impl DatabaseRepository for SqliteRepository {
         )
         .bind(hostname)
         .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to get target by hostname: {}", e)))?;
+        .await?;
 
         Ok(row)
     }
@@ -462,8 +430,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(updated_target.updated_at)
         .bind(&updated_target.id)
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to update target: {}", e)))?;
+        .await?;
 
         Ok(updated_target)
     }
@@ -472,8 +439,7 @@ impl DatabaseRepository for SqliteRepository {
         let result = sqlx::query("DELETE FROM targets WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to delete target: {}", e)))?;
+            .await?;
 
         Ok(result.rows_affected() > 0)
     }
@@ -492,7 +458,7 @@ impl DatabaseRepository for SqliteRepository {
         sqlx::query_as::<_, Target>(&query)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| Error::Database(format!("Failed to list targets: {}", e)))
+            .map_err(Error::Sqlx)
     }
 
     async fn list_targets_for_user(
@@ -518,8 +484,7 @@ impl DatabaseRepository for SqliteRepository {
             .bind(user_id)
             .bind(user_id)
             .fetch_all(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to list targets for user: {}", e)))?;
+            .await?;
 
         Ok(targets)
     }
@@ -551,10 +516,7 @@ impl DatabaseRepository for SqliteRepository {
             query = query.bind(id);
         }
 
-        let targets = query
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to list targets by ids: {}", e)))?;
+        let targets = query.fetch_all(&self.pool).await?;
 
         Ok(targets)
     }
@@ -567,8 +529,7 @@ impl DatabaseRepository for SqliteRepository {
         )
         .bind(policy_act)
         .fetch_all(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to get policies for user: {}", e)))?;
+        .await?;
 
         if rules.is_empty() {
             return Ok(vec![policy_act.parse()?]);
@@ -613,8 +574,7 @@ impl DatabaseRepository for SqliteRepository {
             .bind(user_id)
             .bind(user_id)
             .fetch_all(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to get objects for user: {}", e)))?;
+            .await?;
 
         res.extend_from_slice(&row);
 
@@ -633,8 +593,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(user_id)
         .bind(user_id)
         .fetch_all(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to get policies for user: {}", e)))?;
+        .await?;
 
         Ok(policies)
     }
@@ -648,7 +607,7 @@ impl DatabaseRepository for SqliteRepository {
         sqlx::query_as::<_, CasbinRule>(query)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| Error::Database(format!("Failed to list casbin rules: {}", e)))
+            .map_err(Error::Sqlx)
     }
 
     async fn list_casbin_rules_by_ptype(&self, ptype: &str) -> Result<Vec<CasbinRule>, Error> {
@@ -662,7 +621,7 @@ impl DatabaseRepository for SqliteRepository {
             .bind(ptype)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| Error::Database(format!("Failed to list casbin rules by ptype: {}", e)))
+            .map_err(Error::Sqlx)
     }
 
     async fn create_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error> {
@@ -684,8 +643,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&rule.updated_by)
         .bind(rule.updated_at)
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create casbin rule: {}", e)))?;
+        .await?;
 
         Ok(rule.clone())
     }
@@ -713,8 +671,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(updated_rule.updated_at)
         .bind(&updated_rule.id)
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to update casbin_rule: {}", e)))?;
+        .await?;
 
         Ok(updated_rule)
     }
@@ -723,8 +680,7 @@ impl DatabaseRepository for SqliteRepository {
         let result = sqlx::query("DELETE FROM casbin_rule WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to delete casbin_rule: {}", e)))?;
+            .await?;
 
         Ok(result.rows_affected() > 0)
     }
@@ -743,7 +699,7 @@ impl DatabaseRepository for SqliteRepository {
         sqlx::query_as::<_, Secret>(&query)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| Error::Database(format!("Failed to list secrets: {}", e)))
+            .map_err(Error::Sqlx)
     }
 
     async fn create_secret(&self, secret: &Secret) -> Result<Secret, Error> {
@@ -764,8 +720,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&secret.updated_by)
         .bind(secret.updated_at)
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create secret: {}", e)))?;
+        .await?;
 
         Ok(secret.clone())
     }
@@ -786,8 +741,7 @@ impl DatabaseRepository for SqliteRepository {
         let row = sqlx::query_as::<_, Secret>(&query)
             .bind(id)
             .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to get secret by id: {}", e)))?;
+            .await?;
 
         Ok(row)
     }
@@ -799,8 +753,7 @@ impl DatabaseRepository for SqliteRepository {
         )
         .bind(id)
         .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to get secret by id: {}", e)))?;
+        .await?;
 
         Ok(row)
     }
@@ -820,10 +773,7 @@ impl DatabaseRepository for SqliteRepository {
         for id in ids {
             query = query.bind(id);
         }
-        let rows = query
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to get secrets by ids: {}", e)))?;
+        let rows = query.fetch_all(&self.pool).await?;
 
         Ok(rows)
     }
@@ -850,8 +800,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(updated_secret.updated_at)
         .bind(&updated_secret.id)
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to update secret: {}", e)))?;
+        .await?;
 
         Ok(updated_secret)
     }
@@ -860,8 +809,7 @@ impl DatabaseRepository for SqliteRepository {
         let result = sqlx::query("DELETE FROM secrets WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to delete secret: {}", e)))?;
+            .await?;
 
         Ok(result.rows_affected() > 0)
     }
@@ -902,9 +850,7 @@ impl DatabaseRepository for SqliteRepository {
                 .bind(r.updated_at);
         }
 
-        q.execute(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to create casbin rules batch: {}", e)))?;
+        q.execute(&self.pool).await?;
 
         Ok(rules.to_vec())
     }
@@ -940,9 +886,7 @@ impl DatabaseRepository for SqliteRepository {
                 .bind(u.updated_at);
         }
 
-        q.execute(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to create users batch: {}", e)))?;
+        q.execute(&self.pool).await?;
 
         Ok(users.to_vec())
     }
@@ -977,9 +921,7 @@ impl DatabaseRepository for SqliteRepository {
                 .bind(t.updated_at);
         }
 
-        q.execute(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to create targets batch: {}", e)))?;
+        q.execute(&self.pool).await?;
 
         Ok(targets.to_vec())
     }
@@ -997,7 +939,7 @@ impl DatabaseRepository for SqliteRepository {
         sqlx::query_as::<_, TargetSecret>(&query)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| Error::Database(format!("Failed to list target_secrets: {}", e)))
+            .map_err(Error::Sqlx)
     }
 
     async fn create_target_secret(
@@ -1018,8 +960,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&target_secret.updated_by)
         .bind(target_secret.updated_at)
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create target_secret: {}", e)))?;
+        .await?;
 
         Ok(target_secret.clone())
     }
@@ -1049,8 +990,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(updated.updated_at)
         .bind(&updated.id)
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to update target_secret: {}", e)))?;
+        .await?;
 
         Ok(updated)
     }
@@ -1059,8 +999,7 @@ impl DatabaseRepository for SqliteRepository {
         let result = sqlx::query("DELETE FROM target_secrets WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to delete target_secret: {}", e)))?;
+            .await?;
 
         Ok(result.rows_affected() > 0)
     }
@@ -1078,7 +1017,7 @@ impl DatabaseRepository for SqliteRepository {
         sqlx::query_as::<_, InternalObject>(&query)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| Error::Database(format!("Failed to list internal_objects: {}", e)))
+            .map_err(Error::Sqlx)
     }
 
     async fn update_internal_object(&self, obj: &InternalObject) -> Result<InternalObject, Error> {
@@ -1097,8 +1036,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(obj.updated_at)
         .bind(&obj.name)
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to update internal_objects: {}", e)))?;
+        .await?;
 
         Ok(updated_obj)
     }
@@ -1116,8 +1054,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&obj.updated_by)
         .bind(obj.updated_at)
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create internal_objects: {}", e)))?;
+        .await?;
 
         Ok(obj.clone())
     }
@@ -1131,8 +1068,7 @@ impl DatabaseRepository for SqliteRepository {
         )
         .bind(id)
         .fetch_all(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to query target_secrets: {}", e)))?;
+        .await?;
 
         if row.len() == 1 {
             return Ok(true);
@@ -1143,8 +1079,7 @@ impl DatabaseRepository for SqliteRepository {
         )
         .bind(id)
         .fetch_all(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to query internal_objects: {}", e)))?;
+        .await?;
 
         if row.len() == 1 {
             return Ok(true);
@@ -1218,9 +1153,7 @@ impl DatabaseRepository for SqliteRepository {
                 .bind(s.updated_at);
         }
 
-        q.execute(&self.pool).await.map_err(|e| {
-            Error::Database(format!("Failed to create target secrets batch: {}", e))
-        })?;
+        q.execute(&self.pool).await?;
 
         Ok(secrets.to_vec())
     }
@@ -1270,8 +1203,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&search_pattern)
         .bind(&search_pattern)
         .fetch_all(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to search users: {}", e)))?;
+        .await?;
 
         Ok(users)
     }
@@ -1291,8 +1223,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&search_pattern)
         .bind(&search_pattern)
         .fetch_all(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to search targets: {}", e)))?;
+        .await?;
 
         Ok(targets)
     }
@@ -1300,8 +1231,7 @@ impl DatabaseRepository for SqliteRepository {
     async fn count_users(&self) -> Result<i64, Error> {
         let row = sqlx::query("SELECT COUNT(*) as count FROM users")
             .fetch_one(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to count users: {}", e)))?;
+            .await?;
 
         Ok(row.get("count"))
     }
@@ -1309,8 +1239,7 @@ impl DatabaseRepository for SqliteRepository {
     async fn count_targets(&self) -> Result<i64, Error> {
         let row = sqlx::query("SELECT COUNT(*) as count FROM targets")
             .fetch_one(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to count targets: {}", e)))?;
+            .await?;
 
         Ok(row.get("count"))
     }
@@ -1318,8 +1247,7 @@ impl DatabaseRepository for SqliteRepository {
     async fn count_active_users(&self) -> Result<i64, Error> {
         let row = sqlx::query("SELECT COUNT(*) as count FROM users WHERE is_active = 1")
             .fetch_one(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to count active users: {}", e)))?;
+            .await?;
 
         Ok(row.get("count"))
     }
@@ -1327,8 +1255,7 @@ impl DatabaseRepository for SqliteRepository {
     async fn count_active_targets(&self) -> Result<i64, Error> {
         let row = sqlx::query("SELECT COUNT(*) as count FROM targets WHERE is_active = 1")
             .fetch_one(&self.pool)
-            .await
-            .map_err(|e| Error::Database(format!("Failed to count active targets: {}", e)))?;
+            .await?;
 
         Ok(row.get("count"))
     }
@@ -1348,8 +1275,7 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&log.detail)
         .bind(log.created_at)
         .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to create target: {}", e)))?;
+        .await?;
 
         Ok(())
     }
@@ -1360,8 +1286,7 @@ impl DatabaseRepository for SqliteRepository {
             FROM logs ORDER BY created_at desc"#,
         )
         .fetch_all(&self.pool)
-        .await
-        .map_err(|e| Error::Database(format!("Failed to list logs: {}", e)))?;
+        .await?;
 
         Ok(logs)
     }

@@ -27,9 +27,6 @@ pub enum Error {
     Config(String),
 
     #[error("Database error: {0}")]
-    Database(String),
-
-    #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
 
     #[error(transparent)]
