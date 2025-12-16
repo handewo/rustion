@@ -72,6 +72,10 @@ impl User {
         "********".to_string()
     }
 
+    pub fn get_authorized_keys(&self) -> &[String] {
+        &self.authorized_keys.0
+    }
+
     pub fn print_password(&self) -> String {
         if self.password_hash.is_some() {
             return "********".to_string();
