@@ -3,7 +3,7 @@ use crate::database::models::*;
 use crate::error::Error;
 use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
-use ratatui::layout::{Constraint, Flex, Layout, Margin, Position, Rect};
+use ratatui::layout::{Constraint, Flex, Layout, Margin, Rect};
 use ratatui::style::{self, Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{

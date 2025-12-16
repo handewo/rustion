@@ -21,6 +21,66 @@ pub fn text_input_position(key: KeyCode, textarea: &mut TextArea) {
 }
 
 #[derive(Debug)]
+pub struct SingleLineText {
+    pub textarea: TextArea,
+}
+
+impl SingleLineText {
+    pub fn new(line: Option<String>) -> Self {
+        let textarea = match line {
+            Some(l) => {
+                let mut ta = [l].iter().collect::<TextArea>();
+                ta.set_cursor_line_style(Style::default());
+                ta.set_cursor_style(Style::default());
+                ta
+            }
+            None => {
+                let mut ta = TextArea::default();
+                ta.set_cursor_line_style(Style::default());
+                ta.set_cursor_style(Style::default());
+                ta
+            }
+        };
+        SingleLineText { textarea }
+    }
+
+    pub fn clear_line(&mut self) {
+        self.textarea.move_cursor(CursorMove::End);
+        self.textarea.delete_line_by_head();
+    }
+
+    pub fn get_input(&self) -> Option<String> {
+        let line = self.textarea.lines().iter().next();
+        line.map(|v| v.trim().to_string())
+    }
+
+    pub fn clear_style(&mut self) {
+        self.textarea.set_cursor_line_style(Style::default());
+        self.textarea.set_cursor_style(Style::default());
+    }
+
+    pub fn handle_input(&mut self, key: KeyCode) -> bool {
+        match key {
+            KeyCode::Esc
+            | KeyCode::Tab
+            | KeyCode::BackTab
+            | KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::Enter => return true,
+            _ => {
+                self.textarea.input(Input {
+                    key: Key::from(key),
+                    ctrl: false,
+                    alt: false,
+                    shift: false,
+                });
+            }
+        }
+        false
+    }
+}
+
+#[derive(Debug)]
 pub struct MultiLineText {
     pub textarea: TextArea,
     pub editing_mode: bool,
@@ -50,9 +110,18 @@ impl MultiLineText {
         }
     }
 
+    pub fn clear_style(&mut self) {
+        self.textarea.set_cursor_line_style(Style::default());
+        self.textarea.set_cursor_style(Style::default());
+    }
+
+    pub fn get_input(&self) -> &[String] {
+        self.textarea.lines()
+    }
+
     pub fn handle_input(&mut self, key: KeyCode) -> bool {
         match key {
-            KeyCode::Esc if !self.editing_mode => return true,
+            KeyCode::Esc | KeyCode::Char('q') if !self.editing_mode => return true,
             KeyCode::Esc => {
                 self.textarea.set_cursor_style(Style::default());
                 self.highlight();
@@ -106,6 +175,15 @@ impl MultiLineText {
 }
 
 impl Widget for &MultiLineText {
+    fn render(self, area: Rect, buf: &mut Buffer)
+    where
+        Self: Sized,
+    {
+        self.textarea.render(area, buf);
+    }
+}
+
+impl Widget for &SingleLineText {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,

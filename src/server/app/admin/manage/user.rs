@@ -1,4 +1,7 @@
-use super::super::widgets::{text_editing_style, text_input_position, MultiLineText};
+use super::super::widgets::{
+    text_editing_style, text_input_position, MultiLineText, SingleLineText,
+};
+use crate::error::Error;
 use crate::{database::models::User, server::app::admin::manage::centered_area};
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
@@ -11,15 +14,14 @@ use ratatui::{
         StatefulWidget, Widget,
     },
 };
-use tui_textarea::{CursorMove, Input, Key, TextArea};
 
 const COMMON_HELP: [&str; 2] = [
     "(Enter) edit | (i) insert | (a) append | (d) clear",
     "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
 ];
 const CHECKBOX_HELP: [&str; 2] = [
-    "(Space) toggle | (Tab) next | (Shift Tab) previous",
-    "(Ctrl+S) save | (Esc) cancel",
+    "(Space) toggle",
+    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
 ];
 const AUTHORIZED_KEYS_HELP: [&str; 2] = [
     "(Enter) activate | (d) clear all",
@@ -86,8 +88,8 @@ impl EditorColors {
 pub struct UserEditor {
     user: User,
     focused_field: InputField,
-    username_text: TextArea,
-    email_text: TextArea,
+    username_text: SingleLineText,
+    email_text: SingleLineText,
     authorized_keys_text: MultiLineText,
     scroll_offset: usize,
     colors: EditorColors,
@@ -99,13 +101,8 @@ pub struct UserEditor {
 
 impl UserEditor {
     pub fn new(user: User) -> Self {
-        let mut username_text = TextArea::default();
-        username_text.set_cursor_line_style(Style::default());
-        username_text.set_cursor_style(Style::default());
-
-        let mut email_text = TextArea::default();
-        email_text.set_cursor_line_style(Style::default());
-        email_text.set_cursor_style(Style::default());
+        let username_text = SingleLineText::new(Some(user.username.clone()));
+        let email_text = SingleLineText::new(user.email.clone());
 
         let authorized_keys_text = MultiLineText::new(Some(user.get_authorized_keys()));
 
@@ -152,43 +149,50 @@ impl UserEditor {
             }
         }
 
-        if self.editing_mode && self.focused_field == InputField::AuthorizedKeys {
-            if self.authorized_keys_text.handle_input(key) {
-                self.editing_mode = false;
-                self.handle_unfocus_field();
-                self.help_text = AUTHORIZED_KEYS_HELP;
-            } else if self.authorized_keys_text.editing_mode {
-                self.help_text = AUTHORIZED_KEYS_INPUT_HELP;
-            } else {
-                self.help_text = AUTHORIZED_KEYS_EDIT_HELP;
+        if self.editing_mode {
+            match self.focused_field {
+                InputField::Username => {
+                    if self.username_text.handle_input(key) {
+                        self.editing_mode = false;
+                        self.username_text.clear_style();
+                    }
+                }
+                InputField::Email => {
+                    if self.email_text.handle_input(key) {
+                        self.editing_mode = false;
+                        self.email_text.clear_style();
+                    }
+                }
+                InputField::AuthorizedKeys => {
+                    if self.authorized_keys_text.handle_input(key) {
+                        self.editing_mode = false;
+                        self.authorized_keys_text.clear_style();
+                        self.help_text = AUTHORIZED_KEYS_HELP;
+                    } else if self.authorized_keys_text.editing_mode {
+                        self.help_text = AUTHORIZED_KEYS_INPUT_HELP;
+                    } else {
+                        self.help_text = AUTHORIZED_KEYS_EDIT_HELP;
+                    }
+                    return false;
+                }
+                _ => {
+                    unreachable!()
+                }
             }
-
-            return false;
+            match key {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char(_) => {
+                    return false;
+                }
+                _ => {}
+            }
         }
 
         match key {
-            KeyCode::Char(_)
-            | KeyCode::Left
-            | KeyCode::Right
-            | KeyCode::Backspace
-            | KeyCode::Delete
-            | KeyCode::Home
-            | KeyCode::End
-                if self.editing_mode =>
-            {
-                self.handle_char_input(key);
-            }
             KeyCode::Esc | KeyCode::Char('q') => {
-                if self.editing_mode {
-                    self.editing_mode = false;
-                    self.handle_unfocus_field();
-                } else {
-                    self.show_cancel_confirmation = true;
-                }
+                self.show_cancel_confirmation = true;
             }
             KeyCode::Tab | KeyCode::Char('j') | KeyCode::Down => {
                 self.editing_mode = false;
-                self.handle_unfocus_field();
                 self.next();
                 self.scroll_offset = if self.scroll_offset == self.max_scroll_offset() {
                     0
@@ -198,7 +202,6 @@ impl UserEditor {
             }
             KeyCode::BackTab | KeyCode::Char('k') | KeyCode::Up => {
                 self.editing_mode = false;
-                self.handle_unfocus_field();
                 self.previous();
                 self.scroll_offset = if self.scroll_offset == 0 {
                     self.max_scroll_offset()
@@ -206,48 +209,39 @@ impl UserEditor {
                     self.scroll_offset.saturating_sub(1)
                 };
             }
-            KeyCode::Enter | KeyCode::Char('i') | KeyCode::Char('a') => {
-                if self.editing_mode {
-                    self.editing_mode = false;
-                    self.handle_unfocus_field();
-                } else {
-                    match self.focused_field {
-                        InputField::ForceInitPass => {
-                            self.user.force_init_pass = !self.user.force_init_pass;
-                        }
-                        InputField::IsActive => {
-                            self.user.is_active = !self.user.is_active;
-                        }
-                        InputField::Password => {
-                            self.generate_password = !self.generate_password;
-                        }
-                        InputField::Username => {
-                            self.editing_mode = true;
-                            text_editing_style(self.colors.input_cursor, &mut self.username_text);
-                            text_input_position(key, &mut self.username_text);
-                        }
-                        InputField::Email => {
-                            self.editing_mode = true;
-                            text_editing_style(self.colors.input_cursor, &mut self.email_text);
-                            text_input_position(key, &mut self.email_text);
-                        }
-                        InputField::AuthorizedKeys => {
-                            self.editing_mode = true;
-                            self.authorized_keys_text.cursor_color = self.colors.input_cursor;
-                            self.authorized_keys_text.highlight();
-                            self.help_text = AUTHORIZED_KEYS_EDIT_HELP;
-                        }
-                    }
+            KeyCode::Enter | KeyCode::Char('i') | KeyCode::Char('a') => match self.focused_field {
+                InputField::ForceInitPass => {
+                    self.user.force_init_pass = !self.user.force_init_pass;
                 }
-            }
-            KeyCode::Char('d') if !self.editing_mode => match self.focused_field {
+                InputField::IsActive => {
+                    self.user.is_active = !self.user.is_active;
+                }
+                InputField::Password => {
+                    self.generate_password = !self.generate_password;
+                }
                 InputField::Username => {
-                    self.username_text.move_cursor(CursorMove::End);
-                    self.username_text.delete_line_by_head();
+                    self.editing_mode = true;
+                    text_editing_style(self.colors.input_cursor, &mut self.username_text.textarea);
+                    text_input_position(key, &mut self.username_text.textarea);
                 }
                 InputField::Email => {
-                    self.email_text.move_cursor(CursorMove::End);
-                    self.email_text.delete_line_by_head();
+                    self.editing_mode = true;
+                    text_editing_style(self.colors.input_cursor, &mut self.email_text.textarea);
+                    text_input_position(key, &mut self.email_text.textarea);
+                }
+                InputField::AuthorizedKeys => {
+                    self.editing_mode = true;
+                    self.authorized_keys_text.cursor_color = self.colors.input_cursor;
+                    self.authorized_keys_text.highlight();
+                    self.help_text = AUTHORIZED_KEYS_EDIT_HELP;
+                }
+            },
+            KeyCode::Char('d') if !self.editing_mode => match self.focused_field {
+                InputField::Username => {
+                    self.username_text.clear_line();
+                }
+                InputField::Email => {
+                    self.email_text.clear_line();
                 }
                 InputField::AuthorizedKeys => {
                     let authorized_keys_text = MultiLineText::new(None);
@@ -271,28 +265,6 @@ impl UserEditor {
         }
 
         false
-    }
-
-    fn handle_unfocus_field(&mut self) {
-        match self.focused_field {
-            InputField::Username => {
-                self.username_text.set_cursor_line_style(Style::default());
-                self.username_text.set_cursor_style(Style::default());
-            }
-            InputField::Email => {
-                self.email_text.set_cursor_line_style(Style::default());
-                self.email_text.set_cursor_style(Style::default());
-            }
-            InputField::AuthorizedKeys => {
-                self.authorized_keys_text
-                    .textarea
-                    .set_cursor_line_style(Style::default());
-                self.authorized_keys_text
-                    .textarea
-                    .set_cursor_style(Style::default());
-            }
-            _ => {}
-        }
     }
 
     fn next(&mut self) {
@@ -325,64 +297,9 @@ impl UserEditor {
         }
     }
 
-    fn handle_char_input(&mut self, k: KeyCode) {
-        let input = match k {
-            KeyCode::Char(c) => Input {
-                key: Key::Char(c),
-                ctrl: false,
-                shift: false,
-                alt: false,
-            },
-            KeyCode::Delete => Input {
-                key: Key::Delete,
-                ctrl: false,
-                shift: false,
-                alt: false,
-            },
-            KeyCode::Backspace => Input {
-                key: Key::Backspace,
-                ctrl: false,
-                shift: false,
-                alt: false,
-            },
-            KeyCode::Home => Input {
-                key: Key::Home,
-                ctrl: false,
-                shift: false,
-                alt: false,
-            },
-            KeyCode::End => Input {
-                key: Key::End,
-                ctrl: false,
-                shift: false,
-                alt: false,
-            },
-            KeyCode::Left => Input {
-                key: Key::Left,
-                ctrl: false,
-                shift: false,
-                alt: false,
-            },
-            KeyCode::Right => Input {
-                key: Key::Right,
-                ctrl: false,
-                shift: false,
-                alt: false,
-            },
-            _ => {
-                unreachable!()
-            }
-        };
-        match self.focused_field {
-            InputField::Username => self.username_text.input(input),
-            InputField::Email => self.email_text.input(input),
-            _ => {
-                todo!();
-            }
-        };
+    fn save_user(&mut self) -> Result<(), Error> {
+        Ok(())
     }
-
-    fn save_user(&mut self) {}
 
     fn max_scroll_offset(&self) -> usize {
         5
@@ -609,6 +526,7 @@ impl UserEditor {
         paragraph.render(dialog_area, buf);
     }
 }
+
 impl Widget for &mut UserEditor {
     fn render(self, area: Rect, buf: &mut Buffer) {
         self.render_ui(area, buf);
