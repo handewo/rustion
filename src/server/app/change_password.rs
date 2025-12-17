@@ -350,6 +350,7 @@ pub fn is_valid_password(p: &str) -> bool {
         && p.len() < 64
         && p.chars().any(|c| c.is_ascii_digit())
         && p.chars().any(|c| c.is_ascii_uppercase())
+        && p.chars().any(|c| c.is_ascii_punctuation())
         && p.chars().any(|c| c.is_ascii_lowercase())
         && !p.chars().any(|c| c.is_ascii_whitespace())
         && p.is_ascii()
@@ -368,6 +369,7 @@ mod tests {
     #[test]
     fn bad_passwords() {
         assert!(!is_valid_password("short1!")); // too short
+        assert!(!is_valid_password("C5e5xNA0")); // no punctuation
         assert!(!is_valid_password("LongEnough")); // no digit, no special
         assert!(!is_valid_password("longenough1")); // no upper, no special
         assert!(!is_valid_password("LONGENOUGH1!")); // no lower
