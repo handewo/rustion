@@ -26,7 +26,10 @@ pub enum Error {
     #[error("Configuration error: {0}")]
     Config(String),
 
-    #[error("Database error: {0}")]
+    #[error(transparent)]
+    UserValidator(#[from] crate::database::models::user::ValidateError),
+
+    #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
 
     #[error(transparent)]
