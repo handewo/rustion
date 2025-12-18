@@ -3,7 +3,7 @@ use crate::database::models::*;
 use crate::error::Error;
 use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
-use ratatui::layout::{Constraint, Flex, Layout, Margin, Rect};
+use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{self, Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{
@@ -535,7 +535,11 @@ where
                 let popup_area = if area.width <= POPUP_WINDOW_COL {
                     area
                 } else {
-                    centered_area(area, POPUP_WINDOW_COL, area.height.min(POPUP_WINDOW_ROW))
+                    super::widgets::centered_area(
+                        area,
+                        POPUP_WINDOW_COL,
+                        area.height.min(POPUP_WINDOW_ROW),
+                    )
                 };
 
                 frame.render_widget(Clear, popup_area);
@@ -1014,14 +1018,6 @@ impl FieldsToArray for Log {
             self.created_at.to_string(),
         ]
     }
-}
-
-pub fn centered_area(area: Rect, x: u16, y: u16) -> Rect {
-    let vertical = Layout::vertical([Constraint::Length(y)]).flex(Flex::Center);
-    let horizontal = Layout::horizontal([Constraint::Length(x)]).flex(Flex::Center);
-    let [area] = area.layout(&vertical);
-    let [area] = area.layout(&horizontal);
-    area
 }
 
 enum Editor {

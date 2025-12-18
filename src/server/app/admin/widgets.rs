@@ -1,9 +1,10 @@
 use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Alignment, Constraint, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::Widget,
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 use tui_textarea::{CursorMove, Input, Key, TextArea};
 
@@ -49,9 +50,9 @@ impl SingleLineText {
         self.textarea.delete_line_by_head();
     }
 
-    pub fn get_input(&self) -> Option<String> {
-        let line = self.textarea.lines().iter().next();
-        line.map(|v| v.trim().to_string())
+    pub fn get_input(&self) -> String {
+        let line = self.textarea.lines().iter().next().unwrap();
+        line.to_string()
     }
 
     pub fn clear_style(&mut self) {
@@ -119,12 +120,30 @@ impl MultiLineText {
         self.textarea.lines()
     }
 
+    pub fn reset_lines(&mut self, lines: &[String]) {
+        let style = self.textarea.style();
+        let cursor_style = self.textarea.cursor_style();
+        let cursur_line_style = self.textarea.cursor_line_style();
+        self.textarea = TextArea::from_iter(lines);
+        self.textarea.set_style(style);
+        self.textarea.set_cursor_style(cursor_style);
+        self.textarea.set_cursor_line_style(cursur_line_style);
+    }
+
     pub fn handle_input(&mut self, key: KeyCode) -> bool {
         match key {
             KeyCode::Esc | KeyCode::Char('q') if !self.editing_mode => return true,
             KeyCode::Esc => {
                 self.textarea.set_cursor_style(Style::default());
                 self.highlight();
+                let lines = self
+                    .get_input()
+                    .iter()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<String>>();
+
+                self.reset_lines(&lines);
                 self.editing_mode = false;
             }
             KeyCode::Char('d') if !self.editing_mode => {
@@ -190,4 +209,81 @@ impl Widget for &SingleLineText {
     {
         self.textarea.render(area, buf);
     }
+}
+
+pub fn render_message_dialog(area: Rect, buf: &mut Buffer, message: Vec<String>) {
+    let height = message.len() as u16 + 5;
+    let dialog_area = centered_area(area, area.width, height);
+
+    // Clear the area
+    Clear.render(dialog_area, buf);
+
+    // Render dialog
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Error")
+        .border_style(Style::default().fg(Color::Red));
+
+    let mut text = message
+        .iter()
+        .map(|v| Line::from(v.as_str()))
+        .collect::<Vec<Line>>();
+    text.insert(0, Line::from(""));
+    text.push(Line::from(""));
+    text.push(Line::from(vec![Span::styled(
+        "<OK>",
+        Style::default().bg(Color::Red),
+    )]));
+
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .alignment(Alignment::Center);
+    paragraph.render(dialog_area, buf);
+}
+
+pub fn centered_area(area: Rect, x: u16, y: u16) -> Rect {
+    let vertical = Layout::vertical([Constraint::Length(y)]).flex(Flex::Center);
+    let horizontal = Layout::horizontal([Constraint::Length(x)]).flex(Flex::Center);
+    let [area] = area.layout(&vertical);
+    let [area] = area.layout(&horizontal);
+    area
+}
+
+pub fn render_cancel_dialog(area: Rect, buf: &mut Buffer) {
+    let dialog_area = centered_area(area, area.width, 7);
+
+    // Clear the area
+    Clear.render(dialog_area, buf);
+
+    // Render dialog
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Confirm Cancel")
+        .border_style(Style::default().fg(Color::Red));
+
+    let text = vec![
+        Line::from(""),
+        Line::from("Are you sure you want to cancel?"),
+        Line::from("All unsaved changes will be lost."),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                "Y",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("es / "),
+            Span::styled(
+                "N",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("o"),
+        ]),
+    ];
+
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .alignment(Alignment::Center);
+    paragraph.render(dialog_area, buf);
 }

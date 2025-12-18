@@ -1,17 +1,19 @@
-use super::super::widgets::{
-    text_editing_style, text_input_position, MultiLineText, SingleLineText,
-};
+use crate::database::models::user::ValidateError;
+use crate::database::models::User;
 use crate::error::Error;
-use crate::{database::models::User, server::app::admin::manage::centered_area};
+use crate::server::app::admin::widgets::centered_area;
+use crate::server::app::admin::widgets::{
+    render_cancel_dialog, render_message_dialog, text_editing_style, text_input_position,
+    MultiLineText, SingleLineText,
+};
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{palette::tailwind, Color, Modifier, Style},
-    text::{Line, Span},
     widgets::{
-        Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
-        StatefulWidget, Widget,
+        Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
+        Widget,
     },
 };
 
@@ -96,6 +98,7 @@ pub struct UserEditor {
     show_cancel_confirmation: bool,
     generate_password: bool,
     editing_mode: bool,
+    save_error: Option<Error>,
     pub help_text: [&'static str; 2],
 }
 
@@ -104,7 +107,7 @@ impl UserEditor {
         let username_text = SingleLineText::new(Some(user.username.clone()));
         let email_text = SingleLineText::new(user.email.clone());
 
-        let authorized_keys_text = MultiLineText::new(Some(user.get_authorized_keys()));
+        let authorized_keys_text = MultiLineText::new(user.get_authorized_keys());
 
         Self {
             user,
@@ -117,6 +120,7 @@ impl UserEditor {
             colors: EditorColors::new(&tailwind::BLUE),
             show_cancel_confirmation: false,
             editing_mode: false,
+            save_error: None,
             help_text: COMMON_HELP,
         }
     }
@@ -134,11 +138,21 @@ impl UserEditor {
             return false;
         }
 
+        if self.save_error.is_some() {
+            if key == KeyCode::Enter {
+                self.save_error = None;
+            }
+            return false;
+        }
+
         // Global shortcuts
         if modifiers.contains(KeyModifiers::CONTROL) {
             match key {
                 KeyCode::Char('s') => {
-                    self.save_user();
+                    if let Err(e) = self.save_user() {
+                        self.save_error = Some(e);
+                        return false;
+                    }
                     return true;
                 }
                 KeyCode::Char('c') => {
@@ -298,7 +312,22 @@ impl UserEditor {
     }
 
     fn save_user(&mut self) -> Result<(), Error> {
-        Ok(())
+        let username = self.username_text.get_input();
+        self.user.username = username.trim().into();
+        let email = self.email_text.get_input().trim().to_string();
+        self.user.email = (!email.is_empty()).then_some(email);
+        let authorized_keys = self
+            .authorized_keys_text
+            .get_input()
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<String>>();
+
+        self.authorized_keys_text.reset_lines(&authorized_keys);
+        self.user
+            .set_authorized_keys((!authorized_keys.is_empty()).then_some(authorized_keys));
+        self.user.validate().map_err(Error::UserValidator)
     }
 
     fn max_scroll_offset(&self) -> usize {
@@ -311,7 +340,7 @@ impl UserEditor {
 
     fn render_ui(&mut self, area: Rect, buf: &mut Buffer) {
         let height = self.window_height();
-        let area = super::centered_area(area, area.width - 2, area.height - 2);
+        let area = centered_area(area, area.width - 2, area.height - 2);
         let editor_area = Rect::new(0, 0, area.width, height);
         let mut editor_buf = Buffer::empty(editor_area);
         let scrollbar_needed = height > area.height;
@@ -419,7 +448,25 @@ impl UserEditor {
 
         // Render cancel confirmation dialog if needed
         if self.show_cancel_confirmation {
-            self.render_cancel_dialog(area, buf);
+            render_cancel_dialog(area, buf);
+        }
+
+        if let Some(err) = self.save_error.as_ref() {
+            let e = if let Error::UserValidator(ValidateError::AuthorizedKeyInvalid(idx)) = err {
+                vec![
+                    String::from("Invalid authorized keys"),
+                    format!(
+                        "Line number: {}",
+                        idx.iter()
+                            .map(|x| (x + 1).to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                ]
+            } else {
+                vec![err.to_string()]
+            };
+            render_message_dialog(area, buf, e);
         }
     }
 
@@ -485,45 +532,6 @@ impl UserEditor {
             .style(style)
             .block(Block::default().borders(Borders::ALL));
         paragraph.render(area, buf);
-    }
-
-    fn render_cancel_dialog(&self, area: Rect, buf: &mut Buffer) {
-        let dialog_area = centered_area(area, area.width, 7);
-
-        // Clear the area
-        Clear.render(dialog_area, buf);
-
-        // Render dialog
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title("Confirm Cancel")
-            .border_style(Style::default().fg(Color::Red));
-
-        let text = vec![
-            Line::from(""),
-            Line::from("Are you sure you want to cancel?"),
-            Line::from("All unsaved changes will be lost."),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled(
-                    "Y",
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("es / "),
-                Span::styled(
-                    "N",
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("o"),
-            ]),
-        ];
-
-        let paragraph = Paragraph::new(text)
-            .block(block)
-            .alignment(Alignment::Center);
-        paragraph.render(dialog_area, buf);
     }
 }
 
