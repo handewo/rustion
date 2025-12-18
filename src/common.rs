@@ -1,4 +1,12 @@
+use lazy_static::lazy_static;
 use rand::{prelude::*, seq::SliceRandom};
+use regex::Regex;
+
+lazy_static! {
+    pub static ref EMAIL_REGEX: Regex =
+        Regex::new(r"^\w+([-+.']\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*$").unwrap();
+}
+
 pub fn gen_password(len: usize) -> String {
     let upper = b'A'..=b'Z';
     let lower = b'a'..=b'z';
