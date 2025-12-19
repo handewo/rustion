@@ -117,4 +117,6 @@ pub(super) trait HandlerBackend: Send + Clone {
     fn enable_record(&self) -> bool;
     fn record_input(&self) -> bool;
     fn record_path(&self) -> &str;
+
+    fn load_role_manager(&self) -> impl Future<Output = Result<(), Error>> + Send;
 }

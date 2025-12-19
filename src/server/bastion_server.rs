@@ -140,7 +140,7 @@ impl BastionServer {
     }
 
     #[cfg(feature = "full-role")]
-    pub async fn load_role_manager(&self) -> Result<(), Error> {
+    pub async fn do_load_role_manager(&self) -> Result<(), Error> {
         let g1 = self
             .database
             .repository()
@@ -597,6 +597,16 @@ impl super::HandlerBackend for BastionServer {
 
     fn record_path(&self) -> &str {
         &self.config.record_path
+    }
+
+    #[cfg(feature = "full-role")]
+    async fn load_role_manager(&self) -> Result<(), Error> {
+        self.do_load_role_manager().await
+    }
+
+    #[cfg(feature = "light-role")]
+    async fn load_role_manager(&self) -> Result<(), Error> {
+        Ok(())
     }
 }
 

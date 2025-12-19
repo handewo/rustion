@@ -82,6 +82,14 @@ pub(super) fn shell<B>(
                             t_handle.clone(),
                         );
                     }
+                    CMD_FLUSH_PRIVILEGES => {
+                        if let Err(e) = t_handle.block_on(backend.load_role_manager()) {
+                            let _ = send_to_session
+                                .blocking_send(format!("flush previleges error: {}", e).into());
+                        } else {
+                            let _ = send_to_session.blocking_send("flushed successfully".into());
+                        }
+                    }
                     _ => {
                         let _ =
                             send_to_session.blocking_send(format!("Unknown command: {}", p).into());
