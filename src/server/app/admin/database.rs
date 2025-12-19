@@ -105,7 +105,7 @@ where
         Self {
             state: TableState::default().with_selected(0),
             longest_item_lens: data.constraint_len_calculator(),
-            scroll_state: ScrollbarState::new(((data.len() - 1) * 2).max(0)),
+            scroll_state: ScrollbarState::new((data.len().max(1) - 1) * 2),
             colors: TableColors::new(&tailwind::BLUE),
             row_height: 2,
             selected_tab: 0,
@@ -399,7 +399,7 @@ where
     fn render_scrollbar(&mut self, frame: &mut Frame, area: Rect) {
         self.scroll_state = self
             .scroll_state
-            .content_length((self.items.len() - 1) * self.row_height)
+            .content_length((self.items.len().max(1) - 1) * self.row_height)
             .position(self.state.selected().unwrap_or(0) * self.row_height);
         frame.render_stateful_widget(
             Scrollbar::default()

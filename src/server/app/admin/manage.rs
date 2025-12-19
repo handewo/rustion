@@ -1,6 +1,7 @@
 use super::common::*;
 use crate::database::models::*;
 use crate::error::Error;
+use ::log::error;
 use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
@@ -174,14 +175,18 @@ where
 {
     fn new(backend: Arc<B>, t_handle: Handle, user_id: String) -> Self {
         let data = TableData::Users(
-            t_handle
-                .block_on(backend.db_repository().list_users(false))
-                .unwrap_or_default(),
+            match t_handle.block_on(backend.db_repository().list_users(false)) {
+                Ok(d) => d,
+                Err(e) => {
+                    error!("Failed to list users: {}", e);
+                    Vec::new()
+                }
+            },
         );
         Self {
             state: TableState::default().with_selected(0),
             longest_item_lens: data.constraint_len_calculator(),
-            scroll_state: ScrollbarState::new(((data.len() - 1) * 2).max(0)),
+            scroll_state: ScrollbarState::new((data.len().max(1) - 1) * 2),
             table_colors: TableColors::new(&tailwind::BLUE),
             editor_colors: EditorColors::new(&tailwind::BLUE),
             row_height: 2,
@@ -360,6 +365,29 @@ where
                     Popup::Add | Popup::Edit => match self.editor {
                         Editor::User(ref mut e) => {
                             if e.as_mut().handle_key_event(key.code, key.modifiers) {
+                                if !e.show_cancel_confirmation {
+                                    let mut user = e.user.to_owned();
+                                    if e.generate_password {
+                                        let password = crate::common::gen_password(12);
+                                        self.backend.set_password(&mut user, &password)?;
+                                    }
+                                    match self
+                                        .t_handle
+                                        .block_on(self.backend.db_repository().create_user(&user))
+                                    {
+                                        Ok(_) => {}
+                                        Err(err) => {
+                                            if let Error::Sqlx(sqlx::Error::Database(db_err)) = err
+                                            {
+                                                if db_err.kind()
+                                                    == sqlx::error::ErrorKind::UniqueViolation
+                                                {
+                                                    error!("unique error");
+                                                }
+                                            }
+                                        }
+                                    };
+                                };
                                 self.clear_form();
                             }
                         }
@@ -506,7 +534,7 @@ where
     fn render_scrollbar(&mut self, frame: &mut Frame, area: Rect) {
         self.scroll_state = self
             .scroll_state
-            .content_length((self.items.len() - 1) * self.row_height)
+            .content_length((self.items.len().max(1) - 1) * self.row_height)
             .position(self.state.selected().unwrap_or(0) * self.row_height);
         frame.render_stateful_widget(
             Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
