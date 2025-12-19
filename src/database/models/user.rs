@@ -19,7 +19,6 @@ pub struct User {
     pub username: String,
     pub email: Option<String>,
     pub(in crate::database) password_hash: Option<String>, // For password authentication
-    #[sqlx(json)]
     pub(in crate::database) authorized_keys: Option<StringArray>,
     pub force_init_pass: bool,
     pub is_active: bool,
