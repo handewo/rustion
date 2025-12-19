@@ -466,7 +466,7 @@ impl UserEditor {
             } else {
                 vec![err.to_string()]
             };
-            render_message_dialog(area, buf, Message::Error(e));
+            render_message_dialog(area, buf, &Message::Error(e));
         }
     }
 

@@ -1,4 +1,5 @@
 use super::common::*;
+use super::widgets::{centered_area, render_message_dialog, Message};
 use crate::database::models::*;
 use crate::error::Error;
 use ::log::error;
@@ -167,6 +168,7 @@ where
     t_handle: Handle,
     user_id: String,
     editor: Editor,
+    message: Option<Message>,
 }
 
 impl<B> App<B>
@@ -199,6 +201,7 @@ where
             items: data,
             user_id,
             editor: Editor::None,
+            message: None,
         }
     }
 
@@ -339,6 +342,15 @@ where
             terminal.draw(|frame| self.render(frame))?;
 
             if let Some(key) = event::read(&tty)?.as_key_press_event() {
+                if self.message.is_some() {
+                    match key.code {
+                        KeyCode::Enter => {
+                            self.message = None;
+                            continue;
+                        }
+                        _ => continue,
+                    }
+                }
                 let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
                 match self.popup {
                     Popup::None => match key.code {
@@ -371,24 +383,28 @@ where
                                         let password = crate::common::gen_password(12);
                                         self.backend.set_password(&mut user, &password)?;
                                     }
-                                    match self
+                                    let result = self
                                         .t_handle
-                                        .block_on(self.backend.db_repository().create_user(&user))
-                                    {
-                                        Ok(_) => {}
-                                        Err(err) => {
-                                            if let Error::Sqlx(sqlx::Error::Database(db_err)) = err
-                                            {
+                                        .block_on(self.backend.db_repository().create_user(&user));
+
+                                    if let Err(err) = result {
+                                        let msg = match err {
+                                            Error::Sqlx(sqlx::Error::Database(db_err))
                                                 if db_err.kind()
-                                                    == sqlx::error::ErrorKind::UniqueViolation
-                                                {
-                                                    error!("unique error");
-                                                }
+                                                    == sqlx::error::ErrorKind::UniqueViolation =>
+                                            {
+                                                "Username already exists"
                                             }
-                                        }
-                                    };
+                                            _ => "Internal error",
+                                        };
+
+                                        self.message = Some(Message::Error(vec![msg.into()]));
+                                        continue;
+                                    }
+                                    self.message = Some(Message::Success(vec!["User added".into()]))
                                 };
                                 self.clear_form();
+                                self.refresh_data();
                             }
                         }
                         Editor::Target(ref mut e) => {
@@ -424,6 +440,7 @@ where
         self.render_table(frame, table_area);
         self.render_scrollbar(frame, table_area);
         self.render_popup(frame, table_area);
+        self.render_message(frame, table_area);
         self.render_footer(frame, footer_area);
     }
 
@@ -546,6 +563,17 @@ where
         );
     }
 
+    fn render_message(&mut self, frame: &mut Frame, area: Rect) {
+        if let Some(ref msg) = self.message {
+            let popup_area = if area.width <= POPUP_WINDOW_COL {
+                area
+            } else {
+                centered_area(area, POPUP_WINDOW_COL, area.height.min(POPUP_WINDOW_ROW))
+            };
+            render_message_dialog(popup_area, frame.buffer_mut(), msg);
+        }
+    }
+
     fn render_popup(&mut self, frame: &mut Frame, area: Rect) {
         match self.popup {
             Popup::Add => {
@@ -563,11 +591,7 @@ where
                 let popup_area = if area.width <= POPUP_WINDOW_COL {
                     area
                 } else {
-                    super::widgets::centered_area(
-                        area,
-                        POPUP_WINDOW_COL,
-                        area.height.min(POPUP_WINDOW_ROW),
-                    )
+                    centered_area(area, POPUP_WINDOW_COL, area.height.min(POPUP_WINDOW_ROW))
                 };
 
                 frame.render_widget(Clear, popup_area);

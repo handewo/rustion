@@ -240,16 +240,16 @@ impl Message {
     }
 }
 
-pub fn render_message_dialog(area: Rect, buf: &mut Buffer, message: Message) {
+pub fn render_message_dialog(area: Rect, buf: &mut Buffer, message: &Message) {
     let height = message.len() as u16 + 5;
     let dialog_area = centered_area(area, area.width, height);
 
     use Message::*;
-    let color = match message {
-        Info(_) => Color::default(),
-        Warning(_) => Color::Yellow,
-        Error(_) => Color::Red,
-        Success(_) => Color::Green,
+    let (title, color) = match message {
+        Info(_) => ("Info", Color::default()),
+        Warning(_) => ("Warning", Color::Yellow),
+        Error(_) => ("Error", Color::Red),
+        Success(_) => ("Success", Color::Green),
     };
 
     // Clear the area
@@ -258,7 +258,7 @@ pub fn render_message_dialog(area: Rect, buf: &mut Buffer, message: Message) {
     // Render dialog
     let block = Block::default()
         .borders(Borders::ALL)
-        .title("Error")
+        .title(title)
         .border_style(Style::default().fg(color));
 
     let mut text = message
