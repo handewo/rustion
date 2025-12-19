@@ -3,7 +3,7 @@ use crate::database::models::User;
 use crate::error::Error;
 use crate::server::app::admin::widgets::centered_area;
 use crate::server::app::admin::widgets::{
-    render_cancel_dialog, render_message_dialog, text_editing_style, text_input_position,
+    render_cancel_dialog, render_message_dialog, text_editing_style, text_input_position, Message,
     MultiLineText, SingleLineText,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -88,15 +88,15 @@ impl EditorColors {
 
 #[derive(Debug)]
 pub struct UserEditor {
-    user: User,
+    pub user: User,
     focused_field: InputField,
     username_text: SingleLineText,
     email_text: SingleLineText,
     authorized_keys_text: MultiLineText,
     scroll_offset: usize,
     colors: EditorColors,
-    show_cancel_confirmation: bool,
-    generate_password: bool,
+    pub show_cancel_confirmation: bool,
+    pub generate_password: bool,
     editing_mode: bool,
     save_error: Option<Error>,
     pub help_text: [&'static str; 2],
@@ -466,7 +466,7 @@ impl UserEditor {
             } else {
                 vec![err.to_string()]
             };
-            render_message_dialog(area, buf, e);
+            render_message_dialog(area, buf, Message::Error(e));
         }
     }
 

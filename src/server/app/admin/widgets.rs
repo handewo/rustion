@@ -211,9 +211,46 @@ impl Widget for &SingleLineText {
     }
 }
 
-pub fn render_message_dialog(area: Rect, buf: &mut Buffer, message: Vec<String>) {
+pub enum Message {
+    Info(Vec<String>),
+    Warning(Vec<String>),
+    Error(Vec<String>),
+    Success(Vec<String>),
+}
+
+impl Message {
+    pub fn lines(&self) -> &[String] {
+        use Message::*;
+        match self {
+            Info(lines) => lines,
+            Warning(lines) => lines,
+            Error(lines) => lines,
+            Success(lines) => lines,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        use Message::*;
+        match self {
+            Info(lines) => lines.len(),
+            Warning(lines) => lines.len(),
+            Error(lines) => lines.len(),
+            Success(lines) => lines.len(),
+        }
+    }
+}
+
+pub fn render_message_dialog(area: Rect, buf: &mut Buffer, message: Message) {
     let height = message.len() as u16 + 5;
     let dialog_area = centered_area(area, area.width, height);
+
+    use Message::*;
+    let color = match message {
+        Info(_) => Color::default(),
+        Warning(_) => Color::Yellow,
+        Error(_) => Color::Red,
+        Success(_) => Color::Green,
+    };
 
     // Clear the area
     Clear.render(dialog_area, buf);
@@ -222,17 +259,18 @@ pub fn render_message_dialog(area: Rect, buf: &mut Buffer, message: Vec<String>)
     let block = Block::default()
         .borders(Borders::ALL)
         .title("Error")
-        .border_style(Style::default().fg(Color::Red));
+        .border_style(Style::default().fg(color));
 
     let mut text = message
+        .lines()
         .iter()
         .map(|v| Line::from(v.as_str()))
         .collect::<Vec<Line>>();
     text.insert(0, Line::from(""));
     text.push(Line::from(""));
     text.push(Line::from(vec![Span::styled(
-        "<OK>",
-        Style::default().bg(Color::Red),
+        " <OK> ",
+        Style::default().bg(color),
     )]));
 
     let paragraph = Paragraph::new(text)
