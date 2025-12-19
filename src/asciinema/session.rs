@@ -93,7 +93,7 @@ async fn forward_events(mut events_rx: mpsc::Receiver<Event>, outputs: Vec<Box<d
 
     for mut output in outputs {
         if let Err(e) = output.flush().await {
-            log::error!("output flush failed: {e:?}");
+            log::error!("Asciinema output flush failed: {e:?}");
         }
     }
 }
@@ -103,7 +103,7 @@ async fn forward_event(mut output: Box<dyn Output>, event: Event) -> Option<Box<
         Ok(()) => Some(output),
 
         Err(e) => {
-            log::error!("output event handler failed: {e:?}");
+            log::error!("Asciinema output event handler failed: {e:?}");
             None
         }
     }

@@ -388,6 +388,14 @@ impl super::HandlerBackend for BastionServer {
         Ok(user)
     }
 
+    fn set_password(&self, user: &mut models::User, password: &str) -> Result<(), Error> {
+        let h = self
+            .hash_password(password)
+            .map_err(|_| Error::Server("encrypt user's password failed".to_string()))?;
+        user.set_password_hash(h);
+        Ok(())
+    }
+
     // async fn update_user(&self, user: models::User) -> Result<models::User, Error> {
     //     self.database.repository().update_user(&user).await?;
     //     Ok(user)
@@ -408,7 +416,7 @@ impl super::HandlerBackend for BastionServer {
             created_at: chrono::Utc::now().timestamp_millis(),
         };
         if let Err(e) = self.database.repository().insert_log(&l).await {
-            error!("insert log failed: {}", e);
+            error!("Insert log to database failed: {}", e);
         };
     }
 
