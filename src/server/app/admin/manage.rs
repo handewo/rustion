@@ -323,8 +323,24 @@ where
         }
     }
 
-    pub fn edit_form(&mut self) {
+    pub fn edit_form(&mut self) -> bool {
         self.popup = Popup::Edit;
+        match self.selected_tab {
+            SelectedTab::Users => {
+                let idx = self.state.selected().unwrap();
+                let user = match self.items.get_user(idx) {
+                    Some(u) => u,
+                    None => {
+                        return false;
+                    }
+                };
+                self.editor = Editor::User(Box::new(user::UserEditor::new(user)));
+            }
+            _ => {
+                todo!()
+            }
+        }
+        true
     }
 
     pub fn clear_form(&mut self) {
@@ -371,10 +387,15 @@ where
                             self.table_colors.grep();
                             self.add_form()
                         }
-                        KeyCode::Char('e') => self.edit_form(),
+                        KeyCode::Char('e') => {
+                            self.table_colors.grep();
+                            if !self.edit_form() {
+                                self.clear_form();
+                            }
+                        }
                         _ => {}
                     },
-                    Popup::Add | Popup::Edit => match self.editor {
+                    Popup::Add => match self.editor {
                         Editor::User(ref mut e) => {
                             if e.as_mut().handle_key_event(key.code, key.modifiers) {
                                 if !e.show_cancel_confirmation {
@@ -410,6 +431,35 @@ where
                         Editor::Target(ref mut e) => {
                             if e.as_mut().handle_key_event(key.code, key.modifiers) {
                                 self.clear_form();
+                            }
+                        }
+                        _ => {
+                            todo!()
+                        }
+                    },
+                    Popup::Edit => match self.editor {
+                        Editor::User(ref mut e) => {
+                            if e.as_mut().handle_key_event(key.code, key.modifiers) {
+                                if !e.show_cancel_confirmation {
+                                    let mut user = e.user.to_owned();
+                                    if e.generate_password {
+                                        let password = crate::common::gen_password(12);
+                                        self.backend.set_password(&mut user, &password)?;
+                                    }
+                                    let result = self
+                                        .t_handle
+                                        .block_on(self.backend.db_repository().update_user(&user));
+
+                                    if result.is_err() {
+                                        self.message =
+                                            Some(Message::Error(vec!["Internal error".into()]));
+                                        continue;
+                                    }
+                                    self.message =
+                                        Some(Message::Success(vec!["User updated".into()]))
+                                };
+                                self.clear_form();
+                                self.refresh_data();
                             }
                         }
                         _ => {
@@ -469,12 +519,12 @@ where
             }
         };
         self.longest_item_lens = self.items.constraint_len_calculator();
-        self.state.select(Some(0));
     }
 
     fn render_tabs(&mut self, frame: &mut Frame, area: Rect) {
         if self.selected_tab != self.last_selected_tab {
             self.refresh_data();
+            self.state.select(Some(0));
             self.last_selected_tab = self.selected_tab
         }
 
@@ -575,32 +625,34 @@ where
     }
 
     fn render_popup(&mut self, frame: &mut Frame, area: Rect) {
-        match self.popup {
-            Popup::Add => {
-                let title = match self.editor {
-                    Editor::User(_) => Line::styled("Add New User", Style::default().bold()),
-                    Editor::Target(_) => Line::styled("Add New Target", Style::default().bold()),
-                    _ => todo!(),
-                };
-                let popup = Block::bordered()
-                    .title(title)
-                    .title_style(Style::new().fg(self.editor_colors.title_color))
-                    .border_style(Style::new().fg(self.editor_colors.border_color))
-                    .border_type(BorderType::Double);
+        let title = match self.popup {
+            Popup::Add => match self.editor {
+                Editor::User(_) => Line::styled("Add New User", Style::default().bold()),
+                Editor::Target(_) => Line::styled("Add New Target", Style::default().bold()),
+                _ => todo!(),
+            },
+            Popup::Edit => match self.editor {
+                Editor::User(_) => Line::styled("Edit User", Style::default().bold()),
+                Editor::Target(_) => Line::styled("Edit Target", Style::default().bold()),
+                _ => todo!(),
+            },
+            Popup::None => return,
+        };
+        let popup = Block::bordered()
+            .title(title)
+            .title_style(Style::new().fg(self.editor_colors.title_color))
+            .border_style(Style::new().fg(self.editor_colors.border_color))
+            .border_type(BorderType::Double);
 
-                let popup_area = if area.width <= POPUP_WINDOW_COL {
-                    area
-                } else {
-                    centered_area(area, POPUP_WINDOW_COL, area.height.min(POPUP_WINDOW_ROW))
-                };
+        let popup_area = if area.width <= POPUP_WINDOW_COL {
+            area
+        } else {
+            centered_area(area, POPUP_WINDOW_COL, area.height.min(POPUP_WINDOW_ROW))
+        };
 
-                frame.render_widget(Clear, popup_area);
-                frame.render_widget(popup, popup_area);
-                frame.render_widget(&mut self.editor, popup_area);
-            }
-            Popup::Edit => {}
-            Popup::None => {}
-        }
+        frame.render_widget(Clear, popup_area);
+        frame.render_widget(popup, popup_area);
+        frame.render_widget(&mut self.editor, popup_area);
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
@@ -636,6 +688,14 @@ enum TableData {
 }
 
 impl TableData {
+    fn get_user(&self, i: usize) -> Option<User> {
+        if let TableData::Users(data) = self {
+            data.get(i).cloned()
+        } else {
+            None
+        }
+    }
+
     fn len(&self) -> usize {
         match self {
             Self::Users(ref data) => data.len(),
