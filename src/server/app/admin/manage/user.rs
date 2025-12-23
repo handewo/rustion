@@ -1,39 +1,14 @@
 use crate::database::models::user::ValidateError;
 use crate::database::models::User;
 use crate::error::Error;
-use crate::server::app::admin::widgets::centered_area;
-use crate::server::app::admin::widgets::{
-    render_cancel_dialog, render_message_dialog, text_editing_style, text_input_position, Message,
-    MultiLineText, SingleLineText,
-};
+use crate::server::app::admin::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{palette::tailwind, Color, Modifier, Style},
-    widgets::{
-        Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
-        Widget,
-    },
+    style::palette::tailwind,
+    widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
-
-const COMMON_HELP: [&str; 2] = [
-    "(Enter) edit | (i) insert | (a) append | (d) clear",
-    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
-];
-const CHECKBOX_HELP: [&str; 2] = [
-    "(Space) toggle",
-    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
-];
-const AUTHORIZED_KEYS_HELP: [&str; 2] = [
-    "(Enter) activate | (d) clear all",
-    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
-];
-const AUTHORIZED_KEYS_EDIT_HELP: [&str; 2] = [
-    "(Enter) edit | (i) insert | (a) append | (d) delete line | (o) newline",
-    "(Esc) cancel | (Up) next line | (Down) previous line",
-];
-const AUTHORIZED_KEYS_INPUT_HELP: [&str; 2] = ["(Enter) newline", "(Esc) quit edit"];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum InputField {
@@ -65,23 +40,6 @@ impl InputField {
             Self::ForceInitPass => Self::Password,
             Self::IsActive => Self::ForceInitPass,
             Self::AuthorizedKeys => Self::IsActive,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct EditorColors {
-    focus: Color,
-    editor: Color,
-    input_cursor: Color,
-}
-
-impl EditorColors {
-    const fn new(color: &tailwind::Palette) -> Self {
-        Self {
-            focus: color.c400,
-            editor: color.c300,
-            input_cursor: color.c600,
         }
     }
 }
@@ -181,11 +139,11 @@ impl UserEditor {
                     if self.authorized_keys_text.handle_input(key) {
                         self.editing_mode = false;
                         self.authorized_keys_text.clear_style();
-                        self.help_text = AUTHORIZED_KEYS_HELP;
+                        self.help_text = MULTILINES_HELP;
                     } else if self.authorized_keys_text.editing_mode {
-                        self.help_text = AUTHORIZED_KEYS_INPUT_HELP;
+                        self.help_text = MULTILINES_INPUT_HELP;
                     } else {
-                        self.help_text = AUTHORIZED_KEYS_EDIT_HELP;
+                        self.help_text = MULTILINES_EDIT_HELP;
                     }
                     return false;
                 }
@@ -247,7 +205,7 @@ impl UserEditor {
                     self.editing_mode = true;
                     self.authorized_keys_text.cursor_color = self.colors.input_cursor;
                     self.authorized_keys_text.highlight();
-                    self.help_text = AUTHORIZED_KEYS_EDIT_HELP;
+                    self.help_text = MULTILINES_EDIT_HELP;
                 }
             },
             KeyCode::Char('d') if !self.editing_mode => match self.focused_field {
@@ -285,7 +243,7 @@ impl UserEditor {
         self.focused_field = self.focused_field.next();
         match self.focused_field {
             InputField::AuthorizedKeys => {
-                self.help_text = AUTHORIZED_KEYS_HELP;
+                self.help_text = MULTILINES_HELP;
             }
             InputField::Username | InputField::Email => {
                 self.help_text = COMMON_HELP;
@@ -300,7 +258,7 @@ impl UserEditor {
         self.focused_field = self.focused_field.previous();
         match self.focused_field {
             InputField::AuthorizedKeys => {
-                self.help_text = AUTHORIZED_KEYS_HELP;
+                self.help_text = MULTILINES_HELP;
             }
             InputField::Username | InputField::Email => {
                 self.help_text = COMMON_HELP;
@@ -367,57 +325,66 @@ impl UserEditor {
             .split(content_area);
 
         // Username field
-        self.render_textarea(
+        render_textarea(
             chunks[0],
             &mut editor_buf,
             "*Username*",
             &self.username_text,
-            InputField::Username,
+            self.editing_mode,
+            &self.colors,
+            self.focused_field == InputField::Username,
         );
 
         // Email field
-        self.render_textarea(
+        render_textarea(
             chunks[1],
             &mut editor_buf,
             "Email",
             &self.email_text,
-            InputField::Email,
+            self.editing_mode,
+            &self.colors,
+            self.focused_field == InputField::Email,
         );
 
         // Password field
-        self.render_checkbox(
+        render_checkbox(
             chunks[2],
             &mut editor_buf,
             "Generate New Password",
             self.generate_password,
-            InputField::Password,
+            &self.colors,
+            self.focused_field == InputField::Password,
         );
 
         // Force Init Pass checkbox
-        self.render_checkbox(
+        render_checkbox(
             chunks[3],
             &mut editor_buf,
             "Force Init Password",
             self.user.force_init_pass,
-            InputField::ForceInitPass,
+            &self.colors,
+            self.focused_field == InputField::ForceInitPass,
         );
 
         // Is Active checkbox
-        self.render_checkbox(
+        render_checkbox(
             chunks[4],
             &mut editor_buf,
             "Is Active",
             self.user.is_active,
-            InputField::IsActive,
+            &self.colors,
+            self.focused_field == InputField::IsActive,
         );
 
         // Authorized Keys field
-        self.render_textarea(
+        render_textarea(
             chunks[5],
             &mut editor_buf,
             "Authorized Keys (one per line)",
             &self.authorized_keys_text,
-            InputField::AuthorizedKeys,
+            self.editing_mode,
+            &self.colors,
+            self.focused_field == InputField::AuthorizedKeys,
         );
 
         if scrollbar_needed {
@@ -468,70 +435,6 @@ impl UserEditor {
             };
             render_message_dialog(area, buf, &Message::Error(e));
         }
-    }
-
-    fn render_textarea<W: Widget>(
-        &self,
-        area: Rect,
-        buf: &mut Buffer,
-        label: &str,
-        textarea: W,
-        field: InputField,
-    ) {
-        let is_focused = self.focused_field == field;
-
-        let title_style = if is_focused {
-            Style::default()
-                .fg(tailwind::SLATE.c200)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-
-        let border_style = if is_focused && self.editing_mode {
-            Style::default().fg(self.colors.editor)
-        } else if is_focused {
-            Style::default().fg(self.colors.focus)
-        } else {
-            Style::default()
-        };
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(label)
-            .border_style(border_style)
-            .title_style(title_style);
-
-        let inner = block.inner(area);
-
-        block.render(area, buf);
-        textarea.render(inner, buf);
-    }
-
-    fn render_checkbox(
-        &self,
-        area: Rect,
-        buf: &mut Buffer,
-        label: &str,
-        checked: bool,
-        field: InputField,
-    ) {
-        let is_focused = self.focused_field == field;
-        let checkbox = if checked { "[X]" } else { "[ ]" };
-
-        let style = if is_focused {
-            Style::default()
-                .fg(self.colors.focus)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-
-        let text = format!("{} {}", checkbox, label);
-        let paragraph = Paragraph::new(text)
-            .style(style)
-            .block(Block::default().borders(Borders::ALL));
-        paragraph.render(area, buf);
     }
 }
 

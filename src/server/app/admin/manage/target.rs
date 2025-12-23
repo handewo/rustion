@@ -1,83 +1,87 @@
-use crate::database::models::User;
+use crate::database::models::target::ValidateError;
+use crate::database::models::Target;
+use crate::error::Error;
+use crate::server::app::admin::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
-    Frame,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::palette::tailwind,
+    widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
-
-const COMMON_HELP: [&str; 2] = [
-    "(Tab) next | (Shift Tab) previous | (Enter) Edit/Activate",
-    "(Ctrl+S) Save | (Esc) Cancel",
-];
-const EDITOR_HELP: [&str; 2] = [
-    "(Esc) quit | (↑) move up | (↓) move down | (←) move left | (→) move right",
-    "(Tab) next tab | (Shift Tab) previous tab | (+) zoom in | (-) zoom out | (PgUp) page up | (PgDn) page down",
-];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum InputField {
-    Username,
-    Email,
-    Password,
-    AuthorizedKeys,
-    ForceInitPass,
+    Name,
+    Hostname,
+    Port,
+    ServerPublicKey,
+    Description,
     IsActive,
 }
 
 impl InputField {
     fn next(&self) -> Self {
         match self {
-            Self::Username => Self::Email,
-            Self::Email => Self::Password,
-            Self::Password => Self::AuthorizedKeys,
-            Self::AuthorizedKeys => Self::ForceInitPass,
-            Self::ForceInitPass => Self::IsActive,
-            Self::IsActive => Self::Username,
+            Self::Name => Self::Hostname,
+            Self::Hostname => Self::Port,
+            Self::Port => Self::ServerPublicKey,
+            Self::ServerPublicKey => Self::Description,
+            Self::Description => Self::IsActive,
+            Self::IsActive => Self::Name,
         }
     }
 
     fn previous(&self) -> Self {
         match self {
-            Self::Username => Self::IsActive,
-            Self::Email => Self::Username,
-            Self::Password => Self::Email,
-            Self::AuthorizedKeys => Self::Password,
-            Self::ForceInitPass => Self::AuthorizedKeys,
-            Self::IsActive => Self::ForceInitPass,
+            Self::Name => Self::IsActive,
+            Self::Hostname => Self::Name,
+            Self::Port => Self::Hostname,
+            Self::ServerPublicKey => Self::Port,
+            Self::Description => Self::ServerPublicKey,
+            Self::IsActive => Self::Description,
         }
     }
 }
 
 #[derive(Debug)]
 pub struct TargetEditor {
-    user: User,
+    pub target: Target,
     focused_field: InputField,
-    username_input: String,
-    email_input: String,
-    password_input: String,
-    authorized_keys_input: String,
-    cursor_position: usize,
-    show_cancel_confirmation: bool,
+    name_text: SingleLineText,
+    hostname_text: SingleLineText,
+    port_text: SingleLineText,
+    server_public_key_text: SingleLineText,
+    description_text: SingleLineText,
+    scroll_offset: usize,
+    colors: EditorColors,
+    pub show_cancel_confirmation: bool,
     editing_mode: bool,
+    save_error: Option<Error>,
     pub help_text: [&'static str; 2],
 }
 
 impl TargetEditor {
-    pub fn new(user: User) -> Self {
+    pub fn new(target: Target) -> Self {
+        let name_text = SingleLineText::new(Some(target.name.clone()));
+        let hostname_text = SingleLineText::new(Some(target.hostname.clone()));
+        let port_text = SingleLineText::new(Some(target.port.to_string()));
+        let server_public_key_text = SingleLineText::new(Some(target.server_public_key.clone()));
+        let description_text = SingleLineText::new(target.description.clone());
+
         Self {
-            user,
-            focused_field: InputField::Username,
-            username_input: String::new(),
-            email_input: String::new(),
-            password_input: String::new(),
-            authorized_keys_input: String::new(),
-            cursor_position: 0,
+            target,
+            focused_field: InputField::Name,
+            name_text,
+            hostname_text,
+            port_text,
+            server_public_key_text,
+            description_text,
+            scroll_offset: 0,
+            colors: EditorColors::new(&tailwind::BLUE),
             show_cancel_confirmation: false,
             editing_mode: false,
+            save_error: None,
             help_text: COMMON_HELP,
         }
     }
@@ -90,9 +94,14 @@ impl TargetEditor {
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                     self.show_cancel_confirmation = false;
                 }
-                _ => {
-                    unreachable!()
-                }
+                _ => {}
+            }
+            return false;
+        }
+
+        if self.save_error.is_some() {
+            if key == KeyCode::Enter {
+                self.save_error = None;
             }
             return false;
         }
@@ -101,7 +110,10 @@ impl TargetEditor {
         if modifiers.contains(KeyModifiers::CONTROL) {
             match key {
                 KeyCode::Char('s') => {
-                    self.save_user();
+                    if let Err(e) = self.save_target() {
+                        self.save_error = Some(e);
+                        return false;
+                    }
                     return true;
                 }
                 KeyCode::Char('c') => {
@@ -112,383 +124,336 @@ impl TargetEditor {
             }
         }
 
-        match key {
-            KeyCode::Esc => {
-                if self.editing_mode {
-                    self.editing_mode = false;
-                } else {
-                    self.show_cancel_confirmation = true;
+        if self.editing_mode {
+            match self.focused_field {
+                InputField::Name => {
+                    if self.name_text.handle_input(key) {
+                        self.editing_mode = false;
+                        self.name_text.clear_style();
+                    }
                 }
-            }
-            KeyCode::Tab => {
-                self.editing_mode = false;
-                self.focused_field = self.focused_field.next();
-                self.update_cursor_position();
-            }
-            KeyCode::BackTab => {
-                self.editing_mode = false;
-                self.focused_field = self.focused_field.previous();
-                self.update_cursor_position();
-            }
-            KeyCode::Enter => match self.focused_field {
-                InputField::ForceInitPass => {
-                    self.user.force_init_pass = !self.user.force_init_pass;
+                InputField::Hostname => {
+                    if self.hostname_text.handle_input(key) {
+                        self.editing_mode = false;
+                        self.hostname_text.clear_style();
+                    }
                 }
-                InputField::IsActive => {
-                    self.user.is_active = !self.user.is_active;
+                InputField::Port => {
+                    if self.port_text.handle_input(key) {
+                        self.editing_mode = false;
+                        self.port_text.clear_style();
+                    }
+                }
+                InputField::ServerPublicKey => {
+                    if self.server_public_key_text.handle_input(key) {
+                        self.editing_mode = false;
+                        self.server_public_key_text.clear_style();
+                    }
+                }
+                InputField::Description => {
+                    if self.description_text.handle_input(key) {
+                        self.editing_mode = false;
+                        self.description_text.clear_style();
+                    }
                 }
                 _ => {
+                    unreachable!()
+                }
+            }
+
+            match key {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char(_) => {
+                    return false;
+                }
+                _ => {}
+            }
+        }
+
+        match key {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.show_cancel_confirmation = true;
+            }
+            KeyCode::Tab | KeyCode::Char('j') | KeyCode::Down => {
+                self.editing_mode = false;
+                self.next();
+                self.scroll_offset = if self.scroll_offset == self.max_scroll_offset() {
+                    0
+                } else {
+                    self.scroll_offset.saturating_add(1)
+                }
+            }
+            KeyCode::BackTab | KeyCode::Char('k') | KeyCode::Up => {
+                self.editing_mode = false;
+                self.previous();
+                self.scroll_offset = if self.scroll_offset == 0 {
+                    self.max_scroll_offset()
+                } else {
+                    self.scroll_offset.saturating_sub(1)
+                };
+            }
+            KeyCode::Enter | KeyCode::Char('i') | KeyCode::Char('a') => match self.focused_field {
+                InputField::IsActive => {
+                    self.target.is_active = !self.target.is_active;
+                }
+                InputField::Name => {
                     self.editing_mode = true;
-                    self.help_text = EDITOR_HELP;
+                    text_editing_style(self.colors.input_cursor, &mut self.name_text.textarea);
+                    text_input_position(key, &mut self.name_text.textarea);
+                }
+                InputField::Hostname => {
+                    self.editing_mode = true;
+                    text_editing_style(self.colors.input_cursor, &mut self.hostname_text.textarea);
+                    text_input_position(key, &mut self.hostname_text.textarea);
+                }
+                InputField::Port => {
+                    self.editing_mode = true;
+                    text_editing_style(self.colors.input_cursor, &mut self.port_text.textarea);
+                    text_input_position(key, &mut self.port_text.textarea);
+                }
+                InputField::ServerPublicKey => {
+                    self.editing_mode = true;
+                    text_editing_style(
+                        self.colors.input_cursor,
+                        &mut self.server_public_key_text.textarea,
+                    );
+                    text_input_position(key, &mut self.server_public_key_text.textarea);
+                }
+                InputField::Description => {
+                    self.editing_mode = true;
+                    text_editing_style(
+                        self.colors.input_cursor,
+                        &mut self.description_text.textarea,
+                    );
+                    text_input_position(key, &mut self.description_text.textarea);
                 }
             },
+            KeyCode::Char('d') if !self.editing_mode => match self.focused_field {
+                InputField::Name => {
+                    self.name_text.clear_line();
+                }
+                InputField::Hostname => {
+                    self.hostname_text.clear_line();
+                }
+                InputField::Port => {
+                    self.port_text.clear_line();
+                }
+                InputField::ServerPublicKey => {
+                    self.server_public_key_text.clear_line();
+                }
+                InputField::Description => {
+                    self.description_text.clear_line();
+                }
+                _ => {}
+            },
             KeyCode::Char(' ') => {
-                if matches!(
-                    self.focused_field,
-                    InputField::ForceInitPass | InputField::IsActive
-                ) {
-                    match self.focused_field {
-                        InputField::ForceInitPass => {
-                            self.user.force_init_pass = !self.user.force_init_pass;
-                        }
-                        InputField::IsActive => {
-                            self.user.is_active = !self.user.is_active;
-                        }
-                        _ => {}
-                    }
-                } else if self.editing_mode {
-                    self.handle_char_input(' ');
+                if let InputField::IsActive = self.focused_field {
+                    self.target.is_active = !self.target.is_active;
                 }
-            }
-            KeyCode::Char(c) if self.editing_mode => {
-                self.handle_char_input(c);
-            }
-            KeyCode::Backspace if self.editing_mode => {
-                self.handle_backspace();
-            }
-            KeyCode::Delete if self.editing_mode => {
-                self.handle_delete();
-            }
-            KeyCode::Left if self.editing_mode => {
-                if self.cursor_position > 0 {
-                    self.cursor_position -= 1;
-                }
-            }
-            KeyCode::Right if self.editing_mode => {
-                let current_input = self.get_current_input();
-                if self.cursor_position < current_input.len() {
-                    self.cursor_position += 1;
-                }
-            }
-            KeyCode::Home if self.editing_mode => {
-                self.cursor_position = 0;
-            }
-            KeyCode::End if self.editing_mode => {
-                self.cursor_position = self.get_current_input().len();
             }
             _ => {}
         }
-
         false
     }
 
-    fn handle_char_input(&mut self, c: char) {
-        let cur_pos = self.cursor_position;
-        let input = self.get_current_input_mut();
-        input.insert(cur_pos, c);
-        self.cursor_position += 1;
-    }
-
-    fn handle_backspace(&mut self) {
-        let cur_pos = self.cursor_position;
-        if self.cursor_position > 0 {
-            let input = self.get_current_input_mut();
-            input.remove(cur_pos - 1);
-            self.cursor_position -= 1;
-        }
-    }
-
-    fn handle_delete(&mut self) {
-        let input_len = self.get_current_input().len();
-        let cur_pos = self.cursor_position;
-        if self.cursor_position < input_len {
-            let input = self.get_current_input_mut();
-            input.remove(cur_pos);
-        }
-    }
-
-    fn get_current_input(&self) -> &str {
+    fn next(&mut self) {
+        self.focused_field = self.focused_field.next();
         match self.focused_field {
-            InputField::Username => &self.username_input,
-            InputField::Email => &self.email_input,
-            InputField::Password => &self.password_input,
-            InputField::AuthorizedKeys => &self.authorized_keys_input,
-            _ => "",
+            InputField::ServerPublicKey | InputField::Description => {
+                self.help_text = COMMON_HELP;
+            }
+            InputField::Name | InputField::Hostname | InputField::Port => {
+                self.help_text = COMMON_HELP;
+            }
+            InputField::IsActive => {
+                self.help_text = CHECKBOX_HELP;
+            }
         }
     }
 
-    fn get_current_input_mut(&mut self) -> &mut String {
+    fn previous(&mut self) {
+        self.focused_field = self.focused_field.previous();
         match self.focused_field {
-            InputField::Username => &mut self.username_input,
-            InputField::Email => &mut self.email_input,
-            InputField::Password => &mut self.password_input,
-            InputField::AuthorizedKeys => &mut self.authorized_keys_input,
-            _ => panic!("Invalid field for text input"),
+            InputField::ServerPublicKey | InputField::Description => {
+                self.help_text = COMMON_HELP;
+            }
+            InputField::Name | InputField::Hostname | InputField::Port => {
+                self.help_text = COMMON_HELP;
+            }
+            InputField::IsActive => {
+                self.help_text = CHECKBOX_HELP;
+            }
         }
     }
 
-    fn update_cursor_position(&mut self) {
-        self.cursor_position = self.get_current_input().len();
-    }
+    fn save_target(&mut self) -> Result<(), Error> {
+        let name = self.name_text.get_input();
+        self.target.name = name.trim().into();
 
-    fn save_user(&mut self) {
-        self.user.username = self.username_input.clone();
-        self.user.email = if self.email_input.is_empty() {
-            None
-        } else {
-            Some(self.email_input.clone())
+        let hostname = self.hostname_text.get_input();
+        self.target.hostname = hostname.trim().into();
+
+        let port_str = self.port_text.get_input().trim().to_string();
+        let port: u64 = match port_str.parse() {
+            Ok(p) => {
+                if (1..=65535).contains(&p) {
+                    p
+                } else {
+                    return Err(Error::TargetValidator(ValidateError::PortInvalid));
+                }
+            }
+            Err(_) => return Err(Error::TargetValidator(ValidateError::PortNotNumber)),
         };
+        self.target.port = port as u16;
+        let server_public_key = self.server_public_key_text.get_input();
+        self.target.server_public_key = server_public_key.trim().to_string();
+
+        let description = (!self.description_text.get_input().trim().is_empty())
+            .then(|| self.description_text.get_input().trim().to_string());
+        self.target.description = description;
+
+        self.target.validate().map_err(Error::TargetValidator)
     }
 
-    fn render_ui(&self, area: Rect, buf: &mut Buffer) {
+    fn max_scroll_offset(&self) -> usize {
+        5
+    }
+
+    fn window_height(&self) -> u16 {
+        21
+    }
+
+    fn render_ui(&mut self, area: Rect, buf: &mut Buffer) {
+        let height = self.window_height();
+        let area = centered_area(area, area.width - 2, area.height - 2);
+        let editor_area = Rect::new(0, 0, area.width, height);
+        let mut editor_buf = Buffer::empty(editor_area);
+        let scrollbar_needed = height > area.height;
+        let content_area = if scrollbar_needed {
+            Rect {
+                width: editor_area.width - 1,
+                ..editor_area
+            }
+        } else {
+            editor_area
+        };
+
         // Create main layout
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .margin(2)
             .constraints([
-                Constraint::Length(3), // Username
-                Constraint::Length(3), // Email
-                Constraint::Length(3), // Password
-                Constraint::Length(5), // Authorized Keys
-                Constraint::Length(3), // Force Init Pass
+                Constraint::Length(3), // Name
+                Constraint::Length(3), // Hostname
+                Constraint::Length(3), // Port
+                Constraint::Length(3), // Server Public Key
+                Constraint::Length(3), // Description
                 Constraint::Length(3), // Is Active
             ])
-            .split(area);
+            .split(content_area);
 
-        // Username field
-        self.render_text_input(
+        // Name field
+        render_textarea(
             chunks[0],
-            buf,
-            "*Username*",
-            &self.username_input,
-            InputField::Username,
+            &mut editor_buf,
+            "*Name*",
+            &self.name_text,
+            self.editing_mode,
+            &self.colors,
+            self.focused_field == InputField::Name,
         );
 
-        // Email field
-        self.render_text_input(
+        // Hostname field
+        render_textarea(
             chunks[1],
-            buf,
-            "Email",
-            &self.email_input,
-            InputField::Email,
+            &mut editor_buf,
+            "*Hostname*",
+            &self.hostname_text,
+            self.editing_mode,
+            &self.colors,
+            self.focused_field == InputField::Hostname,
         );
 
-        // Password field
-        let masked_password = "*".repeat(self.password_input.len());
-        self.render_text_input(
+        // Port field
+        render_textarea(
             chunks[2],
-            buf,
-            "Password",
-            &masked_password,
-            InputField::Password,
+            &mut editor_buf,
+            "*Port*",
+            &self.port_text,
+            self.editing_mode,
+            &self.colors,
+            self.focused_field == InputField::Port,
         );
 
-        // Authorized Keys field
-        self.render_textarea(
+        // Server Public Key field
+        render_textarea(
             chunks[3],
-            buf,
-            "Authorized Keys (one per line)",
-            &self.authorized_keys_input,
-            InputField::AuthorizedKeys,
+            &mut editor_buf,
+            "*Server Public Key*",
+            &self.server_public_key_text,
+            self.editing_mode,
+            &self.colors,
+            self.focused_field == InputField::ServerPublicKey,
         );
 
-        // Force Init Pass checkbox
-        self.render_checkbox(
+        // Description field
+        render_textarea(
             chunks[4],
-            buf,
-            "Force Init Password",
-            self.user.force_init_pass,
-            InputField::ForceInitPass,
+            &mut editor_buf,
+            "Description",
+            &self.description_text,
+            self.editing_mode,
+            &self.colors,
+            self.focused_field == InputField::Description,
         );
 
         // Is Active checkbox
-        self.render_checkbox(
+        render_checkbox(
             chunks[5],
-            buf,
+            &mut editor_buf,
             "Is Active",
-            self.user.is_active,
-            InputField::IsActive,
+            self.target.is_active,
+            &self.colors,
+            self.focused_field == InputField::IsActive,
         );
+
+        if scrollbar_needed {
+            let visible_content = editor_buf
+                .content
+                .into_iter()
+                .skip(area.width as usize * self.scroll_offset * 3)
+                .take(area.area() as usize);
+            for (i, cell) in visible_content.enumerate() {
+                let x = i as u16 % area.width;
+                let y = i as u16 / area.width;
+                buf[(area.x + x, area.y + y)] = cell;
+            }
+        } else {
+            for (i, cell) in editor_buf.content.into_iter().enumerate() {
+                let x = i as u16 % area.width;
+                let y = i as u16 / area.width;
+                buf[(area.x + x, area.y + y)] = cell;
+            }
+        };
+
+        if scrollbar_needed {
+            let area = area.intersection(buf.area);
+            let mut state =
+                ScrollbarState::new(self.max_scroll_offset()).position(self.scroll_offset);
+            Scrollbar::new(ScrollbarOrientation::VerticalRight).render(area, buf, &mut state);
+        }
 
         // Render cancel confirmation dialog if needed
         if self.show_cancel_confirmation {
-            self.render_cancel_dialog(area, buf);
+            render_cancel_dialog(area, buf);
         }
 
-        // Set cursor position if in editing mode
-        if self.editing_mode {
-            let chunk = match self.focused_field {
-                InputField::Username => chunks[1],
-                InputField::Email => chunks[2],
-                InputField::Password => chunks[3],
-                InputField::AuthorizedKeys => chunks[4],
-                _ => return,
-            };
-            let x = chunk.x + self.cursor_position as u16 + 1;
-            let y = chunk.y + 1;
-            // TODO: cursor
-            // area.set_cursor_position(ratatui::layout::Position::new(x, y));
+        if let Some(err) = self.save_error.as_ref() {
+            let e = vec![err.to_string()];
+            render_message_dialog(area, buf, &Message::Error(e));
         }
-    }
-
-    fn render_text_input(
-        &self,
-        area: Rect,
-        buf: &mut Buffer,
-        label: &str,
-        value: &str,
-        field: InputField,
-    ) {
-        let is_focused = self.focused_field == field;
-        let style = if is_focused {
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-
-        let border_style = if is_focused && self.editing_mode {
-            Style::default().fg(Color::Green)
-        } else if is_focused {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default()
-        };
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(label)
-            .border_style(border_style);
-
-        let paragraph = Paragraph::new(value).style(style).block(block);
-        paragraph.render(area, buf);
-    }
-
-    fn render_textarea(
-        &self,
-        area: Rect,
-        buf: &mut Buffer,
-        label: &str,
-        value: &str,
-        field: InputField,
-    ) {
-        let is_focused = self.focused_field == field;
-
-        let border_style = if is_focused && self.editing_mode {
-            Style::default().fg(Color::Green)
-        } else if is_focused {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default()
-        };
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(label)
-            .border_style(border_style);
-
-        let paragraph = Paragraph::new(value)
-            .block(block)
-            .wrap(Wrap { trim: false });
-        paragraph.render(area, buf);
-    }
-
-    fn render_checkbox(
-        &self,
-        area: Rect,
-        buf: &mut Buffer,
-        label: &str,
-        checked: bool,
-        field: InputField,
-    ) {
-        let is_focused = self.focused_field == field;
-        let checkbox = if checked { "[X]" } else { "[ ]" };
-
-        let style = if is_focused {
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-
-        let text = format!("{} {}", checkbox, label);
-        let paragraph = Paragraph::new(text)
-            .style(style)
-            .block(Block::default().borders(Borders::ALL));
-        paragraph.render(area, buf);
-    }
-
-    fn render_help(&self, frame: &mut Frame, area: Rect) {
-        let help_text = if self.editing_mode {
-            "Editing Mode | Esc: Exit Edit | Enter: Confirm | ←→: Move Cursor | Home/End: Jump"
-        } else {
-            "Tab/Shift+Tab: Navigate | Enter: Edit/Activate | Space: Toggle Checkbox | Ctrl+S: Save | Esc: Cancel"
-        };
-
-        let paragraph = Paragraph::new(help_text)
-            .style(Style::default().fg(Color::DarkGray))
-            .alignment(Alignment::Center)
-            .wrap(Wrap { trim: true });
-        frame.render_widget(paragraph, area);
-    }
-
-    fn render_cancel_dialog(&self, area: Rect, buf: &mut Buffer) {
-        let dialog_width = 50;
-        let dialog_height = 7;
-        let x = (area.width.saturating_sub(dialog_width)) / 2;
-        let y = (area.height.saturating_sub(dialog_height)) / 2;
-
-        let dialog_area = Rect::new(x, y, dialog_width, dialog_height);
-
-        // Clear the area
-        Clear.render(dialog_area, buf);
-
-        // Render dialog
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title("Confirm Cancel")
-            .border_style(Style::default().fg(Color::Red));
-
-        let text = vec![
-            Line::from(""),
-            Line::from("Are you sure you want to cancel?"),
-            Line::from("All unsaved changes will be lost."),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled(
-                    "Y",
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("es / "),
-                Span::styled(
-                    "N",
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("o"),
-            ]),
-        ];
-
-        let paragraph = Paragraph::new(text)
-            .block(block)
-            .alignment(Alignment::Center);
-        paragraph.render(area, buf);
     }
 }
-impl Widget for &TargetEditor {
+
+impl Widget for &mut TargetEditor {
     fn render(self, area: Rect, buf: &mut Buffer) {
         self.render_ui(area, buf);
     }

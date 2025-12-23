@@ -31,7 +31,7 @@ impl Target {
             id: Uuid::new_v4().to_string(),
             name: String::default(),
             hostname: String::default(),
-            port: 0,
+            port: 22,
             server_public_key: String::default(),
             description: None,
             is_active: true,
@@ -103,6 +103,8 @@ pub enum ValidateError {
     NameTooLong,
     HostnameEmpty,
     HostnameTooLong,
+    PortNotNumber,
+    PortInvalid,
     ServerPublicKey,
 }
 
@@ -124,6 +126,12 @@ impl std::fmt::Display for ValidateError {
             }
             ServerPublicKey => {
                 write!(f, "server public key is invalid")
+            }
+            PortNotNumber => {
+                write!(f, "port is not a number")
+            }
+            PortInvalid => {
+                write!(f, "port is not within the range of 1–65536")
             }
         }
     }

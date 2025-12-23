@@ -30,6 +30,9 @@ pub enum Error {
     UserValidator(#[from] crate::database::models::user::ValidateError),
 
     #[error(transparent)]
+    TargetValidator(#[from] crate::database::models::target::ValidateError),
+
+    #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
 
     #[error(transparent)]

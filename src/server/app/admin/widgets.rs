@@ -400,3 +400,64 @@ impl EditorColors {
         }
     }
 }
+
+pub fn render_textarea<W: Widget>(
+    area: Rect,
+    buf: &mut Buffer,
+    label: &str,
+    textarea: W,
+    editing_mode: bool,
+    colors: &EditorColors,
+    is_focused: bool,
+) {
+    let title_style = if is_focused {
+        Style::default()
+            .fg(tailwind::SLATE.c200)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+
+    let border_style = if is_focused && editing_mode {
+        Style::default().fg(colors.editor)
+    } else if is_focused {
+        Style::default().fg(colors.focus)
+    } else {
+        Style::default()
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(label)
+        .border_style(border_style)
+        .title_style(title_style);
+
+    let inner = block.inner(area);
+    block.render(area, buf);
+    textarea.render(inner, buf);
+}
+
+pub fn render_checkbox(
+    area: Rect,
+    buf: &mut Buffer,
+    label: &str,
+    checked: bool,
+    colors: &EditorColors,
+    is_focused: bool,
+) {
+    let checkbox = if checked { "[X]" } else { "[ ]" };
+
+    let style = if is_focused {
+        Style::default()
+            .fg(colors.focus)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+
+    let text = format!("{} {}", checkbox, label);
+    let paragraph = Paragraph::new(text)
+        .style(style)
+        .block(Block::default().borders(Borders::ALL));
+    paragraph.render(area, buf);
+}

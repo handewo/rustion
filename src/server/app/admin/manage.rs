@@ -4,7 +4,7 @@ use crate::database::models::*;
 use crate::error::Error;
 use crate::server::app::admin::widgets::render_confirm_dialog;
 use ::log::{error, warn};
-use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent};
+use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{self, Color, Modifier, Style, Stylize};
@@ -451,77 +451,7 @@ where
                         }
                         _ => {}
                     },
-                    Popup::Add => match self.editor {
-                        Editor::User(ref mut e) => {
-                            if e.as_mut().handle_key_event(key.code, key.modifiers) {
-                                if !e.show_cancel_confirmation {
-                                    let mut user = e.user.to_owned();
-                                    if e.generate_password {
-                                        let password = crate::common::gen_password(12);
-                                        self.backend.set_password(&mut user, &password)?;
-                                    }
-                                    let result = self
-                                        .t_handle
-                                        .block_on(self.backend.db_repository().create_user(&user));
-
-                                    if let Err(err) = result {
-                                        let msg = match err {
-                                            Error::Sqlx(sqlx::Error::Database(db_err))
-                                                if db_err.kind()
-                                                    == sqlx::error::ErrorKind::UniqueViolation =>
-                                            {
-                                                "Username already exists"
-                                            }
-                                            _ => "Internal error",
-                                        };
-
-                                        self.message = Some(Message::Error(vec![msg.into()]));
-                                        continue;
-                                    }
-                                    self.message = Some(Message::Success(vec!["User added".into()]))
-                                };
-                                self.clear_form();
-                                self.refresh_data();
-                            }
-                        }
-                        Editor::Target(ref mut e) => {
-                            if e.as_mut().handle_key_event(key.code, key.modifiers) {
-                                self.clear_form();
-                            }
-                        }
-                        _ => {
-                            todo!()
-                        }
-                    },
-                    Popup::Edit => match self.editor {
-                        Editor::User(ref mut e) => {
-                            if e.as_mut().handle_key_event(key.code, key.modifiers) {
-                                if !e.show_cancel_confirmation {
-                                    let mut user = e.user.to_owned();
-                                    if e.generate_password {
-                                        let password = crate::common::gen_password(12);
-                                        self.backend.set_password(&mut user, &password)?;
-                                    }
-                                    let result = self
-                                        .t_handle
-                                        .block_on(self.backend.db_repository().update_user(&user));
-
-                                    if result.is_err() {
-                                        self.message =
-                                            Some(Message::Error(vec!["Internal error".into()]));
-                                        continue;
-                                    }
-                                    self.message =
-                                        Some(Message::Success(vec!["User updated".into()]))
-                                };
-                                self.clear_form();
-                                self.refresh_data();
-                            }
-                        }
-                        _ => {
-                            todo!()
-                        }
-                    },
+                    Popup::Add | Popup::Edit => self.do_edit(key)?,
                     Popup::Delete(i) => match key.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') => {
                             self.do_delete(i);
@@ -535,6 +465,57 @@ where
                 }
             }
         }
+    }
+
+    fn do_edit(&mut self, key: KeyEvent) -> Result<(), Error> {
+        match self.editor {
+            Editor::User(ref mut e) => {
+                if e.as_mut().handle_key_event(key.code, key.modifiers) {
+                    if !e.show_cancel_confirmation {
+                        let mut user = e.user.to_owned();
+                        if e.generate_password {
+                            let password = crate::common::gen_password(12);
+                            self.backend.set_password(&mut user, &password)?;
+                        }
+
+                        let (action, result) = match self.popup {
+                            Popup::Add => (
+                                "added",
+                                self.t_handle
+                                    .block_on(self.backend.db_repository().create_user(&user)),
+                            ),
+                            Popup::Edit => (
+                                "updated",
+                                self.t_handle
+                                    .block_on(self.backend.db_repository().update_user(&user)),
+                            ),
+                            _ => unreachable!(),
+                        };
+
+                        if let Err(err) = result {
+                            let msg = match err {
+                                Error::Sqlx(sqlx::Error::Database(db_err))
+                                    if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
+                                {
+                                    "Username already exists"
+                                }
+                                _ => "Internal error",
+                            };
+
+                            self.message = Some(Message::Error(vec![msg.into()]));
+                            return Ok(());
+                        }
+                        self.message = Some(Message::Success(vec![format!("User {}", action)]))
+                    };
+                    self.clear_form();
+                    self.refresh_data();
+                }
+            }
+            _ => {
+                todo!()
+            }
+        }
+        Ok(())
     }
 
     fn render(&mut self, frame: &mut Frame) {
