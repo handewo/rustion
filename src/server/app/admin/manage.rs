@@ -2,7 +2,8 @@ use super::common::*;
 use super::widgets::{centered_area, render_message_dialog, Message};
 use crate::database::models::*;
 use crate::error::Error;
-use ::log::error;
+use crate::server::app::admin::widgets::render_confirm_dialog;
+use ::log::{error, warn};
 use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
@@ -24,14 +25,14 @@ mod target;
 mod user;
 
 const HELP_TEXT: [&str; 2] = [
-    "(Esc) quit | (↑) move up | (↓) move down | (←) move left | (→) move right",
+    "(a) add | (e) edit | (d) delete | (Esc) quit | (↑) move up | (↓) move down | (←) move left | (→) move right",
     "(Tab) next tab | (Shift Tab) previous tab | (+) zoom in | (-) zoom out | (PgUp) page up | (PgDn) page down",
 ];
 
 const LENGTH_UUID: u16 = 32;
 const LENGTH_TIMESTAMP: u16 = 14;
-const POPUP_WINDOW_COL: u16 = 60;
-const POPUP_WINDOW_ROW: u16 = 40;
+const MAX_POPUP_WINDOW_COL: u16 = 60;
+const MAX_POPUP_WINDOW_ROW: u16 = 40;
 const MIN_WINDOW_COL: u16 = 20;
 const MIN_WINDOW_ROW: u16 = 15;
 
@@ -50,7 +51,7 @@ where
     let mut terminal = Terminal::new(tty_backend)?;
     terminal.hide_cursor()?;
     terminal.flush()?;
-    App::new(backend, t_handle, user_id).run(tty, &mut terminal)?;
+    App::new(backend, t_handle, user_id, handler_id).run(tty, &mut terminal)?;
     Ok(())
 }
 
@@ -111,6 +112,7 @@ enum Popup {
     None,
     Add,
     Edit,
+    Delete(usize),
 }
 
 #[repr(usize)]
@@ -166,6 +168,7 @@ where
     table_size: (u16, u16),
     backend: Arc<B>,
     t_handle: Handle,
+    handler_id: String,
     user_id: String,
     editor: Editor,
     message: Option<Message>,
@@ -175,7 +178,7 @@ impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    fn new(backend: Arc<B>, t_handle: Handle, user_id: String) -> Self {
+    fn new(backend: Arc<B>, t_handle: Handle, user_id: String, handler_id: String) -> Self {
         let data = TableData::Users(
             match t_handle.block_on(backend.db_repository().list_users(false)) {
                 Ok(d) => d,
@@ -198,6 +201,7 @@ where
             table_size: (0, 0),
             backend,
             t_handle,
+            handler_id,
             items: data,
             user_id,
             editor: Editor::None,
@@ -205,7 +209,7 @@ where
         }
     }
 
-    pub fn previous_page(&mut self) {
+    fn previous_page(&mut self) {
         let rows = (self.table_size.1 as usize - 1) / self.row_height;
         *self.state.offset_mut() = if self.state.offset() < rows {
             0
@@ -226,7 +230,7 @@ where
         self.scroll_state = self.scroll_state.position(i * self.row_height);
     }
 
-    pub fn next_page(&mut self) {
+    fn next_page(&mut self) {
         let rows = (self.table_size.1 as usize - 1) / self.row_height;
         let mut is_offset = false;
         if self.state.offset() + rows <= self.items.len() {
@@ -250,7 +254,7 @@ where
         self.scroll_state = self.scroll_state.position(i * self.row_height);
     }
 
-    pub fn next_row(&mut self) {
+    fn next_row(&mut self) {
         let i = match self.state.selected() {
             Some(i) => {
                 if i >= self.items.len() - 1 {
@@ -265,7 +269,7 @@ where
         self.scroll_state = self.scroll_state.position(i * self.row_height);
     }
 
-    pub fn previous_row(&mut self) {
+    fn previous_row(&mut self) {
         let i = match self.state.selected() {
             Some(i) => {
                 if i == 0 {
@@ -280,31 +284,31 @@ where
         self.scroll_state = self.scroll_state.position(i * self.row_height);
     }
 
-    pub fn next_column(&mut self) {
+    fn next_column(&mut self) {
         self.state.select_next_column();
     }
 
-    pub fn previous_column(&mut self) {
+    fn previous_column(&mut self) {
         self.state.select_previous_column();
     }
 
-    pub fn next_tab(&mut self) {
+    fn next_tab(&mut self) {
         self.selected_tab = self.selected_tab.next();
     }
 
-    pub fn previous_tab(&mut self) {
+    fn previous_tab(&mut self) {
         self.selected_tab = self.selected_tab.previous();
     }
 
-    pub fn zoom_in(&mut self) {
+    fn zoom_in(&mut self) {
         self.row_height = self.row_height.saturating_add(1).min(20);
     }
 
-    pub fn zoom_out(&mut self) {
+    fn zoom_out(&mut self) {
         self.row_height = self.row_height.saturating_sub(1).max(1);
     }
 
-    pub fn add_form(&mut self) {
+    fn add_form(&mut self) {
         self.popup = Popup::Add;
         match self.selected_tab {
             SelectedTab::Users => {
@@ -323,7 +327,7 @@ where
         }
     }
 
-    pub fn edit_form(&mut self) -> bool {
+    fn edit_form(&mut self) -> bool {
         self.popup = Popup::Edit;
         match self.selected_tab {
             SelectedTab::Users => {
@@ -343,7 +347,49 @@ where
         true
     }
 
-    pub fn clear_form(&mut self) {
+    fn do_delete(&mut self, idx: usize) {
+        match self.selected_tab {
+            SelectedTab::Users => {
+                self.popup = Popup::None;
+                self.clear_form();
+                if let Some(u) = self.items.get_user(idx) {
+                    let result = self
+                        .t_handle
+                        .block_on(self.backend.db_repository().delete_user(&u.id));
+
+                    if let Err(e) = result {
+                        self.message = Some(Message::Error(vec!["Internal error".into()]));
+                        warn!(
+                            "[{}] Delete user: {} failed, {}",
+                            self.handler_id, u.username, e
+                        );
+                        return;
+                    }
+                    self.message = Some(Message::Success(vec!["User deleted".into()]));
+                    self.refresh_data();
+                }
+            }
+            _ => {
+                todo!()
+            }
+        }
+    }
+
+    fn could_delete(&mut self, idx: usize) -> bool {
+        match self.selected_tab {
+            SelectedTab::Users => {
+                if self.items.get_user(idx).is_some() {
+                    return true;
+                }
+            }
+            _ => {
+                todo!()
+            }
+        }
+        false
+    }
+
+    fn clear_form(&mut self) {
         self.popup = Popup::None;
         self.editor = Editor::None;
         self.table_colors = TableColors::new(&tailwind::BLUE);
@@ -383,6 +429,16 @@ where
                         KeyCode::Char('k') | KeyCode::Up => self.previous_row(),
                         KeyCode::Char('l') | KeyCode::Right => self.next_column(),
                         KeyCode::Char('h') | KeyCode::Left => self.previous_column(),
+                        KeyCode::Char('d') => {
+                            self.table_colors.grep();
+
+                            let idx = self.state.selected().unwrap();
+                            if self.could_delete(idx) {
+                                self.popup = Popup::Delete(idx);
+                            } else {
+                                self.clear_form();
+                            }
+                        }
                         KeyCode::Char('a') => {
                             self.table_colors.grep();
                             self.add_form()
@@ -465,6 +521,16 @@ where
                         _ => {
                             todo!()
                         }
+                    },
+                    Popup::Delete(i) => match key.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            self.do_delete(i);
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') => {
+                            self.popup = Popup::None;
+                            self.clear_form()
+                        }
+                        _ => {}
                     },
                 }
             }
@@ -615,16 +681,34 @@ where
 
     fn render_message(&mut self, frame: &mut Frame, area: Rect) {
         if let Some(ref msg) = self.message {
-            let popup_area = if area.width <= POPUP_WINDOW_COL {
+            let popup_area = if area.width <= MAX_POPUP_WINDOW_COL {
                 area
             } else {
-                centered_area(area, POPUP_WINDOW_COL, area.height.min(POPUP_WINDOW_ROW))
+                centered_area(
+                    area,
+                    MAX_POPUP_WINDOW_COL,
+                    area.height.min(MAX_POPUP_WINDOW_ROW),
+                )
             };
             render_message_dialog(popup_area, frame.buffer_mut(), msg);
         }
     }
 
     fn render_popup(&mut self, frame: &mut Frame, area: Rect) {
+        if let Popup::None = self.popup {
+            return;
+        }
+
+        let popup_area = if area.width <= MAX_POPUP_WINDOW_COL {
+            area
+        } else {
+            centered_area(
+                area,
+                MAX_POPUP_WINDOW_COL,
+                area.height.min(MAX_POPUP_WINDOW_ROW),
+            )
+        };
+
         let title = match self.popup {
             Popup::Add => match self.editor {
                 Editor::User(_) => Line::styled("Add New User", Style::default().bold()),
@@ -636,19 +720,26 @@ where
                 Editor::Target(_) => Line::styled("Edit Target", Style::default().bold()),
                 _ => todo!(),
             },
-            Popup::None => return,
+            Popup::Delete(_) => {
+                match self.selected_tab {
+                    SelectedTab::Users => {
+                        render_confirm_dialog(
+                            popup_area,
+                            frame.buffer_mut(),
+                            &["Delete selected user?".to_string()],
+                        );
+                    }
+                    _ => todo!(),
+                };
+                return;
+            }
+            _ => unreachable!(),
         };
         let popup = Block::bordered()
             .title(title)
             .title_style(Style::new().fg(self.editor_colors.title_color))
             .border_style(Style::new().fg(self.editor_colors.border_color))
             .border_type(BorderType::Double);
-
-        let popup_area = if area.width <= POPUP_WINDOW_COL {
-            area
-        } else {
-            centered_area(area, POPUP_WINDOW_COL, area.height.min(POPUP_WINDOW_ROW))
-        };
 
         frame.render_widget(Clear, popup_area);
         frame.render_widget(popup, popup_area);

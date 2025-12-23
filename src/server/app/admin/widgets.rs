@@ -287,6 +287,46 @@ pub fn centered_area(area: Rect, x: u16, y: u16) -> Rect {
     area
 }
 
+pub fn render_confirm_dialog(area: Rect, buf: &mut Buffer, lines: &[String]) {
+    let height = lines.len() as u16 + 5;
+    let dialog_area = centered_area(area, area.width, height);
+
+    // Clear the area
+    Clear.render(dialog_area, buf);
+
+    // Render dialog
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Confirm Delete")
+        .border_style(Style::default().fg(Color::Red));
+
+    let mut text = lines
+        .iter()
+        .map(|v| Line::from(v.as_str()))
+        .collect::<Vec<Line>>();
+    text.insert(0, Line::from(""));
+    text.push(Line::from(""));
+    text.push(Line::from(vec![
+        Span::styled(
+            "Y",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("es / "),
+        Span::styled(
+            "N",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("o"),
+    ]));
+
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .alignment(Alignment::Center);
+    paragraph.render(dialog_area, buf);
+}
+
 pub fn render_cancel_dialog(area: Rect, buf: &mut Buffer) {
     let dialog_area = centered_area(area, area.width, 7);
 
