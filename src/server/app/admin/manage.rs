@@ -25,8 +25,8 @@ mod target;
 mod user;
 
 const HELP_TEXT: [&str; 2] = [
-    "(a) add | (e) edit | (d) delete | (Esc) quit | (↑) move up | (↓) move down | (←) move left | (→) move right",
-    "(Tab) next tab | (Shift Tab) previous tab | (+) zoom in | (-) zoom out | (PgUp) page up | (PgDn) page down",
+    "(a) add | (e) edit | (d) delete | (Esc) quit | (↑↓←→) move around",
+    "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
 ];
 
 const LENGTH_UUID: u16 = 32;
@@ -317,7 +317,7 @@ where
                 ))))
             }
             SelectedTab::Targets => {
-                self.editor = Editor::Target(Box::new(target::TargetEditor::new(User::new(
+                self.editor = Editor::Target(Box::new(target::TargetEditor::new(Target::new(
                     self.user_id.clone(),
                 ))))
             }
@@ -851,15 +851,12 @@ impl TableData {
                     .max(5);
 
                 vec![
-                    Constraint::Length(LENGTH_UUID),
                     Constraint::Length(username_len as u16),
                     Constraint::Length(email_len as u16),
                     Constraint::Length(13),
                     Constraint::Length(15),
                     Constraint::Length(15),
                     Constraint::Length(9),
-                    Constraint::Length(LENGTH_UUID),
-                    Constraint::Length(LENGTH_TIMESTAMP),
                 ]
             }
             Self::Targets(ref data) => {
@@ -893,15 +890,12 @@ impl TableData {
                     .max(11);
 
                 vec![
-                    Constraint::Length(LENGTH_UUID),
                     Constraint::Length(name_len as u16),
                     Constraint::Length(hostname_len as u16),
                     Constraint::Length(5),
                     Constraint::Length(server_public_key_len as u16),
                     Constraint::Length(desc_len as u16),
                     Constraint::Length(9), // is_active
-                    Constraint::Length(LENGTH_UUID),
-                    Constraint::Length(LENGTH_TIMESTAMP),
                 ]
             }
 
@@ -1057,15 +1051,12 @@ impl TableData {
             }
             Self::Targets(_) => {
                 vec![
-                    "id",
                     "name",
                     "hostname",
                     "port",
                     "server_public_key",
                     "description",
                     "is_active",
-                    "updated_by",
-                    "updated_at",
                 ]
             }
             Self::TargetSecrets(_) => {
@@ -1141,15 +1132,12 @@ impl FieldsToArray for User {
 impl FieldsToArray for Target {
     fn ref_array(&self) -> Vec<String> {
         vec![
-            self.id.clone(),
             self.name.clone(),
             self.hostname.clone(),
             self.port.to_string(),
             self.server_public_key.clone(),
             self.description.clone().unwrap_or_default(),
             self.is_active.to_string(),
-            self.updated_by.clone(),
-            self.updated_at.to_string(),
         ]
     }
 }
@@ -1238,7 +1226,7 @@ impl Widget for &mut Editor {
             Editor::User(ref mut e) => {
                 e.render(area, buf);
             }
-            Editor::Target(ref e) => {
+            Editor::Target(ref mut e) => {
                 e.render(area, buf);
             }
             _ => {

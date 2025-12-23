@@ -2,11 +2,29 @@ use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Flex, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{palette::tailwind, Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 use tui_textarea::{CursorMove, Input, Key, TextArea};
+
+pub const COMMON_HELP: [&str; 2] = [
+    "(Enter) edit | (i) insert | (a) append | (d) clear",
+    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
+];
+pub const CHECKBOX_HELP: [&str; 2] = [
+    "(Space) toggle",
+    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
+];
+pub const MULTILINES_HELP: [&str; 2] = [
+    "(Enter) activate | (d) clear all",
+    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
+];
+pub const MULTILINES_EDIT_HELP: [&str; 2] = [
+    "(Enter) edit | (i) insert | (a) append | (d) delete line | (o) newline",
+    "(Esc) cancel | (Up) next line | (Down) previous line",
+];
+pub const MULTILINES_INPUT_HELP: [&str; 2] = ["(Enter) newline", "(Esc) quit edit"];
 
 pub fn text_editing_style(color: Color, textarea: &mut TextArea) {
     textarea.set_cursor_line_style(Style::default().add_modifier(Modifier::UNDERLINED));
@@ -364,4 +382,21 @@ pub fn render_cancel_dialog(area: Rect, buf: &mut Buffer) {
         .block(block)
         .alignment(Alignment::Center);
     paragraph.render(dialog_area, buf);
+}
+
+#[derive(Debug)]
+pub struct EditorColors {
+    pub focus: Color,
+    pub editor: Color,
+    pub input_cursor: Color,
+}
+
+impl EditorColors {
+    pub const fn new(color: &tailwind::Palette) -> Self {
+        Self {
+            focus: color.c400,
+            editor: color.c300,
+            input_cursor: color.c600,
+        }
+    }
 }
