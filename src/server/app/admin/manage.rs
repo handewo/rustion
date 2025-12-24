@@ -340,6 +340,16 @@ where
                 };
                 self.editor = Editor::User(Box::new(user::UserEditor::new(user)));
             }
+            SelectedTab::Targets => {
+                let idx = self.state.selected().unwrap();
+                let target = match self.items.get_target(idx) {
+                    Some(u) => u,
+                    None => {
+                        return false;
+                    }
+                };
+                self.editor = Editor::Target(Box::new(target::TargetEditor::new(target)));
+            }
             _ => {
                 todo!()
             }
@@ -369,6 +379,26 @@ where
                     self.refresh_data();
                 }
             }
+            SelectedTab::Targets => {
+                self.popup = Popup::None;
+                self.clear_form();
+                if let Some(t) = self.items.get_target(idx) {
+                    let result = self
+                        .t_handle
+                        .block_on(self.backend.db_repository().delete_target(&t.id));
+
+                    if let Err(e) = result {
+                        self.message = Some(Message::Error(vec!["Internal error".into()]));
+                        warn!(
+                            "[{}] Delete target: {} failed, {}",
+                            self.handler_id, t.name, e
+                        );
+                        return;
+                    }
+                    self.message = Some(Message::Success(vec!["Target deleted".into()]));
+                    self.refresh_data();
+                }
+            }
             _ => {
                 todo!()
             }
@@ -379,6 +409,11 @@ where
         match self.selected_tab {
             SelectedTab::Users => {
                 if self.items.get_user(idx).is_some() {
+                    return true;
+                }
+            }
+            SelectedTab::Targets => {
+                if self.items.get_target(idx).is_some() {
                     return true;
                 }
             }
@@ -510,6 +545,45 @@ where
                         if !password.is_empty() {
                             msg.push(format!("New password: {}", password));
                         }
+                        self.message = Some(Message::Success(msg))
+                    };
+                    self.clear_form();
+                    self.refresh_data();
+                }
+            }
+            Editor::Target(ref mut e) => {
+                if e.as_mut().handle_key_event(key.code, key.modifiers) {
+                    if !e.show_cancel_confirmation {
+                        let target = e.target.to_owned();
+
+                        let (action, result) = match self.popup {
+                            Popup::Add => (
+                                "added",
+                                self.t_handle
+                                    .block_on(self.backend.db_repository().create_target(&target)),
+                            ),
+                            Popup::Edit => (
+                                "updated",
+                                self.t_handle
+                                    .block_on(self.backend.db_repository().update_target(&target)),
+                            ),
+                            _ => unreachable!(),
+                        };
+
+                        if let Err(err) = result {
+                            let msg = match err {
+                                Error::Sqlx(sqlx::Error::Database(db_err))
+                                    if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
+                                {
+                                    "Target already exists"
+                                }
+                                _ => "Internal error",
+                            };
+
+                            self.message = Some(Message::Error(vec![msg.into()]));
+                            return Ok(());
+                        }
+                        let msg = vec![format!("Target {}", action)];
                         self.message = Some(Message::Success(msg))
                     };
                     self.clear_form();
@@ -715,6 +789,13 @@ where
                             &["Delete selected user?".to_string()],
                         );
                     }
+                    SelectedTab::Targets => {
+                        render_confirm_dialog(
+                            popup_area,
+                            frame.buffer_mut(),
+                            &["Delete selected target?".to_string()],
+                        );
+                    }
                     _ => todo!(),
                 };
                 return;
@@ -765,6 +846,14 @@ enum TableData {
 }
 
 impl TableData {
+    fn get_target(&self, i: usize) -> Option<Target> {
+        if let TableData::Targets(data) = self {
+            data.get(i).cloned()
+        } else {
+            None
+        }
+    }
+
     fn get_user(&self, i: usize) -> Option<User> {
         if let TableData::Users(data) = self {
             data.get(i).cloned()
