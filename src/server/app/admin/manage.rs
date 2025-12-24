@@ -472,9 +472,10 @@ where
             Editor::User(ref mut e) => {
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
                     if !e.show_cancel_confirmation {
+                        let mut password = String::new();
                         let mut user = e.user.to_owned();
                         if e.generate_password {
-                            let password = crate::common::gen_password(12);
+                            password = crate::common::gen_password(12);
                             self.backend.set_password(&mut user, &password)?;
                         }
 
@@ -505,7 +506,11 @@ where
                             self.message = Some(Message::Error(vec![msg.into()]));
                             return Ok(());
                         }
-                        self.message = Some(Message::Success(vec![format!("User {}", action)]))
+                        let mut msg = vec![format!("User {}", action)];
+                        if !password.is_empty() {
+                            msg.push(format!("New password: {}", password));
+                        }
+                        self.message = Some(Message::Success(msg))
                     };
                     self.clear_form();
                     self.refresh_data();
