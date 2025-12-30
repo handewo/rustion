@@ -21,6 +21,7 @@ use style::palette::tailwind;
 use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
 
+mod secret;
 mod target;
 mod user;
 
@@ -188,6 +189,7 @@ where
                 }
             },
         );
+
         Self {
             state: TableState::default().with_selected(0),
             longest_item_lens: data.constraint_len_calculator(),
@@ -216,6 +218,7 @@ where
         } else {
             self.state.offset() - rows
         };
+
         let i = match self.state.selected() {
             Some(i) => {
                 if i < rows {
@@ -226,6 +229,7 @@ where
             }
             None => 0,
         };
+
         self.state.select(Some(i));
         self.scroll_state = self.scroll_state.position(i * self.row_height);
     }
@@ -233,11 +237,13 @@ where
     fn next_page(&mut self) {
         let rows = (self.table_size.1 as usize - 1) / self.row_height;
         let mut is_offset = false;
+
         if self.state.offset() + rows <= self.items.len() {
             *self.state.offset_mut() = self.state.offset() + rows;
         } else {
             is_offset = true;
         }
+
         let i = match self.state.selected() {
             Some(i) => {
                 if is_offset {
@@ -250,6 +256,7 @@ where
             }
             None => 0,
         };
+
         self.state.select(Some(i));
         self.scroll_state = self.scroll_state.position(i * self.row_height);
     }
@@ -265,6 +272,7 @@ where
             }
             None => 0,
         };
+
         self.state.select(Some(i));
         self.scroll_state = self.scroll_state.position(i * self.row_height);
     }
@@ -280,6 +288,7 @@ where
             }
             None => 0,
         };
+
         self.state.select(Some(i));
         self.scroll_state = self.scroll_state.position(i * self.row_height);
     }
@@ -310,6 +319,7 @@ where
 
     fn add_form(&mut self) {
         self.popup = Popup::Add;
+
         match self.selected_tab {
             SelectedTab::Users => {
                 self.editor = Editor::User(Box::new(user::UserEditor::new(User::new(
@@ -321,14 +331,17 @@ where
                     self.user_id.clone(),
                 ))))
             }
-            _ => {
-                todo!()
+            SelectedTab::Secrets => {
+                self.editor = Editor::Secret(Box::new(secret::SecretEditor::new(Secret::new(
+                    self.user_id.clone(),
+                ))))
             }
         }
     }
 
     fn edit_form(&mut self) -> bool {
         self.popup = Popup::Edit;
+
         match self.selected_tab {
             SelectedTab::Users => {
                 let idx = self.state.selected().unwrap();
@@ -350,10 +363,18 @@ where
                 };
                 self.editor = Editor::Target(Box::new(target::TargetEditor::new(target)));
             }
-            _ => {
-                todo!()
+            SelectedTab::Secrets => {
+                let idx = self.state.selected().unwrap();
+                let secret = match self.items.get_secret(idx) {
+                    Some(s) => s,
+                    None => {
+                        return false;
+                    }
+                };
+                self.editor = Editor::Secret(Box::new(secret::SecretEditor::new(secret)));
             }
         }
+
         true
     }
 
@@ -362,6 +383,7 @@ where
             SelectedTab::Users => {
                 self.popup = Popup::None;
                 self.clear_form();
+
                 if let Some(u) = self.items.get_user(idx) {
                     let result = self
                         .t_handle
@@ -375,6 +397,7 @@ where
                         );
                         return;
                     }
+
                     self.message = Some(Message::Success(vec!["User deleted".into()]));
                     self.refresh_data();
                 }
@@ -382,6 +405,7 @@ where
             SelectedTab::Targets => {
                 self.popup = Popup::None;
                 self.clear_form();
+
                 if let Some(t) = self.items.get_target(idx) {
                     let result = self
                         .t_handle
@@ -395,12 +419,32 @@ where
                         );
                         return;
                     }
+
                     self.message = Some(Message::Success(vec!["Target deleted".into()]));
                     self.refresh_data();
                 }
             }
-            _ => {
-                todo!()
+            SelectedTab::Secrets => {
+                self.popup = Popup::None;
+                self.clear_form();
+
+                if let Some(s) = self.items.get_secret(idx) {
+                    let result = self
+                        .t_handle
+                        .block_on(self.backend.db_repository().delete_secret(&s.id));
+
+                    if let Err(e) = result {
+                        self.message = Some(Message::Error(vec!["Internal error".into()]));
+                        warn!(
+                            "[{}] Delete secret: {} failed, {}",
+                            self.handler_id, s.name, e
+                        );
+                        return;
+                    }
+
+                    self.message = Some(Message::Success(vec!["Secret deleted".into()]));
+                    self.refresh_data();
+                }
             }
         }
     }
@@ -417,10 +461,13 @@ where
                     return true;
                 }
             }
-            _ => {
-                todo!()
+            SelectedTab::Secrets => {
+                if self.items.get_secret(idx).is_some() {
+                    return true;
+                }
             }
         }
+
         false
     }
 
@@ -448,7 +495,9 @@ where
                         _ => continue,
                     }
                 }
+
                 let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
+
                 match self.popup {
                     Popup::None => match key.code {
                         KeyCode::PageUp => self.previous_page(),
@@ -466,8 +515,8 @@ where
                         KeyCode::Char('h') | KeyCode::Left => self.previous_column(),
                         KeyCode::Char('d') => {
                             self.table_colors.grep();
-
                             let idx = self.state.selected().unwrap();
+
                             if self.could_delete(idx) {
                                 self.popup = Popup::Delete(idx);
                             } else {
@@ -509,6 +558,7 @@ where
                     if !e.show_cancel_confirmation {
                         let mut password = String::new();
                         let mut user = e.user.to_owned();
+
                         if e.generate_password {
                             password = crate::common::gen_password(12);
                             self.backend.set_password(&mut user, &password)?;
@@ -541,12 +591,14 @@ where
                             self.message = Some(Message::Error(vec![msg.into()]));
                             return Ok(());
                         }
+
                         let mut msg = vec![format!("User {}", action)];
                         if !password.is_empty() {
                             msg.push(format!("New password: {}", password));
                         }
-                        self.message = Some(Message::Success(msg))
-                    };
+                        self.message = Some(Message::Success(msg));
+                    }
+
                     self.clear_form();
                     self.refresh_data();
                 }
@@ -583,9 +635,52 @@ where
                             self.message = Some(Message::Error(vec![msg.into()]));
                             return Ok(());
                         }
+
                         let msg = vec![format!("Target {}", action)];
-                        self.message = Some(Message::Success(msg))
-                    };
+                        self.message = Some(Message::Success(msg));
+                    }
+
+                    self.clear_form();
+                    self.refresh_data();
+                }
+            }
+            Editor::Secret(ref mut e) => {
+                if e.as_mut().handle_key_event(key.code, key.modifiers) {
+                    if !e.show_cancel_confirmation {
+                        let secret = e.secret.to_owned();
+
+                        let (action, result) = match self.popup {
+                            Popup::Add => (
+                                "added",
+                                self.t_handle
+                                    .block_on(self.backend.db_repository().create_secret(&secret)),
+                            ),
+                            Popup::Edit => (
+                                "updated",
+                                self.t_handle
+                                    .block_on(self.backend.db_repository().update_secret(&secret)),
+                            ),
+                            _ => unreachable!(),
+                        };
+
+                        if let Err(err) = result {
+                            let msg = match err {
+                                Error::Sqlx(sqlx::Error::Database(db_err))
+                                    if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
+                                {
+                                    "Secret already exists"
+                                }
+                                _ => "Internal error",
+                            };
+
+                            self.message = Some(Message::Error(vec![msg.into()]));
+                            return Ok(());
+                        }
+
+                        let msg = vec![format!("Secret {}", action)];
+                        self.message = Some(Message::Success(msg));
+                    }
+
                     self.clear_form();
                     self.refresh_data();
                 }
@@ -594,15 +689,18 @@ where
                 todo!()
             }
         }
+
         Ok(())
     }
 
     fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
+
         if area.width < MIN_WINDOW_COL || area.height < MIN_WINDOW_ROW {
             self.render_notice(frame, area, "window is too small");
             return;
         }
+
         let layout = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(5),
@@ -644,6 +742,7 @@ where
                 );
             }
         };
+
         self.longest_item_lens = self.items.constraint_len_calculator();
     }
 
@@ -671,6 +770,7 @@ where
         .select(self.selected_tab as usize)
         .divider(" ")
         .padding("", "");
+
         frame.render_widget(tabs, area);
     }
 
@@ -683,10 +783,13 @@ where
         let header_style = Style::default()
             .fg(self.table_colors.header_fg)
             .bg(self.table_colors.header_bg);
+
         let selected_row_style = Style::default()
             .add_modifier(Modifier::REVERSED)
             .fg(self.table_colors.selected_row_style_fg);
+
         let selected_col_style = Style::default().fg(self.table_colors.selected_column_style_fg);
+
         let selected_cell_style = Style::default()
             .add_modifier(Modifier::REVERSED)
             .fg(self.table_colors.selected_cell_style_fg);
@@ -699,12 +802,14 @@ where
             .collect::<Row>()
             .style(header_style)
             .height(1);
+
         let items = self.items.as_vec();
         let rows = items.iter().enumerate().map(|(i, data)| {
             let color = match i % 2 {
                 0 => self.table_colors.normal_row_color,
                 _ => self.table_colors.alt_row_color,
             };
+
             let item = data.ref_array();
             item.into_iter()
                 .map(|content| Cell::from(Text::from(content.to_string())))
@@ -712,6 +817,7 @@ where
                 .style(Style::new().fg(self.table_colors.row_fg).bg(color))
                 .height(self.row_height as u16)
         });
+
         let bar = vec!["   ".into(); self.row_height];
         let t = Table::new(rows, self.longest_item_lens.clone())
             .header(header)
@@ -721,6 +827,7 @@ where
             .highlight_symbol(Text::from(bar))
             .bg(self.table_colors.buffer_bg)
             .highlight_spacing(HighlightSpacing::Always);
+
         frame.render_stateful_widget(t, area, &mut self.state);
     }
 
@@ -729,6 +836,7 @@ where
             .scroll_state
             .content_length((self.items.len().max(1) - 1) * self.row_height)
             .position(self.state.selected().unwrap_or(0) * self.row_height);
+
         frame.render_stateful_widget(
             Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
             area.inner(Margin {
@@ -750,6 +858,7 @@ where
                     area.height.min(MAX_POPUP_WINDOW_ROW),
                 )
             };
+
             render_message_dialog(popup_area, frame.buffer_mut(), msg);
         }
     }
@@ -773,11 +882,13 @@ where
             Popup::Add => match self.editor {
                 Editor::User(_) => Line::styled("Add New User", Style::default().bold()),
                 Editor::Target(_) => Line::styled("Add New Target", Style::default().bold()),
+                Editor::Secret(_) => Line::styled("Add New Secret", Style::default().bold()),
                 _ => todo!(),
             },
             Popup::Edit => match self.editor {
                 Editor::User(_) => Line::styled("Edit User", Style::default().bold()),
                 Editor::Target(_) => Line::styled("Edit Target", Style::default().bold()),
+                Editor::Secret(_) => Line::styled("Edit Secret", Style::default().bold()),
                 _ => todo!(),
             },
             Popup::Delete(_) => {
@@ -796,12 +907,19 @@ where
                             &["Delete selected target?".to_string()],
                         );
                     }
-                    _ => todo!(),
+                    SelectedTab::Secrets => {
+                        render_confirm_dialog(
+                            popup_area,
+                            frame.buffer_mut(),
+                            &["Delete selected secret?".to_string()],
+                        );
+                    }
                 };
                 return;
             }
             _ => unreachable!(),
         };
+
         let popup = Block::bordered()
             .title(title)
             .title_style(Style::new().fg(self.editor_colors.title_color))
@@ -817,8 +935,10 @@ where
         let text = match self.editor {
             Editor::User(ref e) => e.as_ref().help_text,
             Editor::Target(ref e) => e.as_ref().help_text,
+            Editor::Secret(ref e) => e.as_ref().help_text,
             Editor::None => HELP_TEXT,
         };
+
         let info_footer = Paragraph::new(Text::from_iter(text))
             .style(
                 Style::new()
@@ -831,6 +951,7 @@ where
                     .border_type(BorderType::Double)
                     .border_style(Style::new().fg(self.table_colors.footer_border_color)),
             );
+
         frame.render_widget(info_footer, area);
     }
 }
@@ -856,6 +977,14 @@ impl TableData {
 
     fn get_user(&self, i: usize) -> Option<User> {
         if let TableData::Users(data) = self {
+            data.get(i).cloned()
+        } else {
+            None
+        }
+    }
+
+    fn get_secret(&self, i: usize) -> Option<Secret> {
+        if let TableData::Secrets(data) = self {
             data.get(i).cloned()
         } else {
             None
@@ -917,6 +1046,7 @@ impl TableData {
                     .max()
                     .unwrap_or(0)
                     .max(8);
+
                 let email_len = data
                     .iter()
                     .map(|v| v.email.as_deref().unwrap_or(""))
@@ -942,6 +1072,7 @@ impl TableData {
                     .max()
                     .unwrap_or(0)
                     .max(4);
+
                 let hostname_len = data
                     .iter()
                     .map(|v| v.hostname.as_str())
@@ -949,6 +1080,7 @@ impl TableData {
                     .max()
                     .unwrap_or(0)
                     .max(8);
+
                 let server_public_key_len = data
                     .iter()
                     .map(|v| v.server_public_key.as_str())
@@ -956,6 +1088,7 @@ impl TableData {
                     .max()
                     .unwrap_or(0)
                     .max(17);
+
                 let desc_len = data
                     .iter()
                     .map(|v| v.description.as_deref().unwrap_or(""))
@@ -973,17 +1106,14 @@ impl TableData {
                     Constraint::Length(9), // is_active
                 ]
             }
-
-            Self::TargetSecrets(_) => {
-                vec![
-                    Constraint::Length(LENGTH_UUID), // id
-                    Constraint::Length(LENGTH_UUID), // target_id
-                    Constraint::Length(LENGTH_UUID), // secret_id
-                    Constraint::Length(9),           // is_active
-                    Constraint::Length(LENGTH_UUID), // created_by
-                    Constraint::Length(LENGTH_TIMESTAMP),
-                ]
-            }
+            Self::TargetSecrets(_) => vec![
+                Constraint::Length(LENGTH_UUID), // id
+                Constraint::Length(LENGTH_UUID), // target_id
+                Constraint::Length(LENGTH_UUID), // secret_id
+                Constraint::Length(9),           // is_active
+                Constraint::Length(LENGTH_UUID), // created_by
+                Constraint::Length(LENGTH_TIMESTAMP),
+            ],
             Self::Secrets(ref data) => {
                 let name_len = data
                     .iter()
@@ -1037,6 +1167,7 @@ impl TableData {
                     .max()
                     .unwrap_or(0)
                     .max(2);
+
                 let v1_len = data
                     .iter()
                     .map(|v| v.v1.as_str())
@@ -1044,6 +1175,7 @@ impl TableData {
                     .max()
                     .unwrap_or(0)
                     .max(2);
+
                 let v2_len = data
                     .iter()
                     .map(|v| v.v2.as_str())
@@ -1051,6 +1183,7 @@ impl TableData {
                     .max()
                     .unwrap_or(0)
                     .max(2);
+
                 let v3_len = data
                     .iter()
                     .map(|v| v.v3.as_str())
@@ -1058,6 +1191,7 @@ impl TableData {
                     .max()
                     .unwrap_or(0)
                     .max(2);
+
                 let v4_len = data
                     .iter()
                     .map(|v| v.v4.as_str())
@@ -1065,6 +1199,7 @@ impl TableData {
                     .max()
                     .unwrap_or(0)
                     .max(2);
+
                 let v5_len = data
                     .iter()
                     .map(|v| v.v5.as_str())
@@ -1094,6 +1229,7 @@ impl TableData {
                     .max()
                     .unwrap_or(0)
                     .max(8);
+
                 let detail_len = data
                     .iter()
                     .map(|v| v.detail.as_str())
@@ -1101,6 +1237,7 @@ impl TableData {
                     .max()
                     .unwrap_or(0)
                     .max(6);
+
                 vec![
                     Constraint::Length(LENGTH_UUID),
                     Constraint::Length(log_type_len as u16),
@@ -1114,75 +1251,61 @@ impl TableData {
 
     fn header(&self) -> Vec<&str> {
         match self {
-            Self::Users(_) => {
-                vec![
-                    "username",
-                    "email",
-                    "password_hash",
-                    "authorized_keys",
-                    "force_init_pass",
-                    "is_active",
-                ]
-            }
-            Self::Targets(_) => {
-                vec![
-                    "name",
-                    "hostname",
-                    "port",
-                    "server_public_key",
-                    "description",
-                    "is_active",
-                ]
-            }
-            Self::TargetSecrets(_) => {
-                vec![
-                    "id",
-                    "target_id",
-                    "secret_id",
-                    "is_active",
-                    "updated_by",
-                    "updated_at",
-                ]
-            }
-            Self::Secrets(_) => {
-                vec![
-                    "id",
-                    "name",
-                    "user",
-                    "password",
-                    "private_key",
-                    "public_key",
-                    "is_active",
-                    "updated_by",
-                    "updated_at",
-                ]
-            }
-            Self::InternalObjects(_) => {
-                vec!["name", "is_active", "updated_by", "updated_at"]
-            }
-            Self::CasbinRule(_) => {
-                vec![
-                    "id",
-                    "ptype",
-                    "p0",
-                    "p1",
-                    "p2",
-                    "p3",
-                    "p4",
-                    "p5",
-                    "updated_by",
-                    "updated_at",
-                ]
-            }
-            Self::Logs(_) => {
-                vec![
-                    "connection_id",
-                    "log_type",
-                    "user_id",
-                    "detail",
-                    "created_at",
-                ]
-            }
+            Self::Users(_) => vec![
+                "username",
+                "email",
+                "password_hash",
+                "authorized_keys",
+                "force_init_pass",
+                "is_active",
+            ],
+            Self::Targets(_) => vec![
+                "name",
+                "hostname",
+                "port",
+                "server_public_key",
+                "description",
+                "is_active",
+            ],
+            Self::TargetSecrets(_) => vec![
+                "id",
+                "target_id",
+                "secret_id",
+                "is_active",
+                "updated_by",
+                "updated_at",
+            ],
+            Self::Secrets(_) => vec![
+                "id",
+                "name",
+                "user",
+                "password",
+                "private_key",
+                "public_key",
+                "is_active",
+                "updated_by",
+                "updated_at",
+            ],
+            Self::InternalObjects(_) => vec!["name", "is_active", "updated_by", "updated_at"],
+            Self::CasbinRule(_) => vec![
+                "id",
+                "ptype",
+                "p0",
+                "p1",
+                "p2",
+                "p3",
+                "p4",
+                "p5",
+                "updated_by",
+                "updated_at",
+            ],
+            Self::Logs(_) => vec![
+                "connection_id",
+                "log_type",
+                "user_id",
+                "detail",
+                "created_at",
+            ],
         }
     }
 }
@@ -1289,6 +1412,7 @@ impl FieldsToArray for Log {
 enum Editor {
     User(Box<user::UserEditor>),
     Target(Box<target::TargetEditor>),
+    Secret(Box<secret::SecretEditor>),
     None,
 }
 
@@ -1302,6 +1426,9 @@ impl Widget for &mut Editor {
                 e.render(area, buf);
             }
             Editor::Target(ref mut e) => {
+                e.render(area, buf);
+            }
+            Editor::Secret(ref mut e) => {
                 e.render(area, buf);
             }
             _ => {

@@ -1,5 +1,8 @@
 use chrono::Utc;
+use russh::keys::ssh_key::{PrivateKey, PublicKey};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
+use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -41,12 +44,12 @@ impl TargetSecret {
 }
 
 impl Secret {
-    pub fn new(name: String, user: String, updated_by: String) -> Self {
+    pub fn new(updated_by: String) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
             id: Uuid::new_v4().to_string(),
-            name,
-            user,
+            name: String::default(),
+            user: String::default(),
             password: None,
             private_key: None,
             public_key: None,
@@ -105,6 +108,79 @@ impl Secret {
 
     pub fn take_public_key(&mut self) -> Option<String> {
         self.public_key.take()
+    }
+
+    pub fn validate(&self) -> Result<(), ValidateError> {
+        let name = self.name.trim();
+        if name.is_empty() {
+            return Err(ValidateError::NameEmpty);
+        }
+
+        let user = self.user.trim();
+        if user.is_empty() {
+            return Err(ValidateError::UserEmpty);
+        }
+
+        if let Some(private_key) = self.private_key.as_ref() {
+            match PrivateKey::from_str(private_key) {
+                Ok(key) => {
+                    let ori_public_key = key.public_key();
+                    if let Some(public_key) = self.public_key.as_ref() {
+                        match PublicKey::from_str(public_key) {
+                            Ok(pub_key) => {
+                                if ori_public_key != &pub_key {
+                                    return Err(ValidateError::UnmatchedKey);
+                                }
+                            }
+                            Err(_) => return Err(ValidateError::PublicKeyInvalid),
+                        }
+                    }
+                }
+                Err(_) => return Err(ValidateError::PrivateKeyInvalid),
+            }
+        }
+
+        if self.private_key.is_none() && self.public_key.is_some() {
+            return Err(ValidateError::PublicKeyOnly);
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ValidateError {
+    NameEmpty,
+    UserEmpty,
+    PrivateKeyInvalid,
+    PublicKeyInvalid,
+    UnmatchedKey,
+    PublicKeyOnly,
+}
+
+impl std::fmt::Display for ValidateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ValidateError::*;
+        match self {
+            NameEmpty => {
+                write!(f, "name cannot be empty")
+            }
+            UserEmpty => {
+                write!(f, "user cannot be empty")
+            }
+            PrivateKeyInvalid => {
+                write!(f, "invalid private key format")
+            }
+            PublicKeyInvalid => {
+                write!(f, "invalid public key format")
+            }
+            UnmatchedKey => {
+                write!(f, "private key and public key doesn't match")
+            }
+            PublicKeyOnly => {
+                write!(f, "private key cannot be empty")
+            }
+        }
     }
 }
 

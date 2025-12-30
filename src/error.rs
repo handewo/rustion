@@ -27,6 +27,9 @@ pub enum Error {
     Config(String),
 
     #[error(transparent)]
+    SecretValidator(#[from] crate::database::models::target_secret::ValidateError),
+
+    #[error(transparent)]
     UserValidator(#[from] crate::database::models::user::ValidateError),
 
     #[error(transparent)]
