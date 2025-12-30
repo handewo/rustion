@@ -202,6 +202,12 @@ impl MultiLineText {
                 self.textarea.move_cursor(CursorMove::Down);
                 self.highlight();
             }
+            KeyCode::Left | KeyCode::Char('h') if !self.editing_mode => {
+                self.textarea.move_cursor(CursorMove::Back);
+            }
+            KeyCode::Right | KeyCode::Char('l') if !self.editing_mode => {
+                self.textarea.move_cursor(CursorMove::Forward);
+            }
             KeyCode::Enter | KeyCode::Char('i') | KeyCode::Char('a') if !self.editing_mode => {
                 self.editing_mode = true;
                 text_editing_style(self.cursor_color, &mut self.textarea);
