@@ -319,7 +319,7 @@ impl TargetEditor {
     }
 
     fn window_height(&self) -> u16 {
-        21
+        18
     }
 
     fn render_ui(&mut self, area: Rect, buf: &mut Buffer) {

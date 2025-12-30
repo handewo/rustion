@@ -276,7 +276,7 @@ version = "0.69.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "271383c67ccabffb7381723dea0672a673f292304fcb45c01cc648c7a8d58088"
 dependencies = [
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
  "itertools 0.12.1",
@@ -316,11 +316,11 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.9.1"
+version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b8e56985ec62d17e9c1001dc89c88ecd7dc08e47eba5ec7c29c7b5eeecde967"
+checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
 dependencies = [
- "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -678,7 +678,7 @@ version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b9f2e4c67f833b660cdb0a3523065869fb35570177239812ed4c905aeff87b"
 dependencies = [
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
  "crossterm_winapi",
  "derive_more",
  "document-features",
@@ -693,9 +693,9 @@ dependencies = [
 [[package]]
 name = "crossterm"
 version = "0.29.0"
-source = "git+https://github.com/handewo/crossterm.git#4c45f109e473ce2f3a7b21225f217c9a7368c758"
+source = "git+https://github.com/handewo/crossterm.git#bffc0ae267d46bda3753f883df3e3e47edabab82"
 dependencies = [
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
  "crossbeam-channel",
  "crossterm_winapi",
  "derive_more",
@@ -1258,6 +1258,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1483,7 +1489,18 @@ checksum = "5971ac85611da7067dbfcabef3c70ebb5606018acd9e2a3903a0da507521e0d5"
 dependencies = [
  "allocator-api2",
  "equivalent",
- "foldhash",
+ "foldhash 0.1.5",
+]
+
+[[package]]
+name = "hashbrown"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
 ]
 
 [[package]]
@@ -1492,7 +1509,7 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
 dependencies = [
- "hashbrown",
+ "hashbrown 0.15.4",
 ]
 
 [[package]]
@@ -1746,7 +1763,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe4cd85333e22411419a0bcae1297d25e58c9443848b11dc6a86fefe8c78a661"
 dependencies = [
  "equivalent",
- "hashbrown",
+ "hashbrown 0.15.4",
 ]
 
 [[package]]
@@ -1770,7 +1787,7 @@ name = "inquire"
 version = "0.9.1"
 source = "git+https://github.com/handewo/inquire.git#5a67a4e29bb6e2ac3dfaf461b6df5e631b78f98f"
 dependencies = [
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
  "chrono",
  "crossterm 0.29.0 (git+https://github.com/handewo/crossterm.git)",
  "dyn-clone",
@@ -1829,7 +1846,7 @@ version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b86e202f00093dcba4275d4636b93ef9dd75d025ae560d2521b45ea28ab49013"
 dependencies = [
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
  "cfg-if",
  "libc",
 ]
@@ -1929,7 +1946,7 @@ version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96d9e0d6a8bf886abccc1cbcac7d74f9000ae5882aedc4a9042188bbc9cd4487"
 dependencies = [
- "hashbrown",
+ "hashbrown 0.15.4",
  "thiserror 2.0.12",
 ]
 
@@ -2059,7 +2076,7 @@ version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51a1679740111eb63b7b4cb3c97b1d5d9f82e142292a25edcfdb4120a48b3880"
 dependencies = [
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
 ]
 
 [[package]]
@@ -2121,7 +2138,7 @@ version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86ea4e65087ff52f3862caff188d489f1fab49a0cb09e01b2e3f1a617b10aaed"
 dependencies = [
- "hashbrown",
+ "hashbrown 0.15.4",
 ]
 
 [[package]]
@@ -2235,7 +2252,7 @@ version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
 dependencies = [
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
  "cfg-if",
  "cfg_aliases",
  "libc",
@@ -2585,7 +2602,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8701b58ea97060d5e5b155d383a69952a60943f0e6dfe30b04c287beb0b27455"
 dependencies = [
  "fixedbitset 0.5.7",
- "hashbrown",
+ "hashbrown 0.15.4",
  "indexmap",
  "serde",
 ]
@@ -2912,8 +2929,8 @@ checksum = "f66ee92bc15280519ef199a274fe0cafff4245d31bc39aaa31c011ad56cb1f05"
 
 [[package]]
 name = "ratatui"
-version = "0.30.0-beta.0"
-source = "git+https://github.com/handewo/ratatui.git#5f62ea2eefa9ec86be9ac44a417e355b09e034ef"
+version = "0.30.0"
+source = "git+https://github.com/handewo/ratatui.git#a00a8adc9bc6bab089bee9a565eee9334fa81c28"
 dependencies = [
  "instability",
  "ratatui-core",
@@ -2926,12 +2943,12 @@ dependencies = [
 
 [[package]]
 name = "ratatui-core"
-version = "0.1.0-beta.0"
-source = "git+https://github.com/handewo/ratatui.git#5f62ea2eefa9ec86be9ac44a417e355b09e034ef"
+version = "0.1.0"
+source = "git+https://github.com/handewo/ratatui.git#a00a8adc9bc6bab089bee9a565eee9334fa81c28"
 dependencies = [
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
  "compact_str",
- "hashbrown",
+ "hashbrown 0.16.1",
  "indoc",
  "itertools 0.14.0",
  "kasuari",
@@ -2945,8 +2962,8 @@ dependencies = [
 
 [[package]]
 name = "ratatui-crossterm"
-version = "0.1.0-beta.0"
-source = "git+https://github.com/handewo/ratatui.git#5f62ea2eefa9ec86be9ac44a417e355b09e034ef"
+version = "0.1.0"
+source = "git+https://github.com/handewo/ratatui.git#a00a8adc9bc6bab089bee9a565eee9334fa81c28"
 dependencies = [
  "cfg-if",
  "crossterm 0.29.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2956,8 +2973,8 @@ dependencies = [
 
 [[package]]
 name = "ratatui-macros"
-version = "0.7.0-beta.0"
-source = "git+https://github.com/handewo/ratatui.git#5f62ea2eefa9ec86be9ac44a417e355b09e034ef"
+version = "0.7.0"
+source = "git+https://github.com/handewo/ratatui.git#a00a8adc9bc6bab089bee9a565eee9334fa81c28"
 dependencies = [
  "ratatui-core",
  "ratatui-widgets",
@@ -2966,7 +2983,7 @@ dependencies = [
 [[package]]
 name = "ratatui-notty"
 version = "0.1.0-beta.0"
-source = "git+https://github.com/handewo/ratatui.git#5f62ea2eefa9ec86be9ac44a417e355b09e034ef"
+source = "git+https://github.com/handewo/ratatui.git#a00a8adc9bc6bab089bee9a565eee9334fa81c28"
 dependencies = [
  "cfg-if",
  "crossterm 0.29.0 (git+https://github.com/handewo/crossterm.git)",
@@ -2977,8 +2994,8 @@ dependencies = [
 
 [[package]]
 name = "ratatui-termwiz"
-version = "0.1.0-beta.0"
-source = "git+https://github.com/handewo/ratatui.git#5f62ea2eefa9ec86be9ac44a417e355b09e034ef"
+version = "0.1.0"
+source = "git+https://github.com/handewo/ratatui.git#a00a8adc9bc6bab089bee9a565eee9334fa81c28"
 dependencies = [
  "ratatui-core",
  "termwiz",
@@ -2986,11 +3003,11 @@ dependencies = [
 
 [[package]]
 name = "ratatui-widgets"
-version = "0.3.0-beta.0"
-source = "git+https://github.com/handewo/ratatui.git#5f62ea2eefa9ec86be9ac44a417e355b09e034ef"
+version = "0.3.0"
+source = "git+https://github.com/handewo/ratatui.git#a00a8adc9bc6bab089bee9a565eee9334fa81c28"
 dependencies = [
- "bitflags 2.9.1",
- "hashbrown",
+ "bitflags 2.10.0",
+ "hashbrown 0.16.1",
  "indoc",
  "instability",
  "itertools 0.14.0",
@@ -3008,7 +3025,7 @@ version = "0.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d04b7d0ee6b4a0207a0a7adb104d23ecb0b47d6beae7152d0fa34b692b29fd6"
 dependencies = [
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
 ]
 
 [[package]]
@@ -3152,7 +3169,7 @@ source = "git+https://github.com/handewo/russh.git#9b08dcecbc8307434e4e99f428419
 dependencies = [
  "aes",
  "aws-lc-rs",
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
  "block-padding",
  "byteorder",
  "bytes",
@@ -3314,7 +3331,7 @@ version = "0.38.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154"
 dependencies = [
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
@@ -3327,7 +3344,7 @@ version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c71e83d6afe7ff64890ec6b71d6a69bb8a610ab78ce364b3352876bb4c801266"
 dependencies = [
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
@@ -3434,18 +3451,28 @@ checksum = "56e6fa9c48d24d85fb3de5ad847117517440f6beceb7798af16b4a87d616b8d0"
 
 [[package]]
 name = "serde"
-version = "1.0.219"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f0e2c6ed6606019b4e29e69dbaba95b11854410e5347d525002456dbbb786b6"
+checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
+dependencies = [
+ "serde_core",
+ "serde_derive",
+]
+
+[[package]]
+name = "serde_core"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.219"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b0276cf7f2c73365f7157c8123c21cd9a50fbbd844757af28ca1f5925fc2a00"
+checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3694,7 +3721,7 @@ dependencies = [
  "futures-intrusive",
  "futures-io",
  "futures-util",
- "hashbrown",
+ "hashbrown 0.15.4",
  "hashlink",
  "indexmap",
  "log",
@@ -3761,7 +3788,7 @@ checksum = "aa003f0038df784eb8fecbbac13affe3da23b45194bd57dba231c8f48199c526"
 dependencies = [
  "atoi",
  "base64",
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
  "byteorder",
  "bytes",
  "chrono",
@@ -3805,7 +3832,7 @@ checksum = "db58fcd5a53cf07c184b154801ff91347e4c30d17a3562a635ff028ad5deda46"
 dependencies = [
  "atoi",
  "base64",
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
  "byteorder",
  "chrono",
  "crc",
@@ -4056,7 +4083,7 @@ checksum = "4676b37242ccbd1aabf56edb093a4827dc49086c0ffd764a5705899e0f35f8f7"
 dependencies = [
  "anyhow",
  "base64",
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
  "fancy-regex",
  "filedescriptor",
  "finl_unicode",
@@ -5115,7 +5142,7 @@ version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f42320e61fe2cfd34354ecb597f86f413484a798ba44a8ca1165c58d42da6c1"
 dependencies = [
- "bitflags 2.9.1",
+ "bitflags 2.10.0",
 ]
 
 [[package]]

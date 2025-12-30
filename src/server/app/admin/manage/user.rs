@@ -293,7 +293,7 @@ impl UserEditor {
     }
 
     fn window_height(&self) -> u16 {
-        25
+        23
     }
 
     fn render_ui(&mut self, area: Rect, buf: &mut Buffer) {
