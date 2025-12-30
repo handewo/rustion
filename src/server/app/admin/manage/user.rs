@@ -83,6 +83,19 @@ impl UserEditor {
         }
     }
 
+    pub fn handle_paste_event(&mut self, paste: &str) -> bool {
+        if self.editing_mode {
+            match self.focused_field {
+                InputField::Username => self.username_text.handle_paste(paste),
+                InputField::Email => self.email_text.handle_paste(paste),
+                InputField::AuthorizedKeys => self.authorized_keys_text.handle_paste(paste),
+                _ => false,
+            }
+        } else {
+            false
+        }
+    }
+
     pub fn handle_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) -> bool {
         // Handle cancel confirmation dialog
         if self.show_cancel_confirmation {

@@ -78,6 +78,12 @@ impl SingleLineText {
         self.textarea.set_cursor_style(Style::default());
     }
 
+    /// Just save first line if there are multi-lines pasted.
+    pub fn handle_paste(&mut self, paste: &str) -> bool {
+        let input = paste.trim().split('\n').next().unwrap();
+        self.textarea.insert_str(input)
+    }
+
     pub fn handle_input(&mut self, key: KeyCode) -> bool {
         match key {
             KeyCode::Esc
@@ -146,6 +152,14 @@ impl MultiLineText {
         self.textarea.set_style(style);
         self.textarea.set_cursor_style(cursor_style);
         self.textarea.set_cursor_line_style(cursur_line_style);
+    }
+
+    pub fn handle_paste(&mut self, paste: &str) -> bool {
+        if self.editing_mode {
+            self.textarea.insert_str(paste.trim())
+        } else {
+            false
+        }
     }
 
     pub fn handle_input(&mut self, key: KeyCode) -> bool {

@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 
 use super::common::*;
 use super::{database, manage, Status};
-use crossterm::event::{NoTtyEvent, SenderWriter};
+use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste, NoTtyEvent, SenderWriter};
 
 pub(super) fn shell<B>(
     tty: NoTtyEvent,
@@ -73,6 +73,8 @@ pub(super) fn shell<B>(
                         );
                     }
                     CMD_MANAGE => {
+                        let mut w = SenderWriter::new(send_to_session.clone());
+                        let _ = crossterm::execute!(w, EnableBracketedPaste);
                         let _ = manage::manage(
                             tty.clone(),
                             SenderWriter::new(send_to_session.clone()),
@@ -81,6 +83,7 @@ pub(super) fn shell<B>(
                             backend.clone(),
                             t_handle.clone(),
                         );
+                        let _ = crossterm::execute!(w, DisableBracketedPaste);
                     }
                     CMD_FLUSH_PRIVILEGES => {
                         if let Err(e) = t_handle.block_on(backend.load_role_manager()) {

@@ -484,8 +484,9 @@ where
     ) -> Result<(), Error> {
         loop {
             terminal.draw(|frame| self.render(frame))?;
+            let event = event::read(&tty)?;
 
-            if let Some(key) = event::read(&tty)?.as_key_press_event() {
+            if let Some(key) = event.as_key_press_event() {
                 if self.message.is_some() {
                     match key.code {
                         KeyCode::Enter => {
@@ -546,6 +547,20 @@ where
                         }
                         _ => {}
                     },
+                }
+            }
+            if let Some(paste) = event.as_paste_event() {
+                match self.editor {
+                    Editor::User(ref mut e) => {
+                        let _ = e.as_mut().handle_paste_event(paste);
+                    }
+                    Editor::Target(ref mut e) => {
+                        let _ = e.as_mut().handle_paste_event(paste);
+                    }
+                    Editor::Secret(ref mut e) => {
+                        let _ = e.as_mut().handle_paste_event(paste);
+                    }
+                    Editor::None => {}
                 }
             }
         }

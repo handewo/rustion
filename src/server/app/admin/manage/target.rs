@@ -86,6 +86,21 @@ impl TargetEditor {
         }
     }
 
+    pub fn handle_paste_event(&mut self, paste: &str) -> bool {
+        if self.editing_mode {
+            match self.focused_field {
+                InputField::Name => self.name_text.handle_paste(paste),
+                InputField::Hostname => self.hostname_text.handle_paste(paste),
+                InputField::Port => self.port_text.handle_paste(paste),
+                InputField::ServerPublicKey => self.server_public_key_text.handle_paste(paste),
+                InputField::Description => self.description_text.handle_paste(paste),
+                InputField::IsActive => false,
+            }
+        } else {
+            false
+        }
+    }
+
     pub fn handle_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) -> bool {
         // Handle cancel confirmation dialog
         if self.show_cancel_confirmation {
