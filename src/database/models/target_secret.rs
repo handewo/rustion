@@ -103,8 +103,8 @@ impl Secret {
     }
 
     pub fn print_public_key(&self) -> String {
-        if self.public_key.is_some() {
-            "********".to_string()
+        if let Some(p) = self.public_key.as_ref() {
+            crate::common::shorten_ssh_pubkey(p)
         } else {
             String::new()
         }

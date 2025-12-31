@@ -37,3 +37,25 @@ pub fn gen_password(len: usize) -> String {
     pwd.shuffle(&mut rng);
     pwd.into_iter().collect()
 }
+
+const HEAD_LEN: usize = 8;
+const TAIL_LEN: usize = 16;
+
+pub fn shorten_ssh_pubkey(input: &str) -> String {
+    let mut it = input.split_whitespace();
+    let key_type = it.next().unwrap_or_default();
+    let key_data = it.next().unwrap_or_default();
+    let comment = it.next();
+
+    if key_data.len() <= HEAD_LEN + TAIL_LEN {
+        return input.to_string();
+    }
+
+    let head = &key_data[..HEAD_LEN];
+    let tail = &key_data[key_data.len() - TAIL_LEN..];
+
+    match comment {
+        Some(c) => format!("{key_type} {head}...{tail} {c}"),
+        None => format!("{key_type} {head}...{tail}"),
+    }
+}

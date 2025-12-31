@@ -1115,8 +1115,7 @@ impl TableData {
 
                 let server_public_key_len = data
                     .iter()
-                    .map(|v| v.server_public_key.as_str())
-                    .map(UnicodeWidthStr::width)
+                    .map(|v| v.print_server_key().len())
                     .max()
                     .unwrap_or(0)
                     .max(17);
@@ -1162,17 +1161,20 @@ impl TableData {
                     .max()
                     .unwrap_or(0)
                     .max(4);
+                let public_key_len = data
+                    .iter()
+                    .map(|v| v.print_public_key().len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(10);
 
                 vec![
-                    Constraint::Length(LENGTH_UUID), // id
                     Constraint::Length(name_len as u16),
                     Constraint::Length(user_len as u16),
                     Constraint::Length(8),  // password (shown as <hidden>)
                     Constraint::Length(11), // private_key (shown as <hidden>)
-                    Constraint::Length(10), // public_key (shown as <hidden>)
+                    Constraint::Length(public_key_len as u16), // public_key (shown as <hidden>)
                     Constraint::Length(9),  // is_active
-                    Constraint::Length(LENGTH_UUID), // created_by
-                    Constraint::Length(LENGTH_TIMESTAMP),
                 ]
             }
             Self::InternalObjects(ref data) => {
@@ -1308,15 +1310,12 @@ impl TableData {
                 "updated_at",
             ],
             Self::Secrets(_) => vec![
-                "id",
                 "name",
                 "user",
                 "password",
                 "private_key",
                 "public_key",
                 "is_active",
-                "updated_by",
-                "updated_at",
             ],
             Self::InternalObjects(_) => vec!["name", "is_active", "updated_by", "updated_at"],
             Self::CasbinRule(_) => vec![
@@ -1365,7 +1364,7 @@ impl FieldsToArray for Target {
             self.name.clone(),
             self.hostname.clone(),
             self.port.to_string(),
-            self.server_public_key.clone(),
+            self.print_server_key(),
             self.description.clone().unwrap_or_default(),
             self.is_active.to_string(),
         ]
@@ -1388,15 +1387,12 @@ impl FieldsToArray for TargetSecret {
 impl FieldsToArray for Secret {
     fn ref_array(&self) -> Vec<String> {
         vec![
-            self.id.clone(),
             self.name.clone(),
             self.user.clone(),
             self.print_password(),
             self.print_private_key(),
             self.print_public_key(),
             self.is_active.to_string(),
-            self.updated_by.clone(),
-            self.updated_at.to_string(),
         ]
     }
 }

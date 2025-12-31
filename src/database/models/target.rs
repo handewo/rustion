@@ -55,6 +55,10 @@ impl Target {
         ru_client::connect(config, (self.hostname.clone(), self.port), self).await
     }
 
+    pub fn print_server_key(&self) -> String {
+        crate::common::shorten_ssh_pubkey(&self.server_public_key)
+    }
+
     pub fn validate(&self) -> Result<(), ValidateError> {
         let name = self.name.trim();
         if name.is_empty() {
