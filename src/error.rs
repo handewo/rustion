@@ -27,6 +27,9 @@ pub enum Error {
     Config(String),
 
     #[error(transparent)]
+    RusshForkedKey(#[from] russh::keys::ssh_key::Error),
+
+    #[error(transparent)]
     SecretValidator(#[from] crate::database::models::target_secret::ValidateError),
 
     #[error(transparent)]

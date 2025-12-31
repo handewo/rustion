@@ -19,6 +19,7 @@ use crate::database::service::DatabaseService;
 use crate::error::Error;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::{engine::general_purpose, Engine as _};
+use rand_core::RngCore;
 use std::path::Path;
 use std::sync::Arc;
 #[cfg(feature = "full-role")]
@@ -213,6 +214,7 @@ impl BastionServer {
             Err(e) => Err(Error::Server(format!("Falied to decrypt secret: {}", e))),
         }
     }
+
     pub async fn generate_random_password(&self, mut user: models::User) -> Result<String, Error> {
         let password = crate::common::gen_password(12);
         let h = self
@@ -615,6 +617,23 @@ impl super::HandlerBackend for BastionServer {
     #[cfg(feature = "light-role")]
     async fn load_role_manager(&self) -> Result<(), Error> {
         Ok(())
+    }
+
+    fn encrypt_plain_text(&self, text: &str) -> Result<String, Error> {
+        let mut nonce_bytes = [0u8; 12]; // 96-bit nonce
+        OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        let ciphertext = self
+            .secret_key
+            .encrypt(nonce, text.as_bytes())
+            .map_err(|e| Error::Server(format!("Failed to encrypt plain text: {}", e)))?;
+
+        let mut blob = Vec::with_capacity(nonce_bytes.len() + ciphertext.len());
+        blob.extend_from_slice(&nonce_bytes);
+        blob.extend_from_slice(&ciphertext); // already includes 16-byte tag
+
+        Ok(general_purpose::STANDARD.encode(blob))
     }
 }
 

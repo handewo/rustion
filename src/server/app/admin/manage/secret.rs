@@ -47,10 +47,12 @@ pub struct SecretEditor {
     name_text: SingleLineText,
     user_text: SingleLineText,
     password_text: SingleLineText,
-    private_key_text: SingleLineText,
+    private_key_text: MultiLineText,
     scroll_offset: usize,
     colors: EditorColors,
     pub show_cancel_confirmation: bool,
+    pub private_key_updated: bool,
+    pub password_updated: bool,
     editing_mode: bool,
     save_error: Option<Error>,
     pub help_text: [&'static str; 2],
@@ -61,10 +63,9 @@ impl SecretEditor {
         let name_text = SingleLineText::new(Some(secret.name.clone()));
         let user_text = SingleLineText::new(Some(secret.user.clone()));
 
-        // For password, private_key, and public_key, we'll show placeholder text
-        // to indicate if there are existing values (without revealing them)
-        let password_text = SingleLineText::new(Some(secret.print_password()));
-        let private_key_text = SingleLineText::new(Some(secret.print_private_key()));
+        let mut password_text = SingleLineText::new(Some(secret.print_password()));
+        password_text.textarea.set_mask_char('*');
+        let private_key_text = MultiLineText::new(Some(&[secret.print_private_key()]));
 
         Self {
             secret,
@@ -76,9 +77,25 @@ impl SecretEditor {
             scroll_offset: 0,
             colors: EditorColors::new(&tailwind::BLUE),
             show_cancel_confirmation: false,
+            private_key_updated: false,
+            password_updated: false,
             editing_mode: false,
             save_error: None,
             help_text: COMMON_HELP,
+        }
+    }
+
+    pub fn handle_paste_event(&mut self, paste: &str) -> bool {
+        if self.editing_mode {
+            match self.focused_field {
+                InputField::Name => self.name_text.handle_paste(paste),
+                InputField::User => self.user_text.handle_paste(paste),
+                InputField::Password => self.password_text.handle_paste(paste),
+                InputField::PrivateKey => self.private_key_text.handle_paste(paste),
+                InputField::IsActive => false,
+            }
+        } else {
+            false
         }
     }
 
@@ -144,7 +161,13 @@ impl SecretEditor {
                     if self.private_key_text.handle_input(key) {
                         self.editing_mode = false;
                         self.private_key_text.clear_style();
+                        self.help_text = MULTILINES_HELP;
+                    } else if self.private_key_text.editing_mode {
+                        self.help_text = MULTILINES_INPUT_HELP;
+                    } else {
+                        self.help_text = MULTILINES_EDIT_HELP;
                     }
+                    return false;
                 }
                 _ => {
                     unreachable!()
@@ -202,11 +225,9 @@ impl SecretEditor {
                 }
                 InputField::PrivateKey => {
                     self.editing_mode = true;
-                    text_editing_style(
-                        self.colors.input_cursor,
-                        &mut self.private_key_text.textarea,
-                    );
-                    text_input_position(key, &mut self.private_key_text.textarea);
+                    self.private_key_text.cursor_color = self.colors.input_cursor;
+                    self.private_key_text.highlight();
+                    self.help_text = MULTILINES_EDIT_HELP;
                 }
             },
             KeyCode::Char('d') if !self.editing_mode => match self.focused_field {
@@ -220,7 +241,7 @@ impl SecretEditor {
                     self.password_text.clear_line();
                 }
                 InputField::PrivateKey => {
-                    self.private_key_text.clear_line();
+                    self.private_key_text = MultiLineText::new(None);
                 }
                 _ => {}
             },
@@ -239,7 +260,7 @@ impl SecretEditor {
         self.focused_field = self.focused_field.next();
         match self.focused_field {
             InputField::PrivateKey => {
-                self.help_text = COMMON_HELP;
+                self.help_text = MULTILINES_HELP;
             }
             InputField::Name | InputField::Password | InputField::User => {
                 self.help_text = COMMON_HELP;
@@ -254,7 +275,7 @@ impl SecretEditor {
         self.focused_field = self.focused_field.previous();
         match self.focused_field {
             InputField::PrivateKey => {
-                self.help_text = COMMON_HELP;
+                self.help_text = MULTILINES_HELP;
             }
             InputField::Name | InputField::User | InputField::Password => {
                 self.help_text = COMMON_HELP;
@@ -272,33 +293,40 @@ impl SecretEditor {
         let user = self.user_text.get_input();
         self.secret.user = user.trim().into();
 
-        let password = self.password_text.get_input();
+        let password = self.password_text.get_input().trim().to_string();
+
         // If the password field was modified (not the placeholder), update it
-        if password.trim() != self.secret.print_password() {
-            if password.trim().is_empty() {
-                self.secret = self.secret.clone().with_password(None);
+        // TODO: A better method is needed here.
+        if password != self.secret.print_password() {
+            if password.is_empty() {
+                let _ = self.secret.take_password();
             } else {
-                self.secret = self
-                    .secret
-                    .clone()
-                    .with_password(Some(password.trim().to_string()));
+                self.secret.set_password(Some(password));
             }
+            self.password_updated = true;
         }
 
-        let private_key = self.private_key_text.get_input();
+        let private_key = self
+            .private_key_text
+            .get_input()
+            .join("\n")
+            .trim()
+            .to_string();
         // If the private key field was modified (not the placeholder), update it
-        if private_key.trim() != self.secret.print_private_key() {
-            if private_key.trim().is_empty() {
-                self.secret = self.secret.clone().with_private_key(None);
+        // TODO: A better method is needed here.
+        if private_key != self.secret.print_private_key() {
+            if private_key.is_empty() {
+                let _ = self.secret.take_private_key();
+                let _ = self.secret.take_public_key();
             } else {
-                self.secret = self
-                    .secret
-                    .clone()
-                    .with_private_key(Some(private_key.trim().to_string()));
+                self.secret.set_private_key(Some(private_key));
             }
+            self.private_key_updated = true;
         }
 
-        self.secret.validate().map_err(Error::SecretValidator)
+        self.secret
+            .validate(self.private_key_updated)
+            .map_err(Error::SecretValidator)
     }
 
     fn max_scroll_offset(&self) -> usize {

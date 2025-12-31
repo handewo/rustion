@@ -14,8 +14,10 @@ use ratatui::widgets::{
     ScrollbarOrientation, ScrollbarState, Table, TableState, Tabs, Widget,
 };
 use ratatui::{Frame, Terminal};
+use russh::keys::ssh_key::PrivateKey;
 use std::fmt;
 use std::io::Write;
+use std::str::FromStr;
 use std::sync::Arc;
 use style::palette::tailwind;
 use tokio::runtime::Handle;
@@ -662,7 +664,22 @@ where
             Editor::Secret(ref mut e) => {
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
                     if !e.show_cancel_confirmation {
-                        let secret = e.secret.to_owned();
+                        let mut secret = e.secret.to_owned();
+
+                        if e.password_updated {
+                            if let Some(p) = secret.take_password() {
+                                secret.set_password(Some(self.backend.encrypt_plain_text(&p)?));
+                            }
+                        };
+
+                        if e.private_key_updated {
+                            if let Some(p) = secret.take_private_key() {
+                                secret.set_private_key(Some(self.backend.encrypt_plain_text(&p)?));
+                                secret.set_public_key(Some(
+                                    PrivateKey::from_str(&p)?.public_key().to_openssh()?,
+                                ));
+                            }
+                        }
 
                         let (action, result) = match self.popup {
                             Popup::Add => (
