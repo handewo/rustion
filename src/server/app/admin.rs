@@ -17,6 +17,7 @@ mod common;
 mod database;
 mod manage;
 mod shell;
+mod table;
 mod widgets;
 
 const LOG_TYPE: &str = "admin";

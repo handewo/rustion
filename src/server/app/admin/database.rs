@@ -1,3 +1,4 @@
+use super::table::{AdminTable, DisplayMode, FieldsToArray};
 use crate::database::models::*;
 use crate::error::Error;
 use crate::server::common::{
@@ -6,13 +7,10 @@ use crate::server::common::{
 };
 use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
-use ratatui::layout::{Constraint, Layout, Margin, Rect};
-use ratatui::style::{self, Color, Modifier, Style, Stylize};
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{self, Color, Style, Stylize};
 use ratatui::text::Text;
-use ratatui::widgets::{
-    Block, BorderType, Cell, HighlightSpacing, Paragraph, Row, Scrollbar, ScrollbarOrientation,
-    ScrollbarState, Table, TableState, Tabs,
-};
+use ratatui::widgets::{Block, BorderType, Paragraph, Tabs};
 use ratatui::{Frame, Terminal};
 use std::io::Write;
 use std::sync::Arc;
@@ -45,49 +43,15 @@ where
     Ok(())
 }
 
-struct TableColors {
-    buffer_bg: Color,
-    header_bg: Color,
-    header_fg: Color,
-    row_fg: Color,
-    selected_row_style_fg: Color,
-    selected_column_style_fg: Color,
-    selected_cell_style_fg: Color,
-    normal_row_color: Color,
-    alt_row_color: Color,
-    footer_border_color: Color,
-}
-
-impl TableColors {
-    const fn new(color: &tailwind::Palette) -> Self {
-        Self {
-            buffer_bg: tailwind::SLATE.c950,
-            header_bg: color.c900,
-            header_fg: tailwind::SLATE.c200,
-            row_fg: tailwind::SLATE.c200,
-            selected_row_style_fg: color.c400,
-            selected_column_style_fg: color.c400,
-            selected_cell_style_fg: color.c600,
-            normal_row_color: tailwind::SLATE.c950,
-            alt_row_color: tailwind::SLATE.c900,
-            footer_border_color: color.c400,
-        }
-    }
-}
-
 struct App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    state: TableState,
+    table: AdminTable,
     items: TableData,
     longest_item_lens: Vec<Constraint>,
-    scroll_state: ScrollbarState,
-    row_height: usize,
     selected_tab: usize,
     last_selected_tab: usize,
-    colors: TableColors,
-    table_size: (u16, u16),
     backend: Arc<B>,
     t_handle: Handle,
 }
@@ -103,101 +67,14 @@ where
                 .unwrap_or_default(),
         );
         Self {
-            state: TableState::default().with_selected(0),
+            table: AdminTable::new(&data, &tailwind::BLUE),
             longest_item_lens: data.constraint_len_calculator(),
-            scroll_state: ScrollbarState::new((data.len().max(1) - 1) * 2),
-            colors: TableColors::new(&tailwind::BLUE),
-            row_height: 2,
             selected_tab: 0,
             last_selected_tab: 1,
-            table_size: (0, 0),
             backend,
             t_handle,
             items: data,
         }
-    }
-
-    pub fn previous_page(&mut self) {
-        let rows = (self.table_size.1 as usize - 1) / self.row_height;
-        *self.state.offset_mut() = if self.state.offset() < rows {
-            0
-        } else {
-            self.state.offset() - rows
-        };
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i < rows {
-                    i
-                } else {
-                    i - rows
-                }
-            }
-            None => 0,
-        };
-        self.state.select(Some(i));
-        self.scroll_state = self.scroll_state.position(i * self.row_height);
-    }
-
-    pub fn next_page(&mut self) {
-        let rows = (self.table_size.1 as usize - 1) / self.row_height;
-        let mut is_offset = false;
-        if self.state.offset() + rows <= self.items.len() {
-            *self.state.offset_mut() = self.state.offset() + rows;
-        } else {
-            is_offset = true;
-        }
-        let i = match self.state.selected() {
-            Some(i) => {
-                if is_offset {
-                    i
-                } else if i >= self.items.len() - rows {
-                    self.state.offset()
-                } else {
-                    i + rows
-                }
-            }
-            None => 0,
-        };
-        self.state.select(Some(i));
-        self.scroll_state = self.scroll_state.position(i * self.row_height);
-    }
-
-    pub fn next_row(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i >= self.items.len() - 1 {
-                    0
-                } else {
-                    i + 1
-                }
-            }
-            None => 0,
-        };
-        self.state.select(Some(i));
-        self.scroll_state = self.scroll_state.position(i * self.row_height);
-    }
-
-    pub fn previous_row(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    self.items.len() - 1
-                } else {
-                    i - 1
-                }
-            }
-            None => 0,
-        };
-        self.state.select(Some(i));
-        self.scroll_state = self.scroll_state.position(i * self.row_height);
-    }
-
-    pub fn next_column(&mut self) {
-        self.state.select_next_column();
-    }
-
-    pub fn previous_column(&mut self) {
-        self.state.select_previous_column();
     }
 
     pub fn next_tab(&mut self) {
@@ -212,14 +89,6 @@ where
         }
     }
 
-    pub fn zoom_in(&mut self) {
-        self.row_height = self.row_height.saturating_add(1).min(20);
-    }
-
-    pub fn zoom_out(&mut self) {
-        self.row_height = self.row_height.saturating_sub(1).max(1);
-    }
-
     fn run<W: Write>(
         mut self,
         tty: NoTtyEvent,
@@ -231,19 +100,19 @@ where
             if let Some(key) = event::read(&tty)?.as_key_press_event() {
                 let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
                 match key.code {
-                    KeyCode::PageUp => self.previous_page(),
-                    KeyCode::PageDown => self.next_page(),
-                    KeyCode::Char('f') if ctrl_pressed => self.next_page(),
-                    KeyCode::Char('b') if ctrl_pressed => self.previous_page(),
-                    KeyCode::Char('+') => self.zoom_in(),
-                    KeyCode::Char('-') => self.zoom_out(),
+                    KeyCode::PageUp => self.table.previous_page(),
+                    KeyCode::PageDown => self.table.next_page(&self.items),
+                    KeyCode::Char('f') if ctrl_pressed => self.table.next_page(&self.items),
+                    KeyCode::Char('b') if ctrl_pressed => self.table.previous_page(),
+                    KeyCode::Char('+') => self.table.zoom_in(),
+                    KeyCode::Char('-') => self.table.zoom_out(),
                     KeyCode::Tab => self.next_tab(),
                     KeyCode::BackTab => self.previous_tab(),
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                    KeyCode::Char('j') | KeyCode::Down => self.next_row(),
-                    KeyCode::Char('k') | KeyCode::Up => self.previous_row(),
-                    KeyCode::Char('l') | KeyCode::Right => self.next_column(),
-                    KeyCode::Char('h') | KeyCode::Left => self.previous_column(),
+                    KeyCode::Char('j') | KeyCode::Down => self.table.next_row(&self.items),
+                    KeyCode::Char('k') | KeyCode::Up => self.table.previous_row(&self.items),
+                    KeyCode::Char('l') | KeyCode::Right => self.table.next_column(),
+                    KeyCode::Char('h') | KeyCode::Left => self.table.previous_column(),
                     _ => {}
                 }
             }
@@ -258,11 +127,16 @@ where
         ]);
         let [header_area, table_area, footer_area] = layout.areas(frame.area());
 
-        self.table_size = (table_area.width, table_area.height);
+        self.table.size = (table_area.width, table_area.height);
 
         self.render_tabs(frame, header_area);
-        self.render_table(frame, table_area);
-        self.render_scrollbar(frame, table_area);
+        self.table.render(
+            frame,
+            table_area,
+            &self.items,
+            &self.longest_item_lens,
+            DisplayMode::Full,
+        );
         self.render_footer(frame, footer_area);
     }
 
@@ -322,7 +196,7 @@ where
             }
         };
         self.longest_item_lens = self.items.constraint_len_calculator();
-        self.state.select(Some(0));
+        self.table.state.select(Some(0));
     }
 
     fn render_tabs(&mut self, frame: &mut Frame, area: Rect) {
@@ -342,8 +216,8 @@ where
                 .magenta()
                 .on_black()
                 .bold()
-                .fg(self.colors.header_fg)
-                .bg(self.colors.header_bg),
+                .fg(self.table.colors.header_fg)
+                .bg(self.table.colors.header_bg),
         )
         .select(self.selected_tab)
         .divider(" ")
@@ -351,81 +225,18 @@ where
         frame.render_widget(tabs, area);
     }
 
-    fn render_table(&mut self, frame: &mut Frame, area: Rect) {
-        let header_style = Style::default()
-            .fg(self.colors.header_fg)
-            .bg(self.colors.header_bg);
-        let selected_row_style = Style::default()
-            .add_modifier(Modifier::REVERSED)
-            .fg(self.colors.selected_row_style_fg);
-        let selected_col_style = Style::default().fg(self.colors.selected_column_style_fg);
-        let selected_cell_style = Style::default()
-            .add_modifier(Modifier::REVERSED)
-            .fg(self.colors.selected_cell_style_fg);
-
-        let header = self
-            .items
-            .header()
-            .into_iter()
-            .map(Cell::from)
-            .collect::<Row>()
-            .style(header_style)
-            .height(1);
-        let items = self.items.as_vec();
-        let rows = items.iter().enumerate().map(|(i, data)| {
-            let color = match i % 2 {
-                0 => self.colors.normal_row_color,
-                _ => self.colors.alt_row_color,
-            };
-            let item = data.ref_array();
-            item.into_iter()
-                .map(|content| Cell::from(Text::from(content.to_string())))
-                .collect::<Row>()
-                .style(Style::new().fg(self.colors.row_fg).bg(color))
-                .height(self.row_height as u16)
-        });
-        let bar = vec!["   ".into(); self.row_height];
-        let t = Table::new(rows, self.longest_item_lens.clone())
-            .header(header)
-            .row_highlight_style(selected_row_style)
-            .column_highlight_style(selected_col_style)
-            .cell_highlight_style(selected_cell_style)
-            .highlight_symbol(Text::from(bar))
-            .bg(self.colors.buffer_bg)
-            .highlight_spacing(HighlightSpacing::Always);
-        frame.render_stateful_widget(t, area, &mut self.state);
-    }
-
-    fn render_scrollbar(&mut self, frame: &mut Frame, area: Rect) {
-        self.scroll_state = self
-            .scroll_state
-            .content_length((self.items.len().max(1) - 1) * self.row_height)
-            .position(self.state.selected().unwrap_or(0) * self.row_height);
-        frame.render_stateful_widget(
-            Scrollbar::default()
-                .orientation(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(None)
-                .end_symbol(None),
-            area.inner(Margin {
-                vertical: 1,
-                horizontal: 1,
-            }),
-            &mut self.scroll_state,
-        );
-    }
-
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let info_footer = Paragraph::new(Text::from_iter(INFO_TEXT))
             .style(
                 Style::new()
-                    .fg(self.colors.row_fg)
-                    .bg(self.colors.buffer_bg),
+                    .fg(self.table.colors.row_fg)
+                    .bg(self.table.colors.buffer_bg),
             )
             .centered()
             .block(
                 Block::bordered()
                     .border_type(BorderType::Double)
-                    .border_style(Style::new().fg(self.colors.footer_border_color)),
+                    .border_style(Style::new().fg(self.table.colors.footer_border_color)),
             );
         frame.render_widget(info_footer, area);
     }
@@ -442,51 +253,6 @@ enum TableData {
 }
 
 impl TableData {
-    fn len(&self) -> usize {
-        match self {
-            Self::Users(ref data) => data.len(),
-            Self::Targets(ref data) => data.len(),
-            Self::Secrets(ref data) => data.len(),
-            Self::TargetSecrets(ref data) => data.len(),
-            Self::InternalObjects(ref data) => data.len(),
-            Self::CasbinRule(ref data) => data.len(),
-            Self::Logs(ref data) => data.len(),
-        }
-    }
-
-    fn as_vec(&self) -> Vec<&dyn FieldsToArray> {
-        match self {
-            Self::Users(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-            Self::Targets(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-            Self::Secrets(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-            Self::TargetSecrets(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-            Self::InternalObjects(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-            Self::CasbinRule(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-            Self::Logs(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-        }
-    }
-
     fn constraint_len_calculator(&self) -> Vec<Constraint> {
         match self {
             Self::Users(ref data) => {
@@ -703,6 +469,53 @@ impl TableData {
             }
         }
     }
+}
+
+impl super::table::TableData for TableData {
+    fn len(&self) -> usize {
+        match self {
+            Self::Users(ref data) => data.len(),
+            Self::Targets(ref data) => data.len(),
+            Self::Secrets(ref data) => data.len(),
+            Self::TargetSecrets(ref data) => data.len(),
+            Self::InternalObjects(ref data) => data.len(),
+            Self::CasbinRule(ref data) => data.len(),
+            Self::Logs(ref data) => data.len(),
+        }
+    }
+
+    fn as_vec(&self) -> Vec<&dyn FieldsToArray> {
+        match self {
+            Self::Users(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+            Self::Targets(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+            Self::Secrets(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+            Self::TargetSecrets(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+            Self::InternalObjects(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+            Self::CasbinRule(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+            Self::Logs(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+        }
+    }
 
     fn header(&self) -> Vec<&str> {
         match self {
@@ -782,110 +595,5 @@ impl TableData {
                 ]
             }
         }
-    }
-}
-
-trait FieldsToArray {
-    fn ref_array(&self) -> Vec<String>;
-}
-
-impl FieldsToArray for User {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.id.clone(),
-            self.username.clone(),
-            self.email.clone().unwrap_or_default(),
-            self.print_password(),
-            self.print_authorized_keys(),
-            self.force_init_pass.to_string(),
-            self.is_active.to_string(),
-            self.updated_by.clone(),
-            self.updated_at.to_string(),
-        ]
-    }
-}
-
-impl FieldsToArray for Target {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.id.clone(),
-            self.name.clone(),
-            self.hostname.clone(),
-            self.port.to_string(),
-            self.print_server_key(),
-            self.description.clone().unwrap_or_default(),
-            self.is_active.to_string(),
-            self.updated_by.clone(),
-            self.updated_at.to_string(),
-        ]
-    }
-}
-
-impl FieldsToArray for TargetSecret {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.id.clone(),
-            self.target_id.clone(),
-            self.secret_id.clone(),
-            self.is_active.to_string(),
-            self.updated_by.clone(),
-            self.updated_at.to_string(),
-        ]
-    }
-}
-
-impl FieldsToArray for Secret {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.id.clone(),
-            self.name.clone(),
-            self.user.clone(),
-            self.print_password(),
-            self.print_private_key(),
-            self.print_public_key(),
-            self.is_active.to_string(),
-            self.updated_by.clone(),
-            self.updated_at.to_string(),
-        ]
-    }
-}
-
-impl FieldsToArray for InternalObject {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.name.clone(),
-            self.is_active.to_string(),
-            self.updated_by.clone(),
-            self.updated_at.to_string(),
-        ]
-    }
-}
-
-impl FieldsToArray for CasbinRule {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.id.clone(),
-            self.ptype.clone(),
-            self.v0.clone(),
-            self.v1.clone(),
-            self.v2.clone(),
-            self.v3.clone(),
-            self.v4.clone(),
-            self.v5.clone(),
-            self.updated_by.clone(),
-            self.updated_at.to_string(),
-        ]
-    }
-}
-
-impl FieldsToArray for Log {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.connection_id.clone(),
-            self.log_type.clone(),
-            self.user_id.clone(),
-            self.detail.clone(),
-            self.created_at.to_string(),
-        ]
     }
 }

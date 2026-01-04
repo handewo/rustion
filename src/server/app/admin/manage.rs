@@ -1,4 +1,5 @@
 use super::common::*;
+use super::table::{AdminTable, Colors, DisplayMode, FieldsToArray};
 use super::widgets::{centered_area, render_message_dialog, Message};
 use crate::database::models::*;
 use crate::error::Error;
@@ -6,13 +7,10 @@ use crate::server::app::admin::widgets::render_confirm_dialog;
 use ::log::{error, warn};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
-use ratatui::layout::{Constraint, Layout, Margin, Rect};
-use ratatui::style::{self, Color, Modifier, Style, Stylize};
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{self, Color, Style, Stylize};
 use ratatui::text::{Line, Text};
-use ratatui::widgets::{
-    Block, BorderType, Cell, Clear, HighlightSpacing, Paragraph, Row, Scrollbar,
-    ScrollbarOrientation, ScrollbarState, Table, TableState, Tabs, Widget,
-};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Tabs, Widget};
 use ratatui::{Frame, Terminal};
 use russh::keys::ssh_key::PrivateKey;
 use std::fmt;
@@ -72,45 +70,6 @@ impl EditorColors {
     }
 }
 
-struct TableColors {
-    buffer_bg: Color,
-    header_bg: Color,
-    header_fg: Color,
-    row_fg: Color,
-    tab_font: Color,
-    selected_row_style_fg: Color,
-    selected_column_style_fg: Color,
-    selected_cell_style_fg: Color,
-    normal_row_color: Color,
-    alt_row_color: Color,
-    footer_border_color: Color,
-}
-
-impl TableColors {
-    const fn new(color: &tailwind::Palette) -> Self {
-        Self {
-            buffer_bg: tailwind::SLATE.c950,
-            header_bg: color.c900,
-            header_fg: tailwind::SLATE.c200,
-            row_fg: tailwind::SLATE.c200,
-            tab_font: tailwind::SLATE.c400,
-            selected_row_style_fg: color.c400,
-            selected_column_style_fg: color.c400,
-            selected_cell_style_fg: color.c600,
-            normal_row_color: tailwind::SLATE.c950,
-            alt_row_color: tailwind::SLATE.c900,
-            footer_border_color: color.c400,
-        }
-    }
-
-    pub fn grep(&mut self) {
-        self.header_bg = tailwind::GRAY.c900;
-        self.selected_row_style_fg = tailwind::GRAY.c400;
-        self.selected_column_style_fg = tailwind::GRAY.c400;
-        self.selected_cell_style_fg = tailwind::GRAY.c600;
-    }
-}
-
 enum Popup {
     None,
     Add,
@@ -124,6 +83,7 @@ enum SelectedTab {
     Users = 0,
     Targets = 1,
     Secrets = 2,
+    Bind = 3,
 }
 
 impl fmt::Display for SelectedTab {
@@ -132,6 +92,7 @@ impl fmt::Display for SelectedTab {
             SelectedTab::Users => write!(f, "Users"),
             SelectedTab::Targets => write!(f, "Targets"),
             SelectedTab::Secrets => write!(f, "Secrets"),
+            SelectedTab::Bind => write!(f, "BindSecrets"),
         }
     }
 }
@@ -141,15 +102,17 @@ impl SelectedTab {
         match self {
             SelectedTab::Users => SelectedTab::Targets,
             SelectedTab::Targets => SelectedTab::Secrets,
-            SelectedTab::Secrets => SelectedTab::Users,
+            SelectedTab::Secrets => SelectedTab::Bind,
+            SelectedTab::Bind => SelectedTab::Users,
         }
     }
 
     fn previous(&self) -> Self {
         match self {
-            SelectedTab::Users => SelectedTab::Secrets,
+            SelectedTab::Users => SelectedTab::Bind,
             SelectedTab::Targets => SelectedTab::Users,
             SelectedTab::Secrets => SelectedTab::Targets,
+            SelectedTab::Bind => SelectedTab::Secrets,
         }
     }
 }
@@ -158,17 +121,13 @@ struct App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    state: TableState,
+    table: AdminTable,
     items: TableData,
     longest_item_lens: Vec<Constraint>,
-    scroll_state: ScrollbarState,
-    row_height: usize,
     selected_tab: SelectedTab,
     last_selected_tab: SelectedTab,
     popup: Popup,
-    table_colors: TableColors,
     editor_colors: EditorColors,
-    table_size: (u16, u16),
     backend: Arc<B>,
     t_handle: Handle,
     handler_id: String,
@@ -193,16 +152,12 @@ where
         );
 
         Self {
-            state: TableState::default().with_selected(0),
+            table: AdminTable::new(&data, &tailwind::BLUE),
             longest_item_lens: data.constraint_len_calculator(),
-            scroll_state: ScrollbarState::new((data.len().max(1) - 1) * 2),
-            table_colors: TableColors::new(&tailwind::BLUE),
             editor_colors: EditorColors::new(&tailwind::BLUE),
-            row_height: 2,
             selected_tab: SelectedTab::Users,
             last_selected_tab: SelectedTab::Users.next(),
             popup: Popup::None,
-            table_size: (0, 0),
             backend,
             t_handle,
             handler_id,
@@ -213,110 +168,12 @@ where
         }
     }
 
-    fn previous_page(&mut self) {
-        let rows = (self.table_size.1 as usize - 1) / self.row_height;
-        *self.state.offset_mut() = if self.state.offset() < rows {
-            0
-        } else {
-            self.state.offset() - rows
-        };
-
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i < rows {
-                    i
-                } else {
-                    i - rows
-                }
-            }
-            None => 0,
-        };
-
-        self.state.select(Some(i));
-        self.scroll_state = self.scroll_state.position(i * self.row_height);
-    }
-
-    fn next_page(&mut self) {
-        let rows = (self.table_size.1 as usize - 1) / self.row_height;
-        let mut is_offset = false;
-
-        if self.state.offset() + rows <= self.items.len() {
-            *self.state.offset_mut() = self.state.offset() + rows;
-        } else {
-            is_offset = true;
-        }
-
-        let i = match self.state.selected() {
-            Some(i) => {
-                if is_offset {
-                    i
-                } else if i >= self.items.len() - rows {
-                    self.state.offset()
-                } else {
-                    i + rows
-                }
-            }
-            None => 0,
-        };
-
-        self.state.select(Some(i));
-        self.scroll_state = self.scroll_state.position(i * self.row_height);
-    }
-
-    fn next_row(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i >= self.items.len() - 1 {
-                    0
-                } else {
-                    i + 1
-                }
-            }
-            None => 0,
-        };
-
-        self.state.select(Some(i));
-        self.scroll_state = self.scroll_state.position(i * self.row_height);
-    }
-
-    fn previous_row(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    self.items.len() - 1
-                } else {
-                    i - 1
-                }
-            }
-            None => 0,
-        };
-
-        self.state.select(Some(i));
-        self.scroll_state = self.scroll_state.position(i * self.row_height);
-    }
-
-    fn next_column(&mut self) {
-        self.state.select_next_column();
-    }
-
-    fn previous_column(&mut self) {
-        self.state.select_previous_column();
-    }
-
     fn next_tab(&mut self) {
         self.selected_tab = self.selected_tab.next();
     }
 
     fn previous_tab(&mut self) {
         self.selected_tab = self.selected_tab.previous();
-    }
-
-    fn zoom_in(&mut self) {
-        self.row_height = self.row_height.saturating_add(1).min(20);
-    }
-
-    fn zoom_out(&mut self) {
-        self.row_height = self.row_height.saturating_sub(1).max(1);
     }
 
     fn add_form(&mut self) {
@@ -338,6 +195,7 @@ where
                     self.user_id.clone(),
                 ))))
             }
+            SelectedTab::Bind => todo!(),
         }
     }
 
@@ -346,7 +204,7 @@ where
 
         match self.selected_tab {
             SelectedTab::Users => {
-                let idx = self.state.selected().unwrap();
+                let idx = self.table.state.selected().unwrap();
                 let user = match self.items.get_user(idx) {
                     Some(u) => u,
                     None => {
@@ -356,7 +214,7 @@ where
                 self.editor = Editor::User(Box::new(user::UserEditor::new(user)));
             }
             SelectedTab::Targets => {
-                let idx = self.state.selected().unwrap();
+                let idx = self.table.state.selected().unwrap();
                 let target = match self.items.get_target(idx) {
                     Some(u) => u,
                     None => {
@@ -366,7 +224,7 @@ where
                 self.editor = Editor::Target(Box::new(target::TargetEditor::new(target)));
             }
             SelectedTab::Secrets => {
-                let idx = self.state.selected().unwrap();
+                let idx = self.table.state.selected().unwrap();
                 let secret = match self.items.get_secret(idx) {
                     Some(s) => s,
                     None => {
@@ -375,6 +233,7 @@ where
                 };
                 self.editor = Editor::Secret(Box::new(secret::SecretEditor::new(secret)));
             }
+            SelectedTab::Bind => unreachable!(),
         }
 
         true
@@ -448,6 +307,7 @@ where
                     self.refresh_data();
                 }
             }
+            SelectedTab::Bind => unreachable!(),
         }
     }
 
@@ -468,6 +328,7 @@ where
                     return true;
                 }
             }
+            SelectedTab::Bind => unreachable!(),
         }
 
         false
@@ -476,7 +337,7 @@ where
     fn clear_form(&mut self) {
         self.popup = Popup::None;
         self.editor = Editor::None;
-        self.table_colors = TableColors::new(&tailwind::BLUE);
+        self.table.colors = Colors::new(&tailwind::BLUE);
     }
 
     fn run<W: Write>(
@@ -503,22 +364,22 @@ where
 
                 match self.popup {
                     Popup::None => match key.code {
-                        KeyCode::PageUp => self.previous_page(),
-                        KeyCode::PageDown => self.next_page(),
-                        KeyCode::Char('f') if ctrl_pressed => self.next_page(),
-                        KeyCode::Char('b') if ctrl_pressed => self.previous_page(),
-                        KeyCode::Char('+') => self.zoom_in(),
-                        KeyCode::Char('-') => self.zoom_out(),
+                        KeyCode::PageUp => self.table.previous_page(),
+                        KeyCode::PageDown => self.table.next_page(&self.items),
+                        KeyCode::Char('f') if ctrl_pressed => self.table.next_page(&self.items),
+                        KeyCode::Char('b') if ctrl_pressed => self.table.previous_page(),
+                        KeyCode::Char('+') => self.table.zoom_in(),
+                        KeyCode::Char('-') => self.table.zoom_out(),
                         KeyCode::Tab => self.next_tab(),
                         KeyCode::BackTab => self.previous_tab(),
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                        KeyCode::Char('j') | KeyCode::Down => self.next_row(),
-                        KeyCode::Char('k') | KeyCode::Up => self.previous_row(),
-                        KeyCode::Char('l') | KeyCode::Right => self.next_column(),
-                        KeyCode::Char('h') | KeyCode::Left => self.previous_column(),
+                        KeyCode::Char('j') | KeyCode::Down => self.table.next_row(&self.items),
+                        KeyCode::Char('k') | KeyCode::Up => self.table.previous_row(&self.items),
+                        KeyCode::Char('l') | KeyCode::Right => self.table.next_column(),
+                        KeyCode::Char('h') | KeyCode::Left => self.table.previous_column(),
                         KeyCode::Char('d') => {
-                            self.table_colors.grep();
-                            let idx = self.state.selected().unwrap();
+                            self.table.colors.gray();
+                            let idx = self.table.state.selected().unwrap();
 
                             if self.could_delete(idx) {
                                 self.popup = Popup::Delete(idx);
@@ -527,11 +388,11 @@ where
                             }
                         }
                         KeyCode::Char('a') => {
-                            self.table_colors.grep();
+                            self.table.colors.gray();
                             self.add_form()
                         }
                         KeyCode::Char('e') => {
-                            self.table_colors.grep();
+                            self.table.colors.gray();
                             if !self.edit_form() {
                                 self.clear_form();
                             }
@@ -740,11 +601,16 @@ where
         ]);
         let [header_area, table_area, footer_area] = layout.areas(area);
 
-        self.table_size = (table_area.width, table_area.height);
+        self.table.size = (table_area.width, table_area.height);
 
         self.render_tabs(frame, header_area);
-        self.render_table(frame, table_area);
-        self.render_scrollbar(frame, table_area);
+        self.table.render(
+            frame,
+            table_area,
+            &self.items,
+            &self.longest_item_lens,
+            DisplayMode::Manage,
+        );
         self.render_popup(frame, table_area);
         self.render_message(frame, table_area);
         self.render_footer(frame, footer_area);
@@ -773,6 +639,7 @@ where
                         .unwrap_or_default(),
                 );
             }
+            SelectedTab::Bind => unreachable!(),
         };
 
         self.longest_item_lens = self.items.constraint_len_calculator();
@@ -781,23 +648,23 @@ where
     fn render_tabs(&mut self, frame: &mut Frame, area: Rect) {
         if self.selected_tab != self.last_selected_tab {
             self.refresh_data();
-            self.state.select(Some(0));
+            self.table.state.select(Some(0));
             self.last_selected_tab = self.selected_tab
         }
 
         let tabs = Tabs::new(
             MANAGE_LIST
                 .iter()
-                .map(|v| format!("{v:^17}").fg(self.table_colors.tab_font)),
+                .map(|v| format!("{v:^17}").fg(self.table.colors.tab_font)),
         )
-        .style(self.table_colors.header_bg)
+        .style(self.table.colors.header_bg)
         .highlight_style(
             Style::default()
                 .magenta()
                 .on_black()
                 .bold()
-                .fg(self.table_colors.header_fg)
-                .bg(self.table_colors.header_bg),
+                .fg(self.table.colors.header_fg)
+                .bg(self.table.colors.header_bg),
         )
         .select(self.selected_tab as usize)
         .divider(" ")
@@ -809,74 +676,6 @@ where
     fn render_notice(&mut self, frame: &mut Frame, area: Rect, msg: &str) {
         let paragraph = Paragraph::new(msg);
         frame.render_widget(paragraph, area);
-    }
-
-    fn render_table(&mut self, frame: &mut Frame, area: Rect) {
-        let header_style = Style::default()
-            .fg(self.table_colors.header_fg)
-            .bg(self.table_colors.header_bg);
-
-        let selected_row_style = Style::default()
-            .add_modifier(Modifier::REVERSED)
-            .fg(self.table_colors.selected_row_style_fg);
-
-        let selected_col_style = Style::default().fg(self.table_colors.selected_column_style_fg);
-
-        let selected_cell_style = Style::default()
-            .add_modifier(Modifier::REVERSED)
-            .fg(self.table_colors.selected_cell_style_fg);
-
-        let header = self
-            .items
-            .header()
-            .into_iter()
-            .map(Cell::from)
-            .collect::<Row>()
-            .style(header_style)
-            .height(1);
-
-        let items = self.items.as_vec();
-        let rows = items.iter().enumerate().map(|(i, data)| {
-            let color = match i % 2 {
-                0 => self.table_colors.normal_row_color,
-                _ => self.table_colors.alt_row_color,
-            };
-
-            let item = data.ref_array();
-            item.into_iter()
-                .map(|content| Cell::from(Text::from(content.to_string())))
-                .collect::<Row>()
-                .style(Style::new().fg(self.table_colors.row_fg).bg(color))
-                .height(self.row_height as u16)
-        });
-
-        let bar = vec!["   ".into(); self.row_height];
-        let t = Table::new(rows, self.longest_item_lens.clone())
-            .header(header)
-            .row_highlight_style(selected_row_style)
-            .column_highlight_style(selected_col_style)
-            .cell_highlight_style(selected_cell_style)
-            .highlight_symbol(Text::from(bar))
-            .bg(self.table_colors.buffer_bg)
-            .highlight_spacing(HighlightSpacing::Always);
-
-        frame.render_stateful_widget(t, area, &mut self.state);
-    }
-
-    fn render_scrollbar(&mut self, frame: &mut Frame, area: Rect) {
-        self.scroll_state = self
-            .scroll_state
-            .content_length((self.items.len().max(1) - 1) * self.row_height)
-            .position(self.state.selected().unwrap_or(0) * self.row_height);
-
-        frame.render_stateful_widget(
-            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-            area.inner(Margin {
-                vertical: 1,
-                horizontal: 1,
-            }),
-            &mut self.scroll_state,
-        );
     }
 
     fn render_message(&mut self, frame: &mut Frame, area: Rect) {
@@ -946,6 +745,7 @@ where
                             &["Delete selected secret?".to_string()],
                         );
                     }
+                    SelectedTab::Bind => unreachable!(),
                 };
                 return;
             }
@@ -974,14 +774,14 @@ where
         let info_footer = Paragraph::new(Text::from_iter(text))
             .style(
                 Style::new()
-                    .fg(self.table_colors.row_fg)
-                    .bg(self.table_colors.buffer_bg),
+                    .fg(self.table.colors.row_fg)
+                    .bg(self.table.colors.buffer_bg),
             )
             .centered()
             .block(
                 Block::bordered()
                     .border_type(BorderType::Double)
-                    .border_style(Style::new().fg(self.table_colors.footer_border_color)),
+                    .border_style(Style::new().fg(self.table.colors.footer_border_color)),
             );
 
         frame.render_widget(info_footer, area);
@@ -1020,51 +820,6 @@ impl TableData {
             data.get(i).cloned()
         } else {
             None
-        }
-    }
-
-    fn len(&self) -> usize {
-        match self {
-            Self::Users(ref data) => data.len(),
-            Self::Targets(ref data) => data.len(),
-            Self::Secrets(ref data) => data.len(),
-            Self::TargetSecrets(ref data) => data.len(),
-            Self::InternalObjects(ref data) => data.len(),
-            Self::CasbinRule(ref data) => data.len(),
-            Self::Logs(ref data) => data.len(),
-        }
-    }
-
-    fn as_vec(&self) -> Vec<&dyn FieldsToArray> {
-        match self {
-            Self::Users(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-            Self::Targets(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-            Self::Secrets(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-            Self::TargetSecrets(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-            Self::InternalObjects(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-            Self::CasbinRule(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-            Self::Logs(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
         }
     }
 
@@ -1282,6 +1037,53 @@ impl TableData {
             }
         }
     }
+}
+
+impl super::table::TableData for TableData {
+    fn as_vec(&self) -> Vec<&dyn FieldsToArray> {
+        match self {
+            Self::Users(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+            Self::Targets(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+            Self::Secrets(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+            Self::TargetSecrets(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+            Self::InternalObjects(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+            Self::CasbinRule(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+            Self::Logs(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Users(ref data) => data.len(),
+            Self::Targets(ref data) => data.len(),
+            Self::Secrets(ref data) => data.len(),
+            Self::TargetSecrets(ref data) => data.len(),
+            Self::InternalObjects(ref data) => data.len(),
+            Self::CasbinRule(ref data) => data.len(),
+            Self::Logs(ref data) => data.len(),
+        }
+    }
 
     fn header(&self) -> Vec<&str> {
         match self {
@@ -1338,102 +1140,6 @@ impl TableData {
                 "created_at",
             ],
         }
-    }
-}
-
-trait FieldsToArray {
-    fn ref_array(&self) -> Vec<String>;
-}
-
-impl FieldsToArray for User {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.username.clone(),
-            self.email.clone().unwrap_or_default(),
-            self.print_password(),
-            self.print_authorized_keys(),
-            self.force_init_pass.to_string(),
-            self.is_active.to_string(),
-        ]
-    }
-}
-
-impl FieldsToArray for Target {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.name.clone(),
-            self.hostname.clone(),
-            self.port.to_string(),
-            self.print_server_key(),
-            self.description.clone().unwrap_or_default(),
-            self.is_active.to_string(),
-        ]
-    }
-}
-
-impl FieldsToArray for TargetSecret {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.id.clone(),
-            self.target_id.clone(),
-            self.secret_id.clone(),
-            self.is_active.to_string(),
-            self.updated_by.clone(),
-            self.updated_at.to_string(),
-        ]
-    }
-}
-
-impl FieldsToArray for Secret {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.name.clone(),
-            self.user.clone(),
-            self.print_password(),
-            self.print_private_key(),
-            self.print_public_key(),
-            self.is_active.to_string(),
-        ]
-    }
-}
-
-impl FieldsToArray for InternalObject {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.name.clone(),
-            self.is_active.to_string(),
-            self.updated_by.clone(),
-            self.updated_at.to_string(),
-        ]
-    }
-}
-
-impl FieldsToArray for CasbinRule {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.id.clone(),
-            self.ptype.clone(),
-            self.v0.clone(),
-            self.v1.clone(),
-            self.v2.clone(),
-            self.v3.clone(),
-            self.v4.clone(),
-            self.v5.clone(),
-            self.updated_by.clone(),
-            self.updated_at.to_string(),
-        ]
-    }
-}
-
-impl FieldsToArray for Log {
-    fn ref_array(&self) -> Vec<String> {
-        vec![
-            self.connection_id.clone(),
-            self.log_type.clone(),
-            self.user_id.clone(),
-            self.detail.clone(),
-            self.created_at.to_string(),
-        ]
     }
 }
 

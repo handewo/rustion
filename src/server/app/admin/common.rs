@@ -19,4 +19,5 @@ pub const COMMAND_LIST: [&str; 5] = [
 pub const MANAGE_USERS: &str = "users";
 pub const MANAGE_TARGETS: &str = "targets";
 pub const MANAGE_SECRETS: &str = "secrets";
-pub const MANAGE_LIST: [&str; 3] = [MANAGE_USERS, MANAGE_TARGETS, MANAGE_SECRETS];
+pub const MANAGE_BIND: &str = "bind";
+pub const MANAGE_LIST: [&str; 4] = [MANAGE_USERS, MANAGE_TARGETS, MANAGE_SECRETS, MANAGE_BIND];
