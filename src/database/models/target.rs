@@ -140,3 +140,11 @@ impl std::fmt::Display for ValidateError {
         }
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct TargetInfo {
+    pub id: String,
+    pub name: String,
+    pub hostname: String,
+    pub port: u16,
+}

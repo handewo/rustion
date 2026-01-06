@@ -180,3 +180,11 @@ pub struct TargetSecretName {
     pub secret_id: String,
     pub secret_user: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct SecretInfo {
+    pub id: String,
+    pub name: String,
+    pub user: String,
+    pub is_bound: bool,
+}

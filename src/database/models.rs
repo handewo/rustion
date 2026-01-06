@@ -6,8 +6,8 @@ pub(crate) mod user;
 
 pub(crate) use casbin_rule::{Action, AllowedObjects, CasbinRule, InternalObject};
 pub use log::Log;
-pub(crate) use target::Target;
-pub(crate) use target_secret::{Secret, TargetSecret, TargetSecretName};
+pub(crate) use target::{Target, TargetInfo};
+pub(crate) use target_secret::{Secret, SecretInfo, TargetSecret, TargetSecretName};
 pub(crate) use user::User;
 
 use serde::{Deserialize, Serialize};

@@ -5,8 +5,8 @@ pub(crate) mod sqlite;
 use crate::error::Error;
 use async_trait::async_trait;
 use models::{
-    Action, AllowedObjects, CasbinRule, InternalObject, Log, Secret, Target, TargetSecret,
-    TargetSecretName, User,
+    Action, AllowedObjects, CasbinRule, InternalObject, Log, Secret, SecretInfo, Target,
+    TargetInfo, TargetSecret, TargetSecretName, User,
 };
 
 /// Database configuration enum to support multiple database backends
@@ -70,6 +70,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn update_target(&self, target: &Target) -> Result<Target, Error>;
     async fn delete_target(&self, id: &str) -> Result<bool, Error>;
     async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, Error>;
+    async fn list_targets_info(&self) -> Result<Vec<TargetInfo>, Error>;
 
     /// Secret operations
     async fn create_secret(&self, secret: &Secret) -> Result<Secret, Error>;
@@ -83,6 +84,7 @@ pub trait DatabaseRepository: Send + Sync {
     ) -> Result<Option<Secret>, Error>;
     async fn get_secrets_by_ids(&self, ids: &[&str]) -> Result<Vec<Secret>, Error>;
     async fn delete_secret(&self, id: &str) -> Result<bool, Error>;
+    async fn list_secrets_for_target(&self, target_id: &str) -> Result<Vec<SecretInfo>, Error>;
 
     /// TargetSecret operations
     async fn list_target_secrets(&self, active_only: bool) -> Result<Vec<TargetSecret>, Error>;

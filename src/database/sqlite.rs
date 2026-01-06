@@ -4,8 +4,8 @@ use log::{debug, info};
 use sqlx::{sqlite::SqlitePool, Pool, Row, Sqlite};
 
 use crate::database::models::{
-    Action, AllowedObjects, CasbinRule, InternalObject, Log, Secret, Target, TargetSecret,
-    TargetSecretName, User,
+    Action, AllowedObjects, CasbinRule, InternalObject, Log, Secret, SecretInfo, Target,
+    TargetInfo, TargetSecret, TargetSecretName, User,
 };
 use crate::database::DatabaseRepository;
 use crate::error::Error;
@@ -461,6 +461,14 @@ impl DatabaseRepository for SqliteRepository {
             .map_err(Error::Sqlx)
     }
 
+    async fn list_targets_info(&self) -> Result<Vec<TargetInfo>, Error> {
+        let query = r#"SELECT id, name, hostname, port FROM targets"#;
+        sqlx::query_as::<_, TargetInfo>(query)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(Error::Sqlx)
+    }
+
     async fn list_targets_for_user(
         &self,
         user_id: &str,
@@ -697,6 +705,20 @@ impl DatabaseRepository for SqliteRepository {
         }
 
         sqlx::query_as::<_, Secret>(&query)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(Error::Sqlx)
+    }
+
+    async fn list_secrets_for_target(&self, target_id: &str) -> Result<Vec<SecretInfo>, Error> {
+        let query = r#"
+            SELECT s.id, s.name, s.user, CASE WHEN ts.id IS NULL THEN 0 ELSE 1 END AS is_bound
+            FROM secrets s
+            LEFT JOIN target_secrets ts ON ts.secret_id = s.id AND ts.target_id = ? AND ts.is_active = 1
+            ORDER BY is_bound DESC, s.name
+        "#;
+        sqlx::query_as::<_, SecretInfo>(query)
+            .bind(target_id)
             .fetch_all(&self.pool)
             .await
             .map_err(Error::Sqlx)
