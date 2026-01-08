@@ -94,6 +94,13 @@ pub trait DatabaseRepository: Send + Sync {
     ) -> Result<TargetSecret, Error>;
     async fn update_target_secret(&self, secret: &TargetSecret) -> Result<TargetSecret, Error>;
     async fn delete_target_secret(&self, id: &str) -> Result<bool, Error>;
+    async fn upsert_target_secret(
+        &self,
+        target_id: &str,
+        secret_id: &str,
+        is_active: bool,
+        updated_by: &str,
+    ) -> Result<(), Error>;
 
     /// CasbinRule operations
     async fn list_casbin_rules(&self) -> Result<Vec<CasbinRule>, Error>;

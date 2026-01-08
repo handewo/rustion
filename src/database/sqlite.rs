@@ -462,7 +462,7 @@ impl DatabaseRepository for SqliteRepository {
     }
 
     async fn list_targets_info(&self) -> Result<Vec<TargetInfo>, Error> {
-        let query = r#"SELECT id, name, hostname, port FROM targets"#;
+        let query = r#"SELECT id, name, hostname, port FROM targets ORDER BY name ASC"#;
         sqlx::query_as::<_, TargetInfo>(query)
             .fetch_all(&self.pool)
             .await
@@ -712,10 +712,11 @@ impl DatabaseRepository for SqliteRepository {
 
     async fn list_secrets_for_target(&self, target_id: &str) -> Result<Vec<SecretInfo>, Error> {
         let query = r#"
-            SELECT s.id, s.name, s.user, CASE WHEN ts.id IS NULL THEN 0 ELSE 1 END AS is_bound
+            SELECT s.id, s.name, s.user,
+            CASE WHEN ts.is_active IS NULL THEN 0 ELSE ts.is_active END AS is_bound
             FROM secrets s
-            LEFT JOIN target_secrets ts ON ts.secret_id = s.id AND ts.target_id = ? AND ts.is_active = 1
-            ORDER BY is_bound DESC, s.name
+            LEFT JOIN target_secrets ts ON ts.secret_id = s.id AND ts.target_id = ?
+            ORDER BY s.name ASC
         "#;
         sqlx::query_as::<_, SecretInfo>(query)
             .bind(target_id)
@@ -745,6 +746,47 @@ impl DatabaseRepository for SqliteRepository {
         .await?;
 
         Ok(secret.clone())
+    }
+
+    /// Upsert the binding between a target and a secret.
+    ///
+    /// * If the pair `(target_id, secret_id)` does **not** exist yet → insert a new row
+    /// * If it **does** exist → flip `is_active` to the provided value
+    ///
+    /// Returns the number of rows affected (1 in both cases).
+    async fn upsert_target_secret(
+        &self,
+        target_id: &str,
+        secret_id: &str,
+        is_active: bool,
+        updated_by: &str,
+    ) -> Result<(), Error> {
+        // 1. Does the row already exist?
+        let exists = sqlx::query_as::<_, TargetSecret>(
+            "SELECT * FROM target_secrets WHERE target_id = ? AND secret_id = ?",
+        )
+        .bind(target_id)
+        .bind(secret_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        match exists {
+            Some(mut ts) => {
+                ts.is_active = is_active;
+                self.update_target_secret(&ts).await?;
+            }
+            None => {
+                let mut ts = TargetSecret::new(
+                    target_id.to_string(),
+                    secret_id.to_string(),
+                    updated_by.to_string(),
+                );
+                ts.is_active = is_active;
+                self.create_target_secret(&ts).await?;
+            }
+        };
+
+        Ok(())
     }
 
     async fn get_secret_by_target_secret_id(

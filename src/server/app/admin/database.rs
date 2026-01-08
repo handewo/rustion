@@ -1,4 +1,4 @@
-use super::table::{AdminTable, DisplayMode, FieldsToArray};
+use super::table::{AdminTable, DisplayMode, FieldsToArray, TableData as TD};
 use crate::database::models::*;
 use crate::error::Error;
 use crate::server::common::{
@@ -99,18 +99,19 @@ where
 
             if let Some(key) = event::read(&tty)?.as_key_press_event() {
                 let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
+                let items_len = self.items.len();
                 match key.code {
                     KeyCode::PageUp => self.table.previous_page(),
-                    KeyCode::PageDown => self.table.next_page(&self.items),
-                    KeyCode::Char('f') if ctrl_pressed => self.table.next_page(&self.items),
+                    KeyCode::PageDown => self.table.next_page(items_len),
+                    KeyCode::Char('f') if ctrl_pressed => self.table.next_page(items_len),
                     KeyCode::Char('b') if ctrl_pressed => self.table.previous_page(),
                     KeyCode::Char('+') => self.table.zoom_in(),
                     KeyCode::Char('-') => self.table.zoom_out(),
                     KeyCode::Tab => self.next_tab(),
                     KeyCode::BackTab => self.previous_tab(),
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                    KeyCode::Char('j') | KeyCode::Down => self.table.next_row(&self.items),
-                    KeyCode::Char('k') | KeyCode::Up => self.table.previous_row(&self.items),
+                    KeyCode::Char('j') | KeyCode::Down => self.table.next_row(items_len),
+                    KeyCode::Char('k') | KeyCode::Up => self.table.previous_row(items_len),
                     KeyCode::Char('l') | KeyCode::Right => self.table.next_column(),
                     KeyCode::Char('h') | KeyCode::Left => self.table.previous_column(),
                     _ => {}
@@ -131,7 +132,7 @@ where
 
         self.render_tabs(frame, header_area);
         self.table.render(
-            frame,
+            frame.buffer_mut(),
             table_area,
             &self.items,
             &self.longest_item_lens,

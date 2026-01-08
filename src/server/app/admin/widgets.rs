@@ -1,3 +1,4 @@
+use super::manage::{MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW};
 use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
@@ -480,4 +481,18 @@ pub fn render_checkbox(
         .style(style)
         .block(Block::default().borders(Borders::ALL));
     paragraph.render(area, buf);
+}
+
+pub fn render_message_popup(area: Rect, buf: &mut Buffer, message: &Message) {
+    let popup_area = if area.width <= MAX_POPUP_WINDOW_COL {
+        area
+    } else {
+        centered_area(
+            area,
+            MAX_POPUP_WINDOW_COL,
+            area.height.min(MAX_POPUP_WINDOW_ROW),
+        )
+    };
+
+    render_message_dialog(popup_area, buf, message);
 }

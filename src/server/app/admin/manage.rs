@@ -1,9 +1,8 @@
 use super::common::*;
-use super::table::{AdminTable, Colors, DisplayMode, FieldsToArray};
-use super::widgets::{centered_area, render_message_dialog, Message};
+use super::table::{AdminTable, Colors, DisplayMode, FieldsToArray, TableData as TD};
+use super::widgets::{centered_area, render_confirm_dialog, render_message_popup, Message};
 use crate::database::models::*;
 use crate::error::Error;
-use crate::server::app::admin::widgets::render_confirm_dialog;
 use ::log::{error, warn};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
@@ -21,6 +20,7 @@ use style::palette::tailwind;
 use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
 
+mod bind;
 mod secret;
 mod target;
 mod user;
@@ -32,8 +32,8 @@ const HELP_TEXT: [&str; 2] = [
 
 const LENGTH_UUID: u16 = 32;
 const LENGTH_TIMESTAMP: u16 = 14;
-const MAX_POPUP_WINDOW_COL: u16 = 60;
-const MAX_POPUP_WINDOW_ROW: u16 = 40;
+pub const MAX_POPUP_WINDOW_COL: u16 = 60;
+pub const MAX_POPUP_WINDOW_ROW: u16 = 40;
 const MIN_WINDOW_COL: u16 = 20;
 const MIN_WINDOW_ROW: u16 = 15;
 
@@ -92,7 +92,7 @@ impl fmt::Display for SelectedTab {
             SelectedTab::Users => write!(f, "Users"),
             SelectedTab::Targets => write!(f, "Targets"),
             SelectedTab::Secrets => write!(f, "Secrets"),
-            SelectedTab::Bind => write!(f, "BindSecrets"),
+            SelectedTab::Bind => write!(f, "Bind"),
         }
     }
 }
@@ -132,7 +132,7 @@ where
     t_handle: Handle,
     handler_id: String,
     user_id: String,
-    editor: Editor,
+    editor: Editor<B>,
     message: Option<Message>,
 }
 
@@ -195,7 +195,7 @@ where
                     self.user_id.clone(),
                 ))))
             }
-            SelectedTab::Bind => todo!(),
+            SelectedTab::Bind => unreachable!(),
         }
     }
 
@@ -360,45 +360,55 @@ where
                     }
                 }
 
+                if let Editor::Bind(ref mut e) = self.editor {
+                    if e.handle_key_event(key.code, key.modifiers) {
+                        self.editor = Editor::None;
+                    } else {
+                        continue;
+                    }
+                };
                 let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
 
                 match self.popup {
-                    Popup::None => match key.code {
-                        KeyCode::PageUp => self.table.previous_page(),
-                        KeyCode::PageDown => self.table.next_page(&self.items),
-                        KeyCode::Char('f') if ctrl_pressed => self.table.next_page(&self.items),
-                        KeyCode::Char('b') if ctrl_pressed => self.table.previous_page(),
-                        KeyCode::Char('+') => self.table.zoom_in(),
-                        KeyCode::Char('-') => self.table.zoom_out(),
-                        KeyCode::Tab => self.next_tab(),
-                        KeyCode::BackTab => self.previous_tab(),
-                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                        KeyCode::Char('j') | KeyCode::Down => self.table.next_row(&self.items),
-                        KeyCode::Char('k') | KeyCode::Up => self.table.previous_row(&self.items),
-                        KeyCode::Char('l') | KeyCode::Right => self.table.next_column(),
-                        KeyCode::Char('h') | KeyCode::Left => self.table.previous_column(),
-                        KeyCode::Char('d') => {
-                            self.table.colors.gray();
-                            let idx = self.table.state.selected().unwrap();
+                    Popup::None => {
+                        let items_len = self.items.len();
+                        match key.code {
+                            KeyCode::PageUp => self.table.previous_page(),
+                            KeyCode::PageDown => self.table.next_page(items_len),
+                            KeyCode::Char('f') if ctrl_pressed => self.table.next_page(items_len),
+                            KeyCode::Char('b') if ctrl_pressed => self.table.previous_page(),
+                            KeyCode::Char('+') => self.table.zoom_in(),
+                            KeyCode::Char('-') => self.table.zoom_out(),
+                            KeyCode::Tab => self.next_tab(),
+                            KeyCode::BackTab => self.previous_tab(),
+                            KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                            KeyCode::Char('j') | KeyCode::Down => self.table.next_row(items_len),
+                            KeyCode::Char('k') | KeyCode::Up => self.table.previous_row(items_len),
+                            KeyCode::Char('l') | KeyCode::Right => self.table.next_column(),
+                            KeyCode::Char('h') | KeyCode::Left => self.table.previous_column(),
+                            KeyCode::Char('d') => {
+                                self.table.colors.gray();
+                                let idx = self.table.state.selected().unwrap();
 
-                            if self.could_delete(idx) {
-                                self.popup = Popup::Delete(idx);
-                            } else {
-                                self.clear_form();
+                                if self.could_delete(idx) {
+                                    self.popup = Popup::Delete(idx);
+                                } else {
+                                    self.clear_form();
+                                }
                             }
-                        }
-                        KeyCode::Char('a') => {
-                            self.table.colors.gray();
-                            self.add_form()
-                        }
-                        KeyCode::Char('e') => {
-                            self.table.colors.gray();
-                            if !self.edit_form() {
-                                self.clear_form();
+                            KeyCode::Char('a') => {
+                                self.table.colors.gray();
+                                self.add_form()
                             }
+                            KeyCode::Char('e') => {
+                                self.table.colors.gray();
+                                if !self.edit_form() {
+                                    self.clear_form();
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
-                    },
+                    }
                     Popup::Add | Popup::Edit => self.do_edit(key)?,
                     Popup::Delete(i) => match key.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') => {
@@ -423,6 +433,8 @@ where
                     Editor::Secret(ref mut e) => {
                         let _ = e.as_mut().handle_paste_event(paste);
                     }
+                    Editor::Bind(_) => unreachable!(),
+
                     Editor::None => {}
                 }
             }
@@ -526,13 +538,11 @@ where
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
                     if !e.show_cancel_confirmation {
                         let mut secret = e.secret.to_owned();
-
                         if e.password_updated {
                             if let Some(p) = secret.take_password() {
                                 secret.set_password(Some(self.backend.encrypt_plain_text(&p)?));
-                            }
+                            };
                         };
-
                         if e.private_key_updated {
                             if let Some(p) = secret.take_private_key() {
                                 secret.set_private_key(Some(self.backend.encrypt_plain_text(&p)?));
@@ -541,7 +551,6 @@ where
                                 ));
                             }
                         }
-
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
@@ -555,7 +564,6 @@ where
                             ),
                             _ => unreachable!(),
                         };
-
                         if let Err(err) = result {
                             let msg = match err {
                                 Error::Sqlx(sqlx::Error::Database(db_err))
@@ -565,24 +573,21 @@ where
                                 }
                                 _ => "Internal error",
                             };
-
                             self.message = Some(Message::Error(vec![msg.into()]));
                             return Ok(());
                         }
-
                         let msg = vec![format!("Secret {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
-
                     self.clear_form();
                     self.refresh_data();
                 }
             }
+            Editor::Bind(_) => unreachable!(),
             _ => {
                 todo!()
             }
         }
-
         Ok(())
     }
 
@@ -604,15 +609,25 @@ where
         self.table.size = (table_area.width, table_area.height);
 
         self.render_tabs(frame, header_area);
-        self.table.render(
-            frame,
-            table_area,
-            &self.items,
-            &self.longest_item_lens,
-            DisplayMode::Manage,
-        );
+        if self.selected_tab == SelectedTab::Bind {
+            if let Editor::Bind(_) = self.editor {
+                frame.render_widget(&mut self.editor, table_area);
+            } else {
+                unreachable!()
+            }
+        } else {
+            self.table.render(
+                frame.buffer_mut(),
+                table_area,
+                &self.items,
+                &self.longest_item_lens,
+                DisplayMode::Manage,
+            );
+        }
         self.render_popup(frame, table_area);
-        self.render_message(frame, table_area);
+        if let Some(ref msg) = self.message {
+            render_message_popup(table_area, frame.buffer_mut(), msg);
+        }
         self.render_footer(frame, footer_area);
     }
 
@@ -639,7 +654,33 @@ where
                         .unwrap_or_default(),
                 );
             }
-            SelectedTab::Bind => unreachable!(),
+            SelectedTab::Bind => {
+                // For Bind tab, we need to load targets and secrets
+                let targets = self
+                    .t_handle
+                    .block_on(self.backend.db_repository().list_targets_info())
+                    .unwrap_or_default();
+                let secrets = if !targets.is_empty() {
+                    // Get secrets for the first target as default
+                    self.t_handle
+                        .block_on(
+                            self.backend
+                                .db_repository()
+                                .list_secrets_for_target(&targets[0].id),
+                        )
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                self.editor = Editor::Bind(Box::new(bind::BindEditor::new(
+                    targets,
+                    secrets,
+                    self.backend.clone(),
+                    self.t_handle.clone(),
+                    self.handler_id.clone(),
+                    self.user_id.clone(),
+                )));
+            }
         };
 
         self.longest_item_lens = self.items.constraint_len_calculator();
@@ -678,22 +719,6 @@ where
         frame.render_widget(paragraph, area);
     }
 
-    fn render_message(&mut self, frame: &mut Frame, area: Rect) {
-        if let Some(ref msg) = self.message {
-            let popup_area = if area.width <= MAX_POPUP_WINDOW_COL {
-                area
-            } else {
-                centered_area(
-                    area,
-                    MAX_POPUP_WINDOW_COL,
-                    area.height.min(MAX_POPUP_WINDOW_ROW),
-                )
-            };
-
-            render_message_dialog(popup_area, frame.buffer_mut(), msg);
-        }
-    }
-
     fn render_popup(&mut self, frame: &mut Frame, area: Rect) {
         if let Popup::None = self.popup {
             return;
@@ -714,12 +739,14 @@ where
                 Editor::User(_) => Line::styled("Add New User", Style::default().bold()),
                 Editor::Target(_) => Line::styled("Add New Target", Style::default().bold()),
                 Editor::Secret(_) => Line::styled("Add New Secret", Style::default().bold()),
+                Editor::Bind(_) => unreachable!(),
                 _ => todo!(),
             },
             Popup::Edit => match self.editor {
                 Editor::User(_) => Line::styled("Edit User", Style::default().bold()),
                 Editor::Target(_) => Line::styled("Edit Target", Style::default().bold()),
                 Editor::Secret(_) => Line::styled("Edit Secret", Style::default().bold()),
+                Editor::Bind(_) => unreachable!(),
                 _ => todo!(),
             },
             Popup::Delete(_) => {
@@ -746,18 +773,16 @@ where
                         );
                     }
                     SelectedTab::Bind => unreachable!(),
-                };
+                }
                 return;
             }
             _ => unreachable!(),
         };
-
         let popup = Block::bordered()
             .title(title)
             .title_style(Style::new().fg(self.editor_colors.title_color))
             .border_style(Style::new().fg(self.editor_colors.border_color))
             .border_type(BorderType::Double);
-
         frame.render_widget(Clear, popup_area);
         frame.render_widget(popup, popup_area);
         frame.render_widget(&mut self.editor, popup_area);
@@ -768,6 +793,7 @@ where
             Editor::User(ref e) => e.as_ref().help_text,
             Editor::Target(ref e) => e.as_ref().help_text,
             Editor::Secret(ref e) => e.as_ref().help_text,
+            Editor::Bind(ref e) => e.as_ref().help_text,
             Editor::None => HELP_TEXT,
         };
 
@@ -1143,14 +1169,21 @@ impl super::table::TableData for TableData {
     }
 }
 
-enum Editor {
+enum Editor<B>
+where
+    B: 'static + crate::server::HandlerBackend + Send + Sync,
+{
     User(Box<user::UserEditor>),
     Target(Box<target::TargetEditor>),
     Secret(Box<secret::SecretEditor>),
+    Bind(Box<bind::BindEditor<B>>),
     None,
 }
 
-impl Widget for &mut Editor {
+impl<B> Widget for &mut Editor<B>
+where
+    B: 'static + crate::server::HandlerBackend + Send + Sync,
+{
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized,
@@ -1165,9 +1198,10 @@ impl Widget for &mut Editor {
             Editor::Secret(ref mut e) => {
                 e.render(area, buf);
             }
-            _ => {
-                unreachable!()
+            Editor::Bind(ref mut e) => {
+                e.render(area, buf);
             }
+            Editor::None => {}
         }
     }
 }

@@ -1,11 +1,12 @@
 use crate::database::models::*;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Margin, Rect};
 use ratatui::style::{self, Color, Modifier, Style, Stylize};
 use ratatui::text::Text;
 use ratatui::widgets::{
-    Cell, HighlightSpacing, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table, TableState,
+    Cell, HighlightSpacing, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
+    Table, TableState,
 };
-use ratatui::Frame;
 use style::palette::tailwind;
 
 pub struct Colors {
@@ -89,11 +90,11 @@ impl AdminTable {
         self.scroll_state = self.scroll_state.position(i * self.row_height);
     }
 
-    pub fn next_page<T: TableData>(&mut self, items: &T) {
+    pub fn next_page(&mut self, items_len: usize) {
         let rows = (self.size.1 as usize - 1) / self.row_height;
         let mut is_offset = false;
 
-        if self.state.offset() + rows <= items.len() {
+        if self.state.offset() + rows <= items_len {
             *self.state.offset_mut() = self.state.offset() + rows;
         } else {
             is_offset = true;
@@ -103,7 +104,7 @@ impl AdminTable {
             Some(i) => {
                 if is_offset {
                     i
-                } else if i >= items.len() - rows {
+                } else if i >= items_len - rows {
                     self.state.offset()
                 } else {
                     i + rows
@@ -116,10 +117,10 @@ impl AdminTable {
         self.scroll_state = self.scroll_state.position(i * self.row_height);
     }
 
-    pub fn next_row<T: TableData>(&mut self, items: &T) {
+    pub fn next_row(&mut self, items_len: usize) {
         let i = match self.state.selected() {
             Some(i) => {
-                if i >= items.len() - 1 {
+                if i >= items_len - 1 {
                     0
                 } else {
                     i + 1
@@ -132,11 +133,11 @@ impl AdminTable {
         self.scroll_state = self.scroll_state.position(i * self.row_height);
     }
 
-    pub fn previous_row<T: TableData>(&mut self, items: &T) {
+    pub fn previous_row(&mut self, items_len: usize) {
         let i = match self.state.selected() {
             Some(i) => {
                 if i == 0 {
-                    items.len() - 1
+                    items_len - 1
                 } else {
                     i - 1
                 }
@@ -166,7 +167,7 @@ impl AdminTable {
 
     pub fn render<T: TableData>(
         &mut self,
-        frame: &mut Frame,
+        buf: &mut Buffer,
         area: Rect,
         items: &T,
         longest_item_lens: &Vec<Constraint>,
@@ -219,21 +220,23 @@ impl AdminTable {
             .bg(self.colors.buffer_bg)
             .highlight_spacing(HighlightSpacing::Always);
 
-        frame.render_stateful_widget(t, area, &mut self.state);
+        t.render(area, buf, &mut self.state);
 
         self.scroll_state = self
             .scroll_state
             .content_length((items.len().max(1) - 1) * self.row_height)
             .position(self.state.selected().unwrap_or(0) * self.row_height);
 
-        frame.render_stateful_widget(
-            Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight),
-            area.inner(Margin {
-                vertical: 1,
-                horizontal: 1,
-            }),
-            &mut self.scroll_state,
-        );
+        Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .render(
+                area.inner(Margin {
+                    vertical: 1,
+                    horizontal: 1,
+                }),
+                buf,
+                &mut self.scroll_state,
+            );
     }
 }
 
