@@ -105,6 +105,7 @@ pub trait DatabaseRepository: Send + Sync {
     /// CasbinRule operations
     async fn list_casbin_rules(&self) -> Result<Vec<CasbinRule>, Error>;
     async fn list_casbin_rules_by_ptype(&self, ptype: &str) -> Result<Vec<CasbinRule>, Error>;
+    async fn list_roles_by_user_id(&self, user_id: &str) -> Result<Vec<CasbinRule>, Error>;
     async fn create_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error>;
     async fn update_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error>;
     async fn delete_casbin_rule(&self, id: &str) -> Result<bool, Error>;

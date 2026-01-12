@@ -51,10 +51,28 @@ impl RoleManage {
         }
     }
 
-    pub fn match_sub(&self, policies: Vec<CasbinRule>, sub: &str) -> Vec<CasbinRule> {
+    pub fn match_sub(
+        &self,
+        policies: Vec<CasbinRule>,
+        roles: &Vec<CasbinRule>,
+        sub: &str,
+    ) -> Vec<CasbinRule> {
         policies
             .into_iter()
-            .filter(|p| p.v0 == sub || self.match_role(&p.v0, sub, RoleType::Subject))
+            .filter(|p| {
+                if p.v0 == sub {
+                    return true;
+                };
+                for r in roles {
+                    // exclude user_id
+                    if uuid::Uuid::from_str(&p.v0).is_err()
+                        && self.match_role(&r.v1, &p.v0, RoleType::Subject)
+                    {
+                        return true;
+                    }
+                }
+                false
+            })
             .collect()
     }
 

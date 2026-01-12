@@ -265,7 +265,16 @@ impl super::HandlerBackend for BastionServer {
             .repository()
             .list_casbin_rules_by_ptype("p")
             .await?;
-        let allowed_policies = self.role_manager.read().await.match_sub(policies, user_id);
+        let roles = self
+            .database
+            .repository()
+            .list_roles_by_user_id(user_id)
+            .await?;
+        let allowed_policies = self
+            .role_manager
+            .read()
+            .await
+            .match_sub(policies, &roles, user_id);
 
         for pol in allowed_policies {
             let ts = self
@@ -542,7 +551,16 @@ impl super::HandlerBackend for BastionServer {
             .repository()
             .list_casbin_rules_by_ptype("p")
             .await?;
-        let allowed_policies = self.role_manager.read().await.match_sub(policies, sub);
+        let roles = self
+            .database
+            .repository()
+            .list_roles_by_user_id(sub)
+            .await?;
+        let allowed_policies = self
+            .role_manager
+            .read()
+            .await
+            .match_sub(policies, &roles, sub);
         trace!("sub: {} polices: {:?}", sub, allowed_policies);
 
         for pol in allowed_policies {

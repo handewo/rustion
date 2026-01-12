@@ -618,6 +618,20 @@ impl DatabaseRepository for SqliteRepository {
             .map_err(Error::Sqlx)
     }
 
+    async fn list_roles_by_user_id(&self, user_id: &str) -> Result<Vec<CasbinRule>, Error> {
+        let query = r#"
+        SELECT id, ptype, v0, v1, v2, v3, v4, v5, updated_by, updated_at
+        FROM casbin_rule
+        WHERE ptype = 'g1' AND v0 = ?
+    "#;
+
+        sqlx::query_as::<_, CasbinRule>(query)
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(Error::Sqlx)
+    }
+
     async fn list_casbin_rules_by_ptype(&self, ptype: &str) -> Result<Vec<CasbinRule>, Error> {
         let query = r#"
         SELECT id, ptype, v0, v1, v2, v3, v4, v5, updated_by, updated_at

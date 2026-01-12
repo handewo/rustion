@@ -108,6 +108,14 @@ impl TargetSelector {
 
         let user_id = user.id.as_str();
         let allowed_targets = backend.list_targets_for_user(user_id, true).await?;
+        trace!(
+            "[{}] list targets: {:?}",
+            self.handler_id,
+            allowed_targets
+                .iter()
+                .map(|v| v.id.as_str())
+                .collect::<Vec<&str>>()
+        );
         if allowed_targets.is_empty() {
             return Ok(false);
         }
