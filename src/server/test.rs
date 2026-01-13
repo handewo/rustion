@@ -109,6 +109,12 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(bob.id, "a422db6f-c50e-48d3-bcfb-ddbf8989a974");
+        let paul = server
+            .get_user_by_username("paul", true)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(paul.id, "aa0c69dc-4e7f-49ea-a225-65d89011a3f5");
         let jack = server
             .get_user_by_username("jack", true)
             .await
@@ -135,7 +141,7 @@ mod tests {
                 .filter(|v| v.target_name.starts_with("venus"))
                 .collect::<Vec<&TargetSecretName>>()
                 .len(),
-            28
+            27
         );
 
         assert_eq!(
@@ -144,12 +150,25 @@ mod tests {
                 .filter(|v| v.target_name.starts_with("mars"))
                 .collect::<Vec<&TargetSecretName>>()
                 .len(),
-            31
+            32
         );
         assert!(alice_lt
             .iter()
             .any(|v| v.id == "65f4527b-2fa1-4e19-8324-204b68c7f1c6"));
-        assert_eq!(alice_lt.len(), 60);
+        assert!(alice_lt
+            .iter()
+            .any(|v| v.id == "ee267744-b110-469e-917d-8754d8aafa3c"));
+
+        assert_eq!(alice_lt.len(), 85);
+
+        let paul_lt = server.list_targets_for_user(&paul.id, true).await.unwrap();
+        assert_eq!(paul_lt.len(), 1);
+
+        let jack_lt = server.list_targets_for_user(&jack.id, true).await.unwrap();
+        assert!(!jack_lt
+            .iter()
+            .any(|v| v.id == "ee267744-b110-469e-917d-8754d8aafa3c"));
+        assert_eq!(jack_lt.len(), 26);
 
         let bob_lt = server.list_targets_for_user(&bob.id, true).await.unwrap();
         assert_eq!(
@@ -158,7 +177,7 @@ mod tests {
                 .filter(|v| v.target_name.starts_with("venus"))
                 .collect::<Vec<&TargetSecretName>>()
                 .len(),
-            28
+            26
         );
         assert_eq!(
             bob_lt
@@ -171,8 +190,11 @@ mod tests {
         assert!(bob_lt
             .iter()
             .any(|v| v.id == "7f003584-21ed-4963-a7a1-892810f74e66"));
+        assert!(!bob_lt
+            .iter()
+            .any(|v| v.id == "ee267744-b110-469e-917d-8754d8aafa3c"));
 
-        assert_eq!(bob_lt.len(), 54);
+        assert_eq!(bob_lt.len(), 52);
 
         assert_eq!(
             alice_lt
@@ -180,7 +202,7 @@ mod tests {
                 .filter(|v| v.target_name.starts_with("venus"))
                 .collect::<Vec<&TargetSecretName>>()
                 .len(),
-            28
+            27
         );
         assert!(server
             .enforce(
@@ -254,7 +276,7 @@ mod tests {
             )
             .await
             .unwrap());
-        assert!(!server
+        assert!(server
             .enforce(
                 &alice.id,
                 "62b5d32d-4518-4d8f-8e7a-3fe858e67486",
@@ -769,7 +791,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert!(server
+        assert!(!server
             .enforce(
                 &jack.id,
                 "980f07aa-866c-481f-92a0-727587576a05",
@@ -815,7 +837,7 @@ mod tests {
                 .filter(|v| v.target_name.starts_with("venus"))
                 .collect::<Vec<&TargetSecretName>>()
                 .len(),
-            28
+            26
         );
         assert_eq!(
             admin_lt
@@ -858,7 +880,7 @@ mod tests {
                 .filter(|v| v.target_name.starts_with("venus"))
                 .collect::<Vec<&TargetSecretName>>()
                 .len(),
-            25
+            24
         );
         let r = CasbinRule::new(
             "p".to_string(),

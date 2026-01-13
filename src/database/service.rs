@@ -121,7 +121,7 @@ mod tests {
     async fn test_db_service() {
         let service = create_test_service().await;
 
-        assert_eq!(service.repository.list_users(false).await.unwrap().len(), 4);
+        assert_eq!(service.repository.list_users(false).await.unwrap().len(), 5);
         assert_eq!(
             service.repository.list_targets(false).await.unwrap().len(),
             30
@@ -141,7 +141,7 @@ mod tests {
         );
         assert_eq!(
             service.repository.list_casbin_rules().await.unwrap().len(),
-            106
+            108
         );
         assert_eq!(
             service
@@ -160,7 +160,7 @@ mod tests {
                 .await
                 .unwrap()
                 .len(),
-            61
+            59
         );
         assert_eq!(
             service
@@ -169,7 +169,7 @@ mod tests {
                 .await
                 .unwrap()
                 .len(),
-            55
+            53
         );
     }
 }
