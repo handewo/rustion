@@ -12,7 +12,9 @@ pub use bastion_server::BastionServer;
 use crate::database::models::{Action, Target, TargetSecretName, User};
 use crate::database::DatabaseRepository;
 use crate::error::Error;
+use crate::server::casbin::RoleType;
 use futures::future::BoxFuture;
+use petgraph::stable_graph::StableDiGraph;
 use russh::client as ru_client;
 use std::future::Future;
 use std::sync::Arc;
@@ -121,4 +123,9 @@ pub(super) trait HandlerBackend: Send + Clone {
 
     fn set_password(&self, user: &mut User, password: &str) -> Result<(), Error>;
     fn load_role_manager(&self) -> impl Future<Output = Result<(), Error>> + Send;
+
+    fn get_role_graph(
+        &self,
+        rt: RoleType,
+    ) -> impl Future<Output = StableDiGraph<String, ()>> + Send;
 }

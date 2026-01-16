@@ -8,6 +8,7 @@ use argon2::{
 use log::{error, info, trace, warn};
 use moka::future::Cache;
 use moka::ops::compute::{CompResult, Op};
+use petgraph::stable_graph::StableDiGraph;
 use russh::client as ru_client;
 use russh::keys::Algorithm;
 use russh::server::{Config as RusshConfig, Server};
@@ -652,6 +653,10 @@ impl super::HandlerBackend for BastionServer {
         blob.extend_from_slice(&ciphertext); // already includes 16-byte tag
 
         Ok(general_purpose::STANDARD.encode(blob))
+    }
+
+    async fn get_role_graph(&self, rt: casbin::RoleType) -> StableDiGraph<String, ()> {
+        self.role_manager.read().await.get_group(rt)
     }
 }
 

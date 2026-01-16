@@ -3321,6 +3321,7 @@ dependencies = [
  "tokio",
  "toml",
  "tui-textarea",
+ "tui-tree-widget",
  "unicode-width",
  "uuid",
 ]
@@ -4381,6 +4382,16 @@ source = "git+https://github.com/handewo/tui-textarea.git#9d8f4c0f2cd6268ea0a57c
 dependencies = [
  "crossterm 0.29.0 (git+https://github.com/handewo/crossterm.git)",
  "ratatui",
+ "unicode-width",
+]
+
+[[package]]
+name = "tui-tree-widget"
+version = "0.24.0"
+source = "git+https://github.com/handewo/tui-rs-tree-widget.git#caf8e1232e7c0594c8ba6a383efef7c0d16bfb72"
+dependencies = [
+ "ratatui-core",
+ "ratatui-widgets",
  "unicode-width",
 ]
 

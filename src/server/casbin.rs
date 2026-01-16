@@ -51,6 +51,14 @@ impl RoleManage {
         }
     }
 
+    pub fn get_group(&self, rt: RoleType) -> StableDiGraph<String, ()> {
+        match rt {
+            RoleType::Subject => self.g1.clone(),
+            RoleType::Object => self.g2.clone(),
+            RoleType::Action => self.g3.clone(),
+        }
+    }
+
     pub fn match_sub(
         &self,
         policies: Vec<CasbinRule>,
