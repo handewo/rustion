@@ -1,3 +1,4 @@
+pub mod common;
 pub(crate) mod models;
 pub(crate) mod service;
 pub(crate) mod sqlite;

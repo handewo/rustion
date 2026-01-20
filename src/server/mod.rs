@@ -2,7 +2,6 @@ mod app;
 mod bastion_handler;
 pub mod bastion_server;
 mod casbin;
-pub mod common;
 mod connection_pool;
 pub mod init_service;
 mod test;

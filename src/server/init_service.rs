@@ -1,6 +1,6 @@
 use super::casbin;
-use super::common::*;
 use crate::config::Config;
+use crate::database::common::*;
 use crate::database::{models::*, service::DatabaseService};
 pub async fn init_service(config: Config) {
     let db = DatabaseService::new(&config.database).await.unwrap();

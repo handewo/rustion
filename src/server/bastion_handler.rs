@@ -687,7 +687,7 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
             .backend
             .enforce(
                 &user.id,
-                super::common::OBJ_LOGIN,
+                crate::database::common::OBJ_LOGIN,
                 models::Action::Login,
                 ExtendPolicyReq::new(self.client_ip.map(|v| v.ip())),
             )

@@ -4,9 +4,9 @@ mod tests {
         target_secret::TargetSecret, Action, CasbinRule, InternalObject, Secret, Target,
         TargetSecretName, User,
     };
-    use crate::database::{service::DatabaseService, DatabaseConfig};
+    use crate::database::{common, service::DatabaseService, DatabaseConfig};
     use crate::server::casbin::{ExtendPolicy, ExtendPolicyReq, IpPolicy};
-    use crate::server::{self, common, HandlerBackend};
+    use crate::server::{self, HandlerBackend};
     use chrono::{Datelike, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc};
     use ipnetwork::IpNetwork;
     use serde::{Deserialize, Serialize};
