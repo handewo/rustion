@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::database::common::ACT_EXEC;
     use crate::database::models::{
         target_secret::TargetSecret, Action, CasbinRule, InternalObject, Secret, Target,
         TargetSecretName, User,
@@ -300,7 +301,7 @@ mod tests {
             .find(|v| v.id == "749bed7e-67a5-4749-9371-ec7df959438e")
             .unwrap()
             .clone();
-        r.v2 = "exec".to_string();
+        r.v2 = ACT_EXEC.to_string();
         r = db.repository().update_casbin_rule(&r).await.unwrap();
         assert!(!server
             .enforce(

@@ -1,9 +1,23 @@
 /// Any subject, object, or role-group whose name begins with “__” is
 /// reserved for internal use. Do not create policies that use such names.
-pub const OBJ_LOGIN: &str = "__login";
-pub const OBJ_ADMIN: &str = "__admin";
+pub const OBJ_LOGIN: &str = "__internal_object_login";
+pub const OBJ_ADMIN: &str = "__internal_object_admin";
 
-pub const INTERNAL_OBJECTS: [&str; 2] = [OBJ_LOGIN, OBJ_ADMIN];
+pub const ACT_SHELL: &str = "__internal_action_shell";
+pub const ACT_PTY: &str = "__internal_action_pty";
+pub const ACT_EXEC: &str = "__internal_action_exec";
+pub const ACT_LOGIN: &str = "__internal_action_login";
+pub const ACT_DIRECT_TCPIP: &str = "__internal_action_open_direct_tcpip";
+
+pub const INTERNAL_OBJECTS: [&str; 7] = [
+    OBJ_LOGIN,
+    OBJ_ADMIN,
+    ACT_SHELL,
+    ACT_DIRECT_TCPIP,
+    ACT_EXEC,
+    ACT_LOGIN,
+    ACT_PTY,
+];
 
 pub const TABLE_CASBIN_RULE: &str = "CASBIN_RULE";
 pub const TABLE_USERS: &str = "USERS";

@@ -1,3 +1,4 @@
+use crate::database::common::*;
 use crate::error;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -64,16 +65,29 @@ pub enum Action {
     Pty,
 }
 
+impl Action {
+    pub fn to_sql_store(self) -> String {
+        match self {
+            Action::Shell => ACT_SHELL,
+            Action::Exec => ACT_EXEC,
+            Action::Login => ACT_LOGIN,
+            Action::Pty => ACT_PTY,
+            Action::OpenDirectTcpip => ACT_DIRECT_TCPIP,
+        }
+        .to_string()
+    }
+}
+
 impl FromStr for Action {
     type Err = error::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "shell" => Ok(Action::Shell),
-            "exec" => Ok(Action::Exec),
-            "login" => Ok(Action::Login),
-            "open_direct_tcpip" => Ok(Action::OpenDirectTcpip),
-            "pty" => Ok(Action::Pty),
+            ACT_SHELL => Ok(Action::Shell),
+            ACT_EXEC => Ok(Action::Exec),
+            ACT_LOGIN => Ok(Action::Login),
+            ACT_DIRECT_TCPIP => Ok(Action::OpenDirectTcpip),
+            ACT_PTY => Ok(Action::Pty),
             _ => Err(error::Error::Casbin(format!("Unknown action: {}", s))),
         }
     }

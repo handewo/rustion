@@ -583,10 +583,10 @@ impl super::HandlerBackend for BastionServer {
                     continue;
                 }
                 // match act
-                if pol.v2 == act.to_string()
+                if pol.v2 == act.to_sql_store()
                     || self.role_manager.read().await.match_role(
                         &pol.v2,
-                        &act.to_string(),
+                        &act.to_sql_store(),
                         casbin::RoleType::Action,
                     )
                 {
