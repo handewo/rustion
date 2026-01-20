@@ -115,15 +115,15 @@ impl BastionServer {
         let role_manager = {
             let g1 = database
                 .repository()
-                .list_casbin_rules_by_ptype("g1")
+                .list_casbin_rule_group_by_ptype("g1")
                 .await?;
             let g2 = database
                 .repository()
-                .list_casbin_rules_by_ptype("g2")
+                .list_casbin_rule_group_by_ptype("g2")
                 .await?;
             let g3 = database
                 .repository()
-                .list_casbin_rules_by_ptype("g3")
+                .list_casbin_rule_group_by_ptype("g3")
                 .await?;
 
             casbin::RoleManage::new(&g1, &g2, &g3)
@@ -146,17 +146,17 @@ impl BastionServer {
         let g1 = self
             .database
             .repository()
-            .list_casbin_rules_by_ptype("g1")
+            .list_casbin_rule_group_by_ptype("g1")
             .await?;
         let g2 = self
             .database
             .repository()
-            .list_casbin_rules_by_ptype("g2")
+            .list_casbin_rule_group_by_ptype("g2")
             .await?;
         let g3 = self
             .database
             .repository()
-            .list_casbin_rules_by_ptype("g3")
+            .list_casbin_rule_group_by_ptype("g3")
             .await?;
 
         let mut m = self.role_manager.write().await;
@@ -655,7 +655,7 @@ impl super::HandlerBackend for BastionServer {
         Ok(general_purpose::STANDARD.encode(blob))
     }
 
-    async fn get_role_graph(&self, rt: casbin::RoleType) -> StableDiGraph<String, ()> {
+    async fn get_role_graph(&self, rt: casbin::RoleType) -> StableDiGraph<casbin::RuleGroup, ()> {
         self.role_manager.read().await.get_group(rt)
     }
 }

@@ -4,7 +4,7 @@ pub(crate) mod target;
 pub(crate) mod target_secret;
 pub(crate) mod user;
 
-pub(crate) use casbin_rule::{Action, AllowedObjects, CasbinRule, InternalObject};
+pub(crate) use casbin_rule::{Action, AllowedObjects, CasbinRule, CasbinRuleGroup, InternalObject};
 pub use log::Log;
 pub(crate) use target::{Target, TargetInfo};
 pub(crate) use target_secret::{Secret, SecretInfo, TargetSecret, TargetSecretName};

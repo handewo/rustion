@@ -5,7 +5,7 @@ use std::fmt;
 use std::net::IpAddr;
 #[cfg(feature = "full-role")]
 use {
-    crate::database::models::CasbinRule,
+    crate::database::models::{CasbinRule, CasbinRuleGroup},
     petgraph::stable_graph::{NodeIndex, StableDiGraph},
     petgraph::visit::{Bfs, Walker},
     std::collections::HashMap,
@@ -20,9 +20,9 @@ pub struct RoleManage {
     h1: HashMap<String, NodeIndex>,
     h2: HashMap<String, NodeIndex>,
     h3: HashMap<String, NodeIndex>,
-    g1: StableDiGraph<String, ()>,
-    g2: StableDiGraph<String, ()>,
-    g3: StableDiGraph<String, ()>,
+    g1: StableDiGraph<RuleGroup, ()>,
+    g2: StableDiGraph<RuleGroup, ()>,
+    g3: StableDiGraph<RuleGroup, ()>,
 }
 
 #[cfg(feature = "full-role")]
@@ -32,9 +32,51 @@ pub enum RoleType {
     Action,
 }
 
+#[derive(Debug, Clone)]
+pub enum RuleGroup {
+    V0(GroupV0),
+    V1(GroupV1),
+}
+
+impl RuleGroup {
+    pub fn from_v0(r: &CasbinRuleGroup) -> Self {
+        RuleGroup::V0(GroupV0 {
+            id: r.id.clone(),
+            v0: r.v0.clone(),
+            v0_desc: r.v0_desc.clone(),
+        })
+    }
+    pub fn from_v1(r: &CasbinRuleGroup) -> Self {
+        RuleGroup::V1(GroupV1 {
+            id: r.id.clone(),
+            v1: r.v1.clone(),
+        })
+    }
+
+    pub fn fetch_role(&self) -> &str {
+        match self {
+            RuleGroup::V0(v) => v.v0.as_str(),
+            RuleGroup::V1(v) => v.v1.as_str(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GroupV0 {
+    pub id: String,
+    pub v0: String,
+    pub v0_desc: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GroupV1 {
+    pub id: String,
+    pub v1: String,
+}
+
 #[cfg(feature = "full-role")]
 impl RoleManage {
-    pub fn new(r1: &[CasbinRule], r2: &[CasbinRule], r3: &[CasbinRule]) -> Self {
+    pub fn new(r1: &[CasbinRuleGroup], r2: &[CasbinRuleGroup], r3: &[CasbinRuleGroup]) -> Self {
         let mut h1 = HashMap::new();
         let g1 = build_graph(r1, &mut h1);
         let mut h2 = HashMap::new();
@@ -51,7 +93,7 @@ impl RoleManage {
         }
     }
 
-    pub fn get_group(&self, rt: RoleType) -> StableDiGraph<String, ()> {
+    pub fn get_group(&self, rt: RoleType) -> StableDiGraph<RuleGroup, ()> {
         match rt {
             RoleType::Subject => self.g1.clone(),
             RoleType::Object => self.g2.clone(),
@@ -99,7 +141,7 @@ impl RoleManage {
                         self.g2
                             .node_weight(n)
                             .expect("node should not be none")
-                            .as_str()
+                            .fetch_role()
                     })
                     .collect::<Vec<_>>()
             }
@@ -392,18 +434,18 @@ pub fn is_ip_in_cidr(ip: Option<IpAddr>, ip_policy: Option<IpPolicy>) -> bool {
 
 #[cfg(feature = "full-role")]
 fn build_graph(
-    rules: &[CasbinRule],
+    rules: &[CasbinRuleGroup],
     hm: &mut HashMap<String, NodeIndex>,
-) -> StableDiGraph<String, ()> {
-    let mut g = StableDiGraph::<String, ()>::new();
+) -> StableDiGraph<RuleGroup, ()> {
+    let mut g = StableDiGraph::<RuleGroup, ()>::new();
 
     for r in rules {
         let u = *hm
             .entry(r.v0.clone())
-            .or_insert_with(|| g.add_node(r.v0.clone()));
+            .or_insert_with(|| g.add_node(RuleGroup::from_v0(r)));
         let v = *hm
             .entry(r.v1.clone())
-            .or_insert_with(|| g.add_node(r.v1.clone()));
+            .or_insert_with(|| g.add_node(RuleGroup::from_v1(r)));
         g.add_edge(v, u, ());
     }
 

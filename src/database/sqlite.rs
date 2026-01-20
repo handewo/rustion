@@ -4,8 +4,8 @@ use log::{debug, info};
 use sqlx::{sqlite::SqlitePool, Pool, Row, Sqlite};
 
 use crate::database::models::{
-    Action, AllowedObjects, CasbinRule, InternalObject, Log, Secret, SecretInfo, Target,
-    TargetInfo, TargetSecret, TargetSecretName, User,
+    Action, AllowedObjects, CasbinRule, CasbinRuleGroup, InternalObject, Log, Secret, SecretInfo,
+    Target, TargetInfo, TargetSecret, TargetSecretName, User,
 };
 use crate::database::DatabaseRepository;
 use crate::error::Error;
@@ -627,6 +627,61 @@ impl DatabaseRepository for SqliteRepository {
 
         sqlx::query_as::<_, CasbinRule>(query)
             .bind(user_id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(Error::Sqlx)
+    }
+
+    async fn list_casbin_rule_group_by_ptype(
+        &self,
+        ptype: &str,
+    ) -> Result<Vec<CasbinRuleGroup>, Error> {
+        let query = match ptype {
+            "g1" => {
+                r#"SELECT
+    c.id,
+    c.v0,
+    u.username AS v0_desc,
+    c.v1
+FROM casbin_rule AS c
+LEFT JOIN users AS u ON c.v0 = u.id
+WHERE c.ptype = 'g1';"#
+            }
+            "g2" => {
+                r#"SELECT
+    cr.id,
+    cr.v0,
+    t.name AS v0_desc,
+    cr.v1
+FROM casbin_rule AS cr
+LEFT JOIN (
+        /* unified id→name mapping for external + internal objects */
+        SELECT ts.id,
+               s.user || '@' || t.name || ':' || t.port AS name
+        FROM target_secrets AS ts
+        LEFT JOIN targets  AS t ON ts.target_id = t.id
+        LEFT JOIN secrets  AS s ON ts.secret_id = s.id
+        UNION ALL
+        SELECT name AS id, name
+        FROM internal_objects
+) AS t ON cr.v0 = t.id
+WHERE cr.ptype = 'g2';"#
+            }
+            "g3" => {
+                r#"SELECT                          
+    c.id,
+    c.v0,
+    io.name AS v0_desc,
+    c.v1
+FROM casbin_rule AS c
+LEFT JOIN internal_objects AS io ON c.v0 = io.name
+WHERE c.ptype = 'g3';"#
+            }
+            _ => unreachable!(),
+        };
+
+        sqlx::query_as::<_, CasbinRuleGroup>(query)
+            .bind(ptype)
             .fetch_all(&self.pool)
             .await
             .map_err(Error::Sqlx)

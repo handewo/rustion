@@ -127,5 +127,5 @@ pub(super) trait HandlerBackend: Send + Clone {
     fn get_role_graph(
         &self,
         rt: RoleType,
-    ) -> impl Future<Output = StableDiGraph<String, ()>> + Send;
+    ) -> impl Future<Output = StableDiGraph<casbin::RuleGroup, ()>> + Send;
 }

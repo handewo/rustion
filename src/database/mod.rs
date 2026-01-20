@@ -5,8 +5,8 @@ pub(crate) mod sqlite;
 use crate::error::Error;
 use async_trait::async_trait;
 use models::{
-    Action, AllowedObjects, CasbinRule, InternalObject, Log, Secret, SecretInfo, Target,
-    TargetInfo, TargetSecret, TargetSecretName, User,
+    Action, AllowedObjects, CasbinRule, CasbinRuleGroup, InternalObject, Log, Secret, SecretInfo,
+    Target, TargetInfo, TargetSecret, TargetSecretName, User,
 };
 
 /// Database configuration enum to support multiple database backends
@@ -105,6 +105,10 @@ pub trait DatabaseRepository: Send + Sync {
     /// CasbinRule operations
     async fn list_casbin_rules(&self) -> Result<Vec<CasbinRule>, Error>;
     async fn list_casbin_rules_by_ptype(&self, ptype: &str) -> Result<Vec<CasbinRule>, Error>;
+    async fn list_casbin_rule_group_by_ptype(
+        &self,
+        ptype: &str,
+    ) -> Result<Vec<CasbinRuleGroup>, Error>;
     async fn list_roles_by_user_id(&self, user_id: &str) -> Result<Vec<CasbinRule>, Error>;
     async fn create_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error>;
     async fn update_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error>;

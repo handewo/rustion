@@ -47,8 +47,15 @@ impl CasbinRule {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct CasbinRuleGroup {
+    pub id: String,
+    pub v0: String,
+    pub v0_desc: Option<String>,
+    pub v1: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd, Clone, Copy)]
-#[serde(rename_all = "lowercase")]
 pub enum Action {
     Shell,
     Exec,
@@ -71,6 +78,7 @@ impl FromStr for Action {
         }
     }
 }
+
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
