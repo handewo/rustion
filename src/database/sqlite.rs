@@ -641,7 +641,7 @@ impl DatabaseRepository for SqliteRepository {
                 r#"SELECT
     c.id,
     c.v0,
-    u.username AS v0_desc,
+    u.username AS v0_label,
     c.v1
 FROM casbin_rule AS c
 LEFT JOIN users AS u ON c.v0 = u.id
@@ -651,7 +651,7 @@ WHERE c.ptype = 'g1';"#
                 r#"SELECT
     cr.id,
     cr.v0,
-    t.name AS v0_desc,
+    t.name AS v0_label,
     cr.v1
 FROM casbin_rule AS cr
 LEFT JOIN (
@@ -671,7 +671,7 @@ WHERE cr.ptype = 'g2';"#
                 r#"SELECT                          
     c.id,
     c.v0,
-    io.name AS v0_desc,
+    io.name AS v0_label,
     c.v1
 FROM casbin_rule AS c
 LEFT JOIN internal_objects AS io ON c.v0 = io.name

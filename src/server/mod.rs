@@ -7,6 +7,7 @@ pub mod init_service;
 mod test;
 
 pub use bastion_server::BastionServer;
+pub use casbin::RuleGroup;
 
 use crate::database::models::{Action, Target, TargetSecretName, User};
 use crate::database::DatabaseRepository;

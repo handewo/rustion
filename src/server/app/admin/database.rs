@@ -1,10 +1,10 @@
 use super::table::{AdminTable, DisplayMode, FieldsToArray, TableData as TD};
-use crate::database::models::*;
-use crate::error::Error;
-use crate::server::common::{
+use crate::database::common::{
     TABLE_CASBIN_RULE, TABLE_INTERNAL_OBJECTS, TABLE_LIST, TABLE_LOGS, TABLE_SECRETS,
     TABLE_TARGETS, TABLE_TARGET_SECRETS, TABLE_USERS,
 };
+use crate::database::models::*;
+use crate::error::Error;
 use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -576,12 +576,12 @@ impl super::table::TableData for TableData {
                 vec![
                     "id",
                     "ptype",
-                    "p0",
-                    "p1",
-                    "p2",
-                    "p3",
-                    "p4",
-                    "p5",
+                    "v0",
+                    "v1",
+                    "v2",
+                    "v3",
+                    "v4",
+                    "v5",
                     "updated_by",
                     "updated_at",
                 ]

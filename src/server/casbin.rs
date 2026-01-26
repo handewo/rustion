@@ -32,7 +32,7 @@ pub enum RoleType {
     Action,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RuleGroup {
     V0(GroupV0),
     V1(GroupV1),
@@ -43,7 +43,7 @@ impl RuleGroup {
         RuleGroup::V0(GroupV0 {
             id: r.id.clone(),
             v0: r.v0.clone(),
-            v0_desc: r.v0_desc.clone(),
+            v0_label: r.v0_label.clone(),
         })
     }
     pub fn from_v1(r: &CasbinRuleGroup) -> Self {
@@ -51,6 +51,19 @@ impl RuleGroup {
             id: r.id.clone(),
             v1: r.v1.clone(),
         })
+    }
+
+    pub fn label(&self) -> String {
+        match self {
+            RuleGroup::V0(v) => {
+                if let Some(l) = v.v0_label.as_ref() {
+                    l.clone()
+                } else {
+                    v.v0.clone()
+                }
+            }
+            RuleGroup::V1(v) => v.v1.clone(),
+        }
     }
 
     pub fn fetch_role(&self) -> &str {
@@ -61,14 +74,14 @@ impl RuleGroup {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GroupV0 {
     pub id: String,
     pub v0: String,
-    pub v0_desc: Option<String>,
+    pub v0_label: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GroupV1 {
     pub id: String,
     pub v1: String,

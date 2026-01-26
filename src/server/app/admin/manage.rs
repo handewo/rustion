@@ -21,6 +21,7 @@ use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
 
 mod bind;
+mod role;
 mod secret;
 mod target;
 mod user;
@@ -84,6 +85,7 @@ enum SelectedTab {
     Targets = 1,
     Secrets = 2,
     Bind = 3,
+    Role = 4,
 }
 
 impl fmt::Display for SelectedTab {
@@ -93,6 +95,7 @@ impl fmt::Display for SelectedTab {
             SelectedTab::Targets => write!(f, "Targets"),
             SelectedTab::Secrets => write!(f, "Secrets"),
             SelectedTab::Bind => write!(f, "Bind"),
+            SelectedTab::Role => write!(f, "Role"),
         }
     }
 }
@@ -103,16 +106,18 @@ impl SelectedTab {
             SelectedTab::Users => SelectedTab::Targets,
             SelectedTab::Targets => SelectedTab::Secrets,
             SelectedTab::Secrets => SelectedTab::Bind,
-            SelectedTab::Bind => SelectedTab::Users,
+            SelectedTab::Bind => SelectedTab::Role,
+            SelectedTab::Role => SelectedTab::Users,
         }
     }
 
     fn previous(&self) -> Self {
         match self {
-            SelectedTab::Users => SelectedTab::Bind,
+            SelectedTab::Users => SelectedTab::Role,
             SelectedTab::Targets => SelectedTab::Users,
             SelectedTab::Secrets => SelectedTab::Targets,
             SelectedTab::Bind => SelectedTab::Secrets,
+            SelectedTab::Role => SelectedTab::Bind,
         }
     }
 }
@@ -196,6 +201,7 @@ where
                 ))))
             }
             SelectedTab::Bind => unreachable!(),
+            SelectedTab::Role => unreachable!(),
         }
     }
 
@@ -234,6 +240,7 @@ where
                 self.editor = Editor::Secret(Box::new(secret::SecretEditor::new(secret)));
             }
             SelectedTab::Bind => unreachable!(),
+            SelectedTab::Role => unreachable!(),
         }
 
         true
@@ -308,6 +315,7 @@ where
                 }
             }
             SelectedTab::Bind => unreachable!(),
+            SelectedTab::Role => unreachable!(),
         }
     }
 
@@ -329,6 +337,7 @@ where
                 }
             }
             SelectedTab::Bind => unreachable!(),
+            SelectedTab::Role => unreachable!(),
         }
 
         false
@@ -360,13 +369,23 @@ where
                     }
                 }
 
-                if let Editor::Bind(ref mut e) = self.editor {
-                    if e.handle_key_event(key.code, key.modifiers) {
-                        self.editor = Editor::None;
-                    } else {
-                        continue;
+                match self.editor {
+                    Editor::Bind(ref mut e) => {
+                        if e.handle_key_event(key.code, key.modifiers) {
+                            self.editor = Editor::None;
+                        } else {
+                            continue;
+                        }
                     }
-                };
+                    Editor::Role(ref mut e) => {
+                        if e.handle_key_event(key.code, key.modifiers) {
+                            self.editor = Editor::None;
+                        } else {
+                            continue;
+                        }
+                    }
+                    _ => {}
+                }
                 let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
 
                 match self.popup {
@@ -434,7 +453,7 @@ where
                         let _ = e.as_mut().handle_paste_event(paste);
                     }
                     Editor::Bind(_) => unreachable!(),
-
+                    Editor::Role(_) => unreachable!(),
                     Editor::None => {}
                 }
             }
@@ -584,9 +603,8 @@ where
                 }
             }
             Editor::Bind(_) => unreachable!(),
-            _ => {
-                todo!()
-            }
+            Editor::Role(_) => unreachable!(),
+            Editor::None => unreachable!(),
         }
         Ok(())
     }
@@ -609,20 +627,30 @@ where
         self.table.size = (table_area.width, table_area.height);
 
         self.render_tabs(frame, header_area);
-        if self.selected_tab == SelectedTab::Bind {
-            if let Editor::Bind(_) = self.editor {
-                frame.render_widget(&mut self.editor, table_area);
-            } else {
-                unreachable!()
+        match self.selected_tab {
+            SelectedTab::Bind => {
+                if let Editor::Bind(_) = self.editor {
+                    frame.render_widget(&mut self.editor, table_area);
+                } else {
+                    unreachable!()
+                }
             }
-        } else {
-            self.table.render(
-                frame.buffer_mut(),
-                table_area,
-                &self.items,
-                &self.longest_item_lens,
-                DisplayMode::Manage,
-            );
+            SelectedTab::Role => {
+                if let Editor::Role(ref mut e) = self.editor {
+                    e.draw(table_area, frame.buffer_mut());
+                } else {
+                    unreachable!()
+                }
+            }
+            _ => {
+                self.table.render(
+                    frame.buffer_mut(),
+                    table_area,
+                    &self.items,
+                    &self.longest_item_lens,
+                    DisplayMode::Manage,
+                );
+            }
         }
         self.render_popup(frame, table_area);
         if let Some(ref msg) = self.message {
@@ -675,6 +703,14 @@ where
                 self.editor = Editor::Bind(Box::new(bind::BindEditor::new(
                     targets,
                     secrets,
+                    self.backend.clone(),
+                    self.t_handle.clone(),
+                    self.handler_id.clone(),
+                    self.user_id.clone(),
+                )));
+            }
+            SelectedTab::Role => {
+                self.editor = Editor::Role(Box::new(role::RoleEditor::new(
                     self.backend.clone(),
                     self.t_handle.clone(),
                     self.handler_id.clone(),
@@ -740,14 +776,16 @@ where
                 Editor::Target(_) => Line::styled("Add New Target", Style::default().bold()),
                 Editor::Secret(_) => Line::styled("Add New Secret", Style::default().bold()),
                 Editor::Bind(_) => unreachable!(),
-                _ => todo!(),
+                Editor::Role(_) => unreachable!(),
+                Editor::None => unreachable!(),
             },
             Popup::Edit => match self.editor {
                 Editor::User(_) => Line::styled("Edit User", Style::default().bold()),
                 Editor::Target(_) => Line::styled("Edit Target", Style::default().bold()),
                 Editor::Secret(_) => Line::styled("Edit Secret", Style::default().bold()),
                 Editor::Bind(_) => unreachable!(),
-                _ => todo!(),
+                Editor::Role(_) => unreachable!(),
+                Editor::None => unreachable!(),
             },
             Popup::Delete(_) => {
                 match self.selected_tab {
@@ -773,6 +811,7 @@ where
                         );
                     }
                     SelectedTab::Bind => unreachable!(),
+                    SelectedTab::Role => unreachable!(),
                 }
                 return;
             }
@@ -794,6 +833,7 @@ where
             Editor::Target(ref e) => e.as_ref().help_text,
             Editor::Secret(ref e) => e.as_ref().help_text,
             Editor::Bind(ref e) => e.as_ref().help_text,
+            Editor::Role(ref e) => e.as_ref().help_text,
             Editor::None => HELP_TEXT,
         };
 
@@ -1177,6 +1217,7 @@ where
     Target(Box<target::TargetEditor>),
     Secret(Box<secret::SecretEditor>),
     Bind(Box<bind::BindEditor<B>>),
+    Role(Box<role::RoleEditor<B>>),
     None,
 }
 
@@ -1200,6 +1241,9 @@ where
             }
             Editor::Bind(ref mut e) => {
                 e.render(area, buf);
+            }
+            Editor::Role(_) => {
+                unreachable!();
             }
             Editor::None => {}
         }

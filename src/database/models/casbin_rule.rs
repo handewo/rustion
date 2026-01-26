@@ -52,7 +52,7 @@ impl CasbinRule {
 pub struct CasbinRuleGroup {
     pub id: String,
     pub v0: String,
-    pub v0_desc: Option<String>,
+    pub v0_label: Option<String>,
     pub v1: String,
 }
 

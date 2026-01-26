@@ -1,7 +1,8 @@
+use crate::database::common as db_common;
 use crate::database::models::{Action, User};
 use crate::error::Error;
+use crate::server::casbin;
 use crate::server::HandlerLog;
-use crate::server::{casbin, common as srv_common};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use crossterm::event::NoTtyEvent;
@@ -18,6 +19,7 @@ mod database;
 mod manage;
 mod shell;
 mod table;
+mod tree;
 mod widgets;
 
 const LOG_TYPE: &str = "admin";
@@ -93,7 +95,7 @@ impl Admin {
         ip: Option<std::net::IpAddr>,
     ) -> Result<bool, Error> {
         if !self
-            .check_permission(backend, srv_common::OBJ_ADMIN, Action::Login, ip)
+            .check_permission(backend, db_common::OBJ_ADMIN, Action::Login, ip)
             .await?
         {
             debug!(
