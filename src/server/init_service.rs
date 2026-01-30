@@ -54,9 +54,6 @@ pub async fn init_service(config: Config) {
     {
         panic!("Table: target_secrets doesn't empty");
     }
-    let server = crate::server::BastionServer::with_config(config)
-        .await
-        .unwrap();
 
     // init admin user
     let admin_id = Uuid::new_v4();
@@ -71,12 +68,27 @@ pub async fn init_service(config: Config) {
     let action_exec = CasbinName::new("act".to_string(), ACT_EXEC.to_string(), u.id);
     let action_pty = CasbinName::new("act".to_string(), ACT_PTY.to_string(), u.id);
     let action_tcpip = CasbinName::new("act".to_string(), ACT_DIRECT_TCPIP.to_string(), u.id);
-    
-    db.repository().create_casbin_name(&action_login).await.unwrap();
-    db.repository().create_casbin_name(&action_shell).await.unwrap();
-    db.repository().create_casbin_name(&action_exec).await.unwrap();
-    db.repository().create_casbin_name(&action_pty).await.unwrap();
-    db.repository().create_casbin_name(&action_tcpip).await.unwrap();
+
+    db.repository()
+        .create_casbin_name(&action_login)
+        .await
+        .unwrap();
+    db.repository()
+        .create_casbin_name(&action_shell)
+        .await
+        .unwrap();
+    db.repository()
+        .create_casbin_name(&action_exec)
+        .await
+        .unwrap();
+    db.repository()
+        .create_casbin_name(&action_pty)
+        .await
+        .unwrap();
+    db.repository()
+        .create_casbin_name(&action_tcpip)
+        .await
+        .unwrap();
 
     // init built-in internal objects
     let internal_objs = INTERNAL_OBJECTS
@@ -87,14 +99,25 @@ pub async fn init_service(config: Config) {
         .create_internal_objects_batch(&internal_objs)
         .await
         .unwrap();
-    
+
     // Get UUIDs for internal objects (OBJ_LOGIN, OBJ_ADMIN)
-    let obj_login_id = internal_objs.iter().find(|o| o.name == OBJ_LOGIN).unwrap().id;
-    let obj_admin_id = internal_objs.iter().find(|o| o.name == OBJ_ADMIN).unwrap().id;
+    let obj_login_id = internal_objs
+        .iter()
+        .find(|o| o.name == OBJ_LOGIN)
+        .unwrap()
+        .id;
+    let obj_admin_id = internal_objs
+        .iter()
+        .find(|o| o.name == OBJ_ADMIN)
+        .unwrap()
+        .id;
 
     // Create login_group UUID and store in casbin_names
     let login_group = CasbinName::new("g1".to_string(), "login_group".to_string(), u.id);
-    db.repository().create_casbin_name(&login_group).await.unwrap();
+    db.repository()
+        .create_casbin_name(&login_group)
+        .await
+        .unwrap();
 
     let ext = casbin::ExtendPolicy {
         ip_policy: Some(casbin::IpPolicy::Allow("127.0.0.1/32".parse().unwrap())),
@@ -102,7 +125,7 @@ pub async fn init_service(config: Config) {
         end_time: None,
         expire_date: None,
     };
-    
+
     // Policy: admin can login from localhost (IPv4)
     let p = CasbinRule::new(
         "p".to_string(),
@@ -128,7 +151,7 @@ pub async fn init_service(config: Config) {
         u.id,
     );
     db.repository().create_casbin_rule(&p).await.unwrap();
-    
+
     // for ipv6
     let ext = casbin::ExtendPolicy {
         ip_policy: Some(casbin::IpPolicy::Allow("::1/128".parse().unwrap())),
@@ -136,7 +159,7 @@ pub async fn init_service(config: Config) {
         end_time: None,
         expire_date: None,
     };
-    
+
     // Policy: admin can login from localhost (IPv6)
     let p = CasbinRule::new(
         "p".to_string(),
@@ -162,7 +185,7 @@ pub async fn init_service(config: Config) {
         u.id,
     );
     db.repository().create_casbin_rule(&p).await.unwrap();
-    
+
     // Policy: login_group can login (no IP restriction)
     let ext = casbin::ExtendPolicy {
         ip_policy: None,
@@ -181,6 +204,10 @@ pub async fn init_service(config: Config) {
         u.id,
     );
     db.repository().create_casbin_rule(&p).await.unwrap();
+
+    let server = crate::server::BastionServer::with_config(config)
+        .await
+        .unwrap();
 
     let pass = server.generate_random_password(u).await.unwrap();
     eprintln!("Rustion has been initialized successfully.");
