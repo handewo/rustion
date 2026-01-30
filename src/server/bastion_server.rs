@@ -24,7 +24,6 @@ use base64::{engine::general_purpose, Engine as _};
 use rand_core::RngCore;
 use std::path::Path;
 use std::sync::Arc;
-#[cfg(feature = "full-role")]
 use tokio::sync::RwLock;
 
 #[derive(Clone)]
@@ -35,7 +34,6 @@ pub struct BastionServer {
     client_ip_pool: Cache<std::net::IpAddr, u32>,
     client_user_pool: Cache<String, u32>,
     connection_pool: Option<super::connection_pool::ConnectionPool>,
-    #[cfg(feature = "full-role")]
     role_manager: Arc<RwLock<casbin::RoleManage>>,
 }
 
@@ -112,7 +110,6 @@ impl BastionServer {
         });
 
         // initial casbin role
-        #[cfg(feature = "full-role")]
         let role_manager = {
             let g1 = database
                 .repository()
@@ -195,12 +192,10 @@ impl BastionServer {
             client_ip_pool,
             client_user_pool,
             connection_pool,
-            #[cfg(feature = "full-role")]
             role_manager: Arc::new(RwLock::new(role_manager)),
         })
     }
 
-    #[cfg(feature = "full-role")]
     pub async fn do_load_role_manager(&self) -> Result<(), Error> {
         let g1 = self
             .database
@@ -313,7 +308,6 @@ impl super::HandlerBackend for BastionServer {
             .await
     }
 
-    #[cfg(feature = "full-role")]
     async fn list_targets_for_user(
         &self,
         user_id: &Uuid,
@@ -355,18 +349,6 @@ impl super::HandlerBackend for BastionServer {
             }
         }
         Ok(res)
-    }
-
-    #[cfg(feature = "light-role")]
-    async fn list_targets_for_user(
-        &self,
-        user_id: &Uuid,
-        active_only: bool,
-    ) -> Result<Vec<models::TargetSecretName>, Error> {
-        self.database
-            .repository()
-            .list_targets_for_user(user_id, active_only)
-            .await
     }
 
     async fn connect_to_target(
@@ -527,65 +509,6 @@ impl super::HandlerBackend for BastionServer {
         self.database.repository()
     }
 
-    #[cfg(feature = "light-role")]
-    async fn enforce(
-        &self,
-        sub: Uuid,
-        obj: Uuid,
-        act: Uuid,
-        ext: casbin::ExtendPolicyReq,
-    ) -> Result<bool, Error> {
-        // match sub
-        let policies = self
-            .database
-            .repository()
-            .get_policies_for_user(&sub)
-            .await?;
-        if policies.is_empty() {
-            return Ok(false);
-        }
-        trace!("sub: {} polices: {:?}", sub, policies);
-
-        // match obj
-        let allowed_objects = self
-            .database
-            .repository()
-            .list_objects_for_user(&sub, true)
-            .await?;
-        if allowed_objects.is_empty() {
-            return Ok(false);
-        }
-        trace!(
-            "sub: {}, obj: {} allowed_objects: {:?}",
-            sub,
-            obj,
-            allowed_objects
-        );
-        for ao in allowed_objects.iter().filter(|v| v.id == obj) {
-            if let Some(p) = policies.iter().find(|v| v.id == ao.pid) {
-                // match act
-                if let Some(policy_act) = p.v2 {
-                    if policy_act == act {
-                        // match ext
-                        if casbin::verify_extend_policy(&ext, &p.v3)? {
-                            trace!("Accept sub: {}, policy: {:?}", sub, p);
-                            return Ok(true);
-                        }
-                    } else {
-                        trace!(
-                            "Reject by action, sub: {}, act: {}, policy: {:?}",
-                            sub,
-                            act,
-                            p
-                        );
-                    }
-                }
-            }
-        }
-        Ok(false)
-    }
-
-    #[cfg(feature = "full-role")]
     async fn enforce(
         &self,
         sub: Uuid,
@@ -668,14 +591,8 @@ impl super::HandlerBackend for BastionServer {
         &self.config.record_path
     }
 
-    #[cfg(feature = "full-role")]
     async fn load_role_manager(&self) -> Result<(), Error> {
         self.do_load_role_manager().await
-    }
-
-    #[cfg(feature = "light-role")]
-    async fn load_role_manager(&self) -> Result<(), Error> {
-        Ok(())
     }
 
     fn encrypt_plain_text(&self, text: &str) -> Result<String, Error> {

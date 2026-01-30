@@ -586,7 +586,6 @@ mod tests {
             .delete_casbin_rule(&Uuid::parse_str("f45acaa9-c0e4-4e6a-a95a-a35efc6e528f").unwrap())
             .await
             .unwrap();
-        #[cfg(feature = "full-role")]
         server.load_role_manager().await.unwrap();
         assert!(server
             .enforce(
@@ -646,7 +645,6 @@ mod tests {
             .delete_casbin_rule(&Uuid::parse_str("6e62e16d-052e-4992-be35-4d1482449d90").unwrap())
             .await
             .unwrap();
-        #[cfg(feature = "full-role")]
         server.load_role_manager().await.unwrap();
         assert!(!server
             .enforce(
@@ -657,53 +655,9 @@ mod tests {
             )
             .await
             .unwrap());
-        #[cfg(feature = "light-role")]
-        assert!(!server
-            .enforce(
-                &jack.id.to_string(),
-                Uuid::from_str("980f07aa-866c-481f-92a0-727587576a05").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        #[cfg(feature = "light-role")]
-        assert!(!server
-            .enforce(
-                admin.id,
-                // mars
-                Uuid::from_str("5846631d-62c2-4de8-83c0-b1f25667ca5c").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        #[cfg(feature = "light-role")]
-        assert!(!server
-            .enforce(
-                admin.id,
-                // saturn
-                Uuid::from_str("3d5c1f2b-2e7c-4f29-b7bd-cb826966f2e0").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        #[cfg(feature = "light-role")]
-        assert!(!server
-            .enforce(
-                admin.id,
-                // venus
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
     }
 
     #[tokio::test]
-    #[cfg(feature = "full-role")]
     async fn test_full_role() {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test.db");

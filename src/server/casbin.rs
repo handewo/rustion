@@ -4,7 +4,6 @@ use ipnetwork::IpNetwork;
 use log::trace;
 use std::fmt;
 use std::net::IpAddr;
-#[cfg(feature = "full-role")]
 use {
     crate::database::models::{CasbinRule, CasbinRuleGroup},
     petgraph::stable_graph::{NodeIndex, StableDiGraph},
@@ -16,7 +15,6 @@ use chrono::{DateTime, FixedOffset, NaiveTime, Utc};
 use serde::{ser, Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
 
-#[cfg(feature = "full-role")]
 pub struct RoleManage {
     h1: HashMap<Uuid, NodeIndex>,
     h2: HashMap<Uuid, NodeIndex>,
@@ -26,7 +24,6 @@ pub struct RoleManage {
     g3: StableDiGraph<RuleGroup, ()>,
 }
 
-#[cfg(feature = "full-role")]
 pub enum RoleType {
     Subject,
     Object,
@@ -96,7 +93,6 @@ pub struct GroupV1 {
     pub v1_label: Option<String>,
 }
 
-#[cfg(feature = "full-role")]
 impl RoleManage {
     pub fn new(r1: &[CasbinRuleGroup], r2: &[CasbinRuleGroup], r3: &[CasbinRuleGroup]) -> Self {
         let mut h1 = HashMap::new();
@@ -466,7 +462,6 @@ pub fn is_ip_in_cidr(ip: Option<IpAddr>, ip_policy: Option<IpPolicy>) -> bool {
     }
 }
 
-#[cfg(feature = "full-role")]
 fn build_graph(
     rules: &[CasbinRuleGroup],
     hm: &mut HashMap<Uuid, NodeIndex>,
