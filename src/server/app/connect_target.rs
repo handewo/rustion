@@ -1,5 +1,5 @@
 use crate::asciinema;
-use crate::database::models::{self, Target, TargetSecretName, User};
+use crate::database::models::{Target, TargetSecretName, User};
 use crate::error::Error;
 use crate::server::{casbin, HandlerLog};
 use log::{debug, trace};
@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use crate::database::Uuid;
 
 static LOG_TYPE: &str = "target";
 
@@ -21,7 +22,7 @@ pub enum Request<'a> {
 }
 
 pub(crate) struct ConnectTarget {
-    handler_id: String,
+    handler_id: Uuid,
     user: Option<User>,
     // selected target
     target: Option<Target>,
@@ -37,7 +38,7 @@ pub(crate) struct ConnectTarget {
 }
 
 impl ConnectTarget {
-    pub(crate) fn new(id: String, user: Option<User>, log: HandlerLog) -> Self {
+    pub(crate) fn new(id: Uuid, user: Option<User>, log: HandlerLog) -> Self {
         Self {
             handler_id: id,
             user,
@@ -101,9 +102,8 @@ impl ConnectTarget {
             return Ok(false);
         };
 
-        let user_id = user.id.as_str();
         let target_secret_name = match backend
-            .list_targets_for_user(user_id, true)
+            .list_targets_for_user(&user.id, true)
             .await?
             .into_iter()
             .find(|t| t.target_name == target_name && t.secret_user == target_user)
@@ -547,7 +547,7 @@ impl ConnectTarget {
     pub async fn check_permission<B>(
         &mut self,
         backend: Arc<B>,
-        action: models::Action,
+        action_uuid: Uuid,
         ip: Option<std::net::IpAddr>,
     ) -> Result<bool, Error>
     where
@@ -560,7 +560,7 @@ impl ConnectTarget {
         };
 
         let target_sec_id = if let Some(tsn) = self.target_sec_name.as_ref() {
-            tsn.id.as_str()
+            tsn.id
         } else {
             return Ok(false);
         };
@@ -573,16 +573,16 @@ impl ConnectTarget {
 
         if !backend
             .enforce(
-                &user.id,
+                user.id,
                 target_sec_id,
-                action,
+                action_uuid,
                 casbin::ExtendPolicyReq::new(ip),
             )
             .await?
         {
             debug!(
-                "[{}] User: {} doesn't have permission to access target: {}, action: {}",
-                self.handler_id, &user.username, &target.name, action
+                "[{}] User: {} doesn't have permission to access target: {}, action_uuid: {}",
+                self.handler_id, &user.username, &target.name, action_uuid
             );
             return Ok(false);
         }
@@ -600,7 +600,7 @@ impl ConnectTarget {
         };
 
         let target_sec_id = if let Some(tsn) = self.target_sec_name.as_ref() {
-            tsn.id.as_str()
+            &tsn.id
         } else {
             return Ok(());
         };

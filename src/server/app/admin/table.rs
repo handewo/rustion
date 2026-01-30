@@ -261,14 +261,14 @@ impl FieldsToArray for User {
         match mode {
             DisplayMode::Full => {
                 vec![
-                    self.id.clone(),
+                    self.id.to_string(),
                     self.username.clone(),
                     self.email.clone().unwrap_or_default(),
                     self.print_password(),
                     self.print_authorized_keys(),
                     self.force_init_pass.to_string(),
                     self.is_active.to_string(),
-                    self.updated_by.clone(),
+                    self.updated_by.to_string(),
                     self.updated_at.to_string(),
                 ]
             }
@@ -291,14 +291,14 @@ impl FieldsToArray for Target {
         match mode {
             DisplayMode::Full => {
                 vec![
-                    self.id.clone(),
+                    self.id.to_string(),
                     self.name.clone(),
                     self.hostname.clone(),
                     self.port.to_string(),
                     self.print_server_key(),
                     self.description.clone().unwrap_or_default(),
                     self.is_active.to_string(),
-                    self.updated_by.clone(),
+                    self.updated_by.to_string(),
                     self.updated_at.to_string(),
                 ]
             }
@@ -321,11 +321,11 @@ impl FieldsToArray for TargetSecret {
         match mode {
             DisplayMode::Full => {
                 vec![
-                    self.id.clone(),
-                    self.target_id.clone(),
-                    self.secret_id.clone(),
+                    self.id.to_string(),
+                    self.target_id.to_string(),
+                    self.secret_id.to_string(),
                     self.is_active.to_string(),
-                    self.updated_by.clone(),
+                    self.updated_by.to_string(),
                     self.updated_at.to_string(),
                 ]
             }
@@ -341,14 +341,14 @@ impl FieldsToArray for Secret {
         match mode {
             DisplayMode::Full => {
                 vec![
-                    self.id.clone(),
+                    self.id.to_string(),
                     self.name.clone(),
                     self.user.clone(),
                     self.print_password(),
                     self.print_private_key(),
                     self.print_public_key(),
                     self.is_active.to_string(),
-                    self.updated_by.clone(),
+                    self.updated_by.to_string(),
                     self.updated_at.to_string(),
                 ]
             }
@@ -373,7 +373,7 @@ impl FieldsToArray for InternalObject {
                 vec![
                     self.name.clone(),
                     self.is_active.to_string(),
-                    self.updated_by.clone(),
+                    self.updated_by.to_string(),
                     self.updated_at.to_string(),
                 ]
             }
@@ -389,15 +389,15 @@ impl FieldsToArray for CasbinRule {
         match mode {
             DisplayMode::Full => {
                 vec![
-                    self.id.clone(),
+                    self.id.to_string(),
                     self.ptype.clone(),
-                    self.v0.clone(),
-                    self.v1.clone(),
-                    self.v2.clone(),
+                    self.v0.to_string(),
+                    self.v1.to_string(),
+                    self.v2.map(|u| u.to_string()).unwrap_or_default(),
                     self.v3.clone(),
                     self.v4.clone(),
                     self.v5.clone(),
-                    self.updated_by.clone(),
+                    self.updated_by.to_string(),
                     self.updated_at.to_string(),
                 ]
             }
@@ -413,9 +413,9 @@ impl FieldsToArray for Log {
         match mode {
             DisplayMode::Full => {
                 vec![
-                    self.connection_id.clone(),
+                    self.connection_id.to_string(),
                     self.log_type.clone(),
-                    self.user_id.clone(),
+                    self.user_id.to_string(),
                     self.detail.clone(),
                     self.created_at.to_string(),
                 ]

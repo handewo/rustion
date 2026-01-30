@@ -13,22 +13,22 @@ const MAX_NAME_LEN: usize = 50;
 /// Target model for database storage
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Target {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub hostname: String,
     pub port: u16,
     pub server_public_key: String,
     pub description: Option<String>,
     pub is_active: bool,
-    pub updated_by: String, // User ID who last updated this target
+    pub updated_by: Uuid, // User ID who last updated this target
     pub updated_at: i64,
 }
 
 impl Target {
-    pub fn new(updated_by: String) -> Self {
+    pub fn new(updated_by: Uuid) -> Self {
         let now = Utc::now();
         Self {
-            id: Uuid::new_v4().to_string(),
+            id: Uuid::new_v4(),
             name: String::default(),
             hostname: String::default(),
             port: 22,
@@ -143,7 +143,7 @@ impl std::fmt::Display for ValidateError {
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct TargetInfo {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub hostname: String,
     pub port: u16,

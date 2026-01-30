@@ -7,33 +7,33 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct TargetSecret {
-    pub id: String,
-    pub target_id: String,
-    pub secret_id: String,
+    pub id: Uuid,
+    pub target_id: Uuid,
+    pub secret_id: Uuid,
     pub is_active: bool,
-    pub updated_by: String,
+    pub updated_by: Uuid,
     pub updated_at: i64,
 }
 
 /// For login to remote target
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Secret {
-    pub id: String,
+    pub id: Uuid,
     pub name: String, //for display only
     pub user: String, //login user of target
     pub(in crate::database) password: Option<String>,
     pub(in crate::database) private_key: Option<String>,
     pub(in crate::database) public_key: Option<String>,
     pub is_active: bool,
-    pub updated_by: String,
+    pub updated_by: Uuid,
     pub updated_at: i64,
 }
 
 impl TargetSecret {
-    pub fn new(target_id: String, secret_id: String, updated_by: String) -> Self {
+    pub fn new(target_id: Uuid, secret_id: Uuid, updated_by: Uuid) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
-            id: Uuid::new_v4().to_string(),
+            id: Uuid::new_v4(),
             target_id,
             secret_id,
             is_active: true,
@@ -44,10 +44,10 @@ impl TargetSecret {
 }
 
 impl Secret {
-    pub fn new(updated_by: String) -> Self {
+    pub fn new(updated_by: Uuid) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
-            id: Uuid::new_v4().to_string(),
+            id: Uuid::new_v4(),
             name: String::default(),
             user: String::default(),
             password: None,
@@ -172,18 +172,18 @@ impl std::fmt::Display for ValidateError {
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct TargetSecretName {
     // policy id in casbin_rule
-    pub pid: String,
+    pub pid: Uuid,
     // target_secret id
-    pub id: String,
-    pub target_id: String,
+    pub id: Uuid,
+    pub target_id: Uuid,
     pub target_name: String,
-    pub secret_id: String,
+    pub secret_id: Uuid,
     pub secret_user: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct SecretInfo {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub user: String,
     pub is_bound: bool,

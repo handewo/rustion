@@ -14,6 +14,7 @@ use russh::server as ru_server;
 use russh::{Channel, ChannelId};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use crate::database::Uuid;
 
 #[derive(Clone)]
 enum TerminalStatus {
@@ -24,7 +25,7 @@ enum TerminalStatus {
 }
 
 pub(crate) struct TargetSelector {
-    handler_id: String,
+    handler_id: Uuid,
     user: Option<User>,
 
     allowed_targets: Option<Vec<TargetSecretName>>,
@@ -37,7 +38,7 @@ pub(crate) struct TargetSelector {
 }
 
 impl TargetSelector {
-    pub(crate) fn new(id: String, user: Option<User>, log: HandlerLog) -> Self {
+    pub(crate) fn new(id: Uuid, user: Option<User>, log: HandlerLog) -> Self {
         Self {
             handler_id: id,
             user,
@@ -76,8 +77,7 @@ impl TargetSelector {
             return Ok(false);
         };
 
-        let user_id = user.id.as_str();
-        let mut allowed_targets = backend.list_targets_for_user(user_id, true).await?;
+        let mut allowed_targets = backend.list_targets_for_user(&user.id, true).await?;
         if allowed_targets.is_empty() {
             return Ok(false);
         }
@@ -106,15 +106,14 @@ impl TargetSelector {
             return Ok(false);
         };
 
-        let user_id = user.id.as_str();
-        let allowed_targets = backend.list_targets_for_user(user_id, true).await?;
+        let allowed_targets = backend.list_targets_for_user(&user.id, true).await?;
         trace!(
             "[{}] list targets: {:?}",
             self.handler_id,
             allowed_targets
                 .iter()
-                .map(|v| v.id.as_str())
-                .collect::<Vec<&str>>()
+                .map(|v| v.id)
+                .collect::<Vec<Uuid>>()
         );
         if allowed_targets.is_empty() {
             return Ok(false);
@@ -159,7 +158,7 @@ impl TargetSelector {
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
-        let handler_id = self.handler_id.clone();
+        let handler_id = self.handler_id;
         let channel_id = channel;
 
         let user = self
@@ -205,7 +204,7 @@ impl TargetSelector {
             }
         });
 
-        let handler_id = self.handler_id.clone();
+        let handler_id = self.handler_id;
         tokio::spawn(async move {
             loop {
                 match recv_status.recv().await {
@@ -234,7 +233,7 @@ impl TargetSelector {
             }
         });
 
-        let handler_id = self.handler_id.clone();
+        let handler_id = self.handler_id;
         tokio::task::spawn_blocking(move || {
             while let Ok(data) = recv_from_tty.recv() {
                 if send_to_session_from_tty.blocking_send(data).is_err() {
@@ -246,7 +245,7 @@ impl TargetSelector {
 
         let tokio_handle = tokio::runtime::Handle::current();
         let handler_log = self.log.clone();
-        let handler_id = self.handler_id.clone();
+        let handler_id = self.handler_id;
 
         tokio::task::spawn_blocking(move || {
             // TODO: Classify different target type in future
@@ -434,7 +433,7 @@ impl TargetSelector {
                                 status = TerminalStatus::SelectTarget;
                                 if allowed_targets
                                     .iter()
-                                    .map(|v| v.target_id.clone())
+                                    .map(|v| v.target_id)
                                     .collect::<std::collections::HashSet<_>>()
                                     .len()
                                     == 1
@@ -473,8 +472,7 @@ impl TargetSelector {
                         .id
                 })
                 .unwrap_or_else(|| panic!("[{}] target_secret_id should be found", handler_id))
-                .target_id
-                .clone();
+                .target_id;
             let target = match tokio_handle.block_on(backend.get_target_by_id(&target_id, true)) {
                 Ok(t) => t,
                 Err(e) => {
@@ -487,7 +485,7 @@ impl TargetSelector {
                 }
             };
 
-            let connect_target = ConnectTarget::new(handler_id.clone(), Some(user), handler_log)
+            let connect_target = ConnectTarget::new(handler_id, Some(user), handler_log)
                 .with_target(target)
                 .with_target_sec_name(selected_target_sec_name);
             if app_sender

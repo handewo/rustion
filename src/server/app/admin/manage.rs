@@ -2,6 +2,7 @@ use super::common::*;
 use super::table::{AdminTable, Colors, DisplayMode, FieldsToArray, TableData as TD};
 use super::widgets::{centered_area, render_confirm_dialog, render_message_popup, Message};
 use crate::database::models::*;
+use crate::database::Uuid;
 use crate::error::Error;
 use ::log::{error, warn};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent};
@@ -41,8 +42,8 @@ const MIN_WINDOW_ROW: u16 = 15;
 pub(super) fn manage<B, W: Write>(
     tty: NoTtyEvent,
     w: W,
-    user_id: String,
-    handler_id: String,
+    user_id: Uuid,
+    handler_id: Uuid,
     backend: Arc<B>,
     t_handle: Handle,
 ) -> Result<(), Error>
@@ -135,8 +136,8 @@ where
     editor_colors: EditorColors,
     backend: Arc<B>,
     t_handle: Handle,
-    handler_id: String,
-    user_id: String,
+    handler_id: Uuid,
+    user_id: Uuid,
     editor: Editor<B>,
     message: Option<Message>,
 }
@@ -145,7 +146,7 @@ impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    fn new(backend: Arc<B>, t_handle: Handle, user_id: String, handler_id: String) -> Self {
+    fn new(backend: Arc<B>, t_handle: Handle, user_id: Uuid, handler_id: Uuid) -> Self {
         let data = TableData::Users(
             match t_handle.block_on(backend.db_repository().list_users(false)) {
                 Ok(d) => d,
@@ -186,18 +187,16 @@ where
 
         match self.selected_tab {
             SelectedTab::Users => {
-                self.editor = Editor::User(Box::new(user::UserEditor::new(User::new(
-                    self.user_id.clone(),
-                ))))
+                self.editor = Editor::User(Box::new(user::UserEditor::new(User::new(self.user_id))))
             }
             SelectedTab::Targets => {
                 self.editor = Editor::Target(Box::new(target::TargetEditor::new(Target::new(
-                    self.user_id.clone(),
+                    self.user_id,
                 ))))
             }
             SelectedTab::Secrets => {
                 self.editor = Editor::Secret(Box::new(secret::SecretEditor::new(Secret::new(
-                    self.user_id.clone(),
+                    self.user_id,
                 ))))
             }
             SelectedTab::Bind => unreachable!(),
@@ -705,16 +704,16 @@ where
                     secrets,
                     self.backend.clone(),
                     self.t_handle.clone(),
-                    self.handler_id.clone(),
-                    self.user_id.clone(),
+                    self.handler_id,
+                    self.user_id,
                 )));
             }
             SelectedTab::Role => {
                 self.editor = Editor::Role(Box::new(role::RoleEditor::new(
                     self.backend.clone(),
                     self.t_handle.clone(),
-                    self.handler_id.clone(),
-                    self.user_id.clone(),
+                    self.handler_id,
+                    self.user_id,
                 )));
             }
         };
@@ -1015,29 +1014,8 @@ impl TableData {
                 ]
             }
             Self::CasbinRule(ref data) => {
-                let v0_len = data
-                    .iter()
-                    .map(|v| v.v0.as_str())
-                    .map(UnicodeWidthStr::width)
-                    .max()
-                    .unwrap_or(0)
-                    .max(2);
-
-                let v1_len = data
-                    .iter()
-                    .map(|v| v.v1.as_str())
-                    .map(UnicodeWidthStr::width)
-                    .max()
-                    .unwrap_or(0)
-                    .max(2);
-
-                let v2_len = data
-                    .iter()
-                    .map(|v| v.v2.as_str())
-                    .map(UnicodeWidthStr::width)
-                    .max()
-                    .unwrap_or(0)
-                    .max(2);
+                // UUIDs have fixed width of 36 characters
+                let uuid_len = 36;
 
                 let v3_len = data
                     .iter()
@@ -1066,9 +1044,9 @@ impl TableData {
                 vec![
                     Constraint::Length(LENGTH_UUID),
                     Constraint::Length(5),
-                    Constraint::Length(v0_len as u16),
-                    Constraint::Length(v1_len as u16),
-                    Constraint::Length(v2_len as u16),
+                    Constraint::Length(uuid_len as u16),
+                    Constraint::Length(uuid_len as u16),
+                    Constraint::Length(uuid_len as u16),
                     Constraint::Length(v3_len as u16),
                     Constraint::Length(v4_len as u16),
                     Constraint::Length(v5_len as u16),

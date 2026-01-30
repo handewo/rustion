@@ -31,7 +31,7 @@ mod tests {
     use super::*;
     use crate::database::{
         models::{target_secret::TargetSecret, CasbinRule, Secret},
-        InternalObject, Target, User,
+        CasbinName, InternalObject, Target, User,
     };
     use serde::{Deserialize, Serialize};
     use serde_json;
@@ -45,6 +45,7 @@ mod tests {
         secrets: Vec<Secret>,
         target_secrets: Vec<TargetSecret>,
         casbin_rule: Vec<CasbinRule>,
+        casbin_names: Vec<CasbinName>,
         internal_objects: Vec<InternalObject>,
     }
 
@@ -150,26 +151,7 @@ mod tests {
                 .await
                 .unwrap()
                 .len(),
-            1
-        );
-
-        assert_eq!(
-            service
-                .repository
-                .list_objects_for_user("66ed2d9e-a51c-4765-966d-b77763232717", false)
-                .await
-                .unwrap()
-                .len(),
-            59
-        );
-        assert_eq!(
-            service
-                .repository
-                .list_objects_for_user("a422db6f-c50e-48d3-bcfb-ddbf8989a974", false)
-                .await
-                .unwrap()
-                .len(),
-            53
+            2
         );
     }
 }

@@ -1,6 +1,7 @@
 use super::app::{self, Application};
 use super::HandlerBackend;
-use crate::database::models::{self, User};
+use crate::database::models::User;
+use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::casbin::ExtendPolicyReq;
 use futures::future::FutureExt;
@@ -15,7 +16,7 @@ static LOG_TYPE: &str = "server";
 
 pub struct BastionHandler<B: HandlerBackend + Send + Clone> {
     // Unique ID for each connection.
-    id: String,
+    id: Uuid,
     pub(super) user: Option<User>,
     login_parse: Option<LoginParse>,
     client_ip: Option<std::net::SocketAddr>,
@@ -61,7 +62,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
 
                 if user.force_init_pass {
                     let app = Box::new(app::ChangePassword::new(
-                        self.id.clone(),
+                        self.id,
                         self.user.take(),
                         self.log.clone(),
                     ));
@@ -71,7 +72,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 match login_parse.parse_mode() {
                     LoginMode::TargetSelector => {
                         let mut app = Box::new(app::TargetSelector::new(
-                            self.id.clone(),
+                            self.id,
                             self.user.take(),
                             self.log.clone(),
                         ));
@@ -83,7 +84,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     }
                     LoginMode::Password => {
                         let app = Box::new(app::ChangePassword::new(
-                            self.id.clone(),
+                            self.id,
                             self.user.take(),
                             self.log.clone(),
                         ));
@@ -91,11 +92,8 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                         Ok(true)
                     }
                     LoginMode::Admin => {
-                        let mut app = Box::new(app::Admin::new(
-                            self.id.clone(),
-                            self.user.take(),
-                            self.log.clone(),
-                        ));
+                        let mut app =
+                            Box::new(app::Admin::new(self.id, self.user.take(), self.log.clone()));
                         let res = app
                             .channel_open_session(
                                 self.backend.clone(),
@@ -109,7 +107,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     }
                     LoginMode::TargetWithUser(user, target) => {
                         let mut app = Box::new(app::ConnectTarget::new(
-                            self.id.clone(),
+                            self.id,
                             self.user.take(),
                             self.log.clone(),
                         ));
@@ -121,7 +119,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     }
                     LoginMode::Target(name) => {
                         let mut app = Box::new(app::TargetSelector::new(
-                            self.id.clone(),
+                            self.id,
                             self.user.take(),
                             self.log.clone(),
                         ));
@@ -158,7 +156,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
 
         match self.user.as_ref() {
             Some(u) => {
-                self.log = self.handler_log(u.id.clone());
+                self.log = self.handler_log(u.id);
                 if !u.is_active {
                     return Ok(ru_server::Auth::reject());
                 }
@@ -198,7 +196,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
 
         match self.user.as_ref() {
             Some(u) => {
-                self.log = self.handler_log(u.id.clone());
+                self.log = self.handler_log(u.id);
                 if !u.is_active {
                     return Ok(ru_server::Auth::reject());
                 }
@@ -307,7 +305,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 if app
                     .check_permission(
                         self.backend.clone(),
-                        models::Action::Exec,
+                        crate::database::common::InternalUuids::get().act_exec,
                         self.client_ip.map(|v| v.ip()),
                     )
                     .await?
@@ -351,7 +349,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 if app
                     .check_permission(
                         self.backend.clone(),
-                        models::Action::OpenDirectTcpip,
+                        crate::database::common::InternalUuids::get().act_direct_tcpip,
                         self.client_ip.map(|v| v.ip()),
                     )
                     .await?
@@ -393,7 +391,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 match login_parse.parse_mode() {
                     LoginMode::TargetWithUser(user, target) => {
                         let mut app = Box::new(app::ConnectTarget::new(
-                            self.id.clone(),
+                            self.id,
                             self.user.take(),
                             self.log.clone(),
                         ));
@@ -406,7 +404,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                         if app
                             .check_permission(
                                 self.backend.clone(),
-                                models::Action::OpenDirectTcpip,
+                                crate::database::common::InternalUuids::get().act_direct_tcpip,
                                 self.client_ip.map(|v| v.ip()),
                             )
                             .await?
@@ -455,7 +453,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 if !app
                     .check_permission(
                         self.backend.clone(),
-                        models::Action::Pty,
+                        crate::database::common::InternalUuids::get().act_pty,
                         self.client_ip.map(|v| v.ip()),
                     )
                     .await?
@@ -517,7 +515,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 if app
                     .check_permission(
                         self.backend.clone(),
-                        models::Action::Shell,
+                        crate::database::common::InternalUuids::get().act_shell,
                         self.client_ip.map(|v| v.ip()),
                     )
                     .await?
@@ -573,14 +571,14 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 if app
                     .check_permission(
                         self.backend.clone(),
-                        models::Action::Pty,
+                        crate::database::common::InternalUuids::get().act_pty,
                         self.client_ip.map(|v| v.ip()),
                     )
                     .await?
                     && app
                         .check_permission(
                             self.backend.clone(),
-                            models::Action::Shell,
+                            crate::database::common::InternalUuids::get().act_shell,
                             self.client_ip.map(|v| v.ip()),
                         )
                         .await?
@@ -619,18 +617,16 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
         backend: Arc<B>,
     ) -> Self {
         let (send_app_msg, recv_app_msg) = channel(1);
-        let uuid = uuid::Uuid::new_v4().to_string();
+        let uuid = Uuid::new_v4();
         trace!("[{}] create new handler", uuid);
-        let uuid_log = uuid.clone();
         let log = Arc::new(move |_, _| {
-            let uuid = uuid_log.clone();
             async move {
                 warn!("[{}] handler log hasn't initialized", uuid);
             }
             .boxed()
         });
         BastionHandler {
-            id: uuid.clone(),
+            id: uuid,
             user: None,
             login_parse: None,
             client_ip,
@@ -647,16 +643,14 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
         }
     }
 
-    fn handler_log(&self, user_id: String) -> super::HandlerLog {
-        let cid = self.id.clone();
+    fn handler_log(&self, user_id: Uuid) -> super::HandlerLog {
+        let cid = self.id;
         let backend = self.backend.clone();
 
         Arc::new(move |log_type: String, detail: String| {
-            let cid = cid.clone();
-            let uid = user_id.clone();
             let backend = backend.clone();
             async move {
-                backend.insert_log(cid, uid, log_type, detail).await;
+                backend.insert_log(cid, user_id, log_type, detail).await;
             }
             .boxed()
         })
@@ -683,12 +677,13 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
             return Ok(false);
         };
 
+        let uuids = crate::database::common::InternalUuids::get();
         if !self
             .backend
             .enforce(
-                &user.id,
-                crate::database::common::OBJ_LOGIN,
-                models::Action::Login,
+                user.id,
+                uuids.obj_login,
+                uuids.act_login,
                 ExtendPolicyReq::new(self.client_ip.map(|v| v.ip())),
             )
             .await?

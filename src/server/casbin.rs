@@ -1,3 +1,4 @@
+use crate::database::Uuid;
 use crate::error::Error;
 use ipnetwork::IpNetwork;
 use log::trace;
@@ -17,9 +18,9 @@ use std::str::FromStr;
 
 #[cfg(feature = "full-role")]
 pub struct RoleManage {
-    h1: HashMap<String, NodeIndex>,
-    h2: HashMap<String, NodeIndex>,
-    h3: HashMap<String, NodeIndex>,
+    h1: HashMap<Uuid, NodeIndex>,
+    h2: HashMap<Uuid, NodeIndex>,
+    h3: HashMap<Uuid, NodeIndex>,
     g1: StableDiGraph<RuleGroup, ()>,
     g2: StableDiGraph<RuleGroup, ()>,
     g3: StableDiGraph<RuleGroup, ()>,
@@ -41,15 +42,16 @@ pub enum RuleGroup {
 impl RuleGroup {
     pub fn from_v0(r: &CasbinRuleGroup) -> Self {
         RuleGroup::V0(GroupV0 {
-            id: r.id.clone(),
-            v0: r.v0.clone(),
+            id: r.id,
+            v0: r.v0,
             v0_label: r.v0_label.clone(),
         })
     }
     pub fn from_v1(r: &CasbinRuleGroup) -> Self {
         RuleGroup::V1(GroupV1 {
-            id: r.id.clone(),
-            v1: r.v1.clone(),
+            id: r.id,
+            v1: r.v1,
+            v1_label: r.v1_label.clone(),
         })
     }
 
@@ -59,32 +61,39 @@ impl RuleGroup {
                 if let Some(l) = v.v0_label.as_ref() {
                     l.clone()
                 } else {
-                    v.v0.clone()
+                    v.v0.to_string()
                 }
             }
-            RuleGroup::V1(v) => v.v1.clone(),
+            RuleGroup::V1(v) => {
+                if let Some(l) = v.v1_label.as_ref() {
+                    l.clone()
+                } else {
+                    v.v1.to_string()
+                }
+            }
         }
     }
 
-    pub fn fetch_role(&self) -> &str {
+    pub fn fetch_role(&self) -> Uuid {
         match self {
-            RuleGroup::V0(v) => v.v0.as_str(),
-            RuleGroup::V1(v) => v.v1.as_str(),
+            RuleGroup::V0(v) => v.v0,
+            RuleGroup::V1(v) => v.v1,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GroupV0 {
-    pub id: String,
-    pub v0: String,
+    pub id: Uuid,
+    pub v0: Uuid,
     pub v0_label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GroupV1 {
-    pub id: String,
-    pub v1: String,
+    pub id: Uuid,
+    pub v1: Uuid,
+    pub v1_label: Option<String>,
 }
 
 #[cfg(feature = "full-role")]
@@ -114,36 +123,33 @@ impl RoleManage {
         }
     }
 
-    pub fn match_sub(
-        &self,
-        policies: Vec<CasbinRule>,
-        roles: &Vec<CasbinRule>,
-        sub: &str,
-    ) -> Vec<CasbinRule> {
+    pub fn match_sub(&self, policies: Vec<CasbinRule>, sub: Uuid) -> Vec<CasbinRule> {
         policies
             .into_iter()
-            .filter(|p| {
-                if p.v0 == sub {
-                    return true;
-                };
-                for r in roles {
-                    // exclude user_id
-                    if uuid::Uuid::from_str(&p.v0).is_err()
-                        && self.match_role(&r.v1, &p.v0, RoleType::Subject)
-                    {
-                        return true;
-                    }
-                }
-                false
-            })
+            .filter(|p| p.v0 == sub || self.match_role(sub, p.v0, RoleType::Subject))
             .collect()
     }
 
-    pub fn fetch_role_from_start(&self, start: &str, rt: RoleType) -> Vec<&str> {
+    pub fn fetch_role_from_start(&self, start: Uuid, rt: RoleType) -> Vec<Uuid> {
         match rt {
-            RoleType::Subject => todo!(),
+            RoleType::Subject => {
+                let start = if let Some(n) = self.h1.get(&start) {
+                    n
+                } else {
+                    return Vec::new();
+                };
+                Bfs::new(&self.g1, *start)
+                    .iter(&self.g1)
+                    .map(|n| {
+                        self.g1
+                            .node_weight(n)
+                            .expect("node should not be none")
+                            .fetch_role()
+                    })
+                    .collect::<Vec<_>>()
+            }
             RoleType::Object => {
-                let start = if let Some(n) = self.h2.get(start) {
+                let start = if let Some(n) = self.h2.get(&start) {
                     n
                 } else {
                     return Vec::new();
@@ -158,19 +164,34 @@ impl RoleManage {
                     })
                     .collect::<Vec<_>>()
             }
-            RoleType::Action => todo!(),
+            RoleType::Action => {
+                let start = if let Some(n) = self.h3.get(&start) {
+                    n
+                } else {
+                    return Vec::new();
+                };
+                Bfs::new(&self.g3, *start)
+                    .iter(&self.g3)
+                    .map(|n| {
+                        self.g3
+                            .node_weight(n)
+                            .expect("node should not be none")
+                            .fetch_role()
+                    })
+                    .collect::<Vec<_>>()
+            }
         }
     }
 
-    pub fn match_role(&self, start: &str, req: &str, rt: RoleType) -> bool {
+    pub fn match_role(&self, start: Uuid, req: Uuid, rt: RoleType) -> bool {
         match rt {
             RoleType::Subject => {
-                let start = if let Some(n) = self.h1.get(start) {
+                let start = if let Some(n) = self.h1.get(&start) {
                     n
                 } else {
                     return false;
                 };
-                let node = if let Some(n) = self.h1.get(req) {
+                let node = if let Some(n) = self.h1.get(&req) {
                     n
                 } else {
                     return false;
@@ -180,12 +201,12 @@ impl RoleManage {
                     .any(|n| &n == node)
             }
             RoleType::Object => {
-                let start = if let Some(n) = self.h2.get(start) {
+                let start = if let Some(n) = self.h2.get(&start) {
                     n
                 } else {
                     return false;
                 };
-                let node = if let Some(n) = self.h2.get(req) {
+                let node = if let Some(n) = self.h2.get(&req) {
                     n
                 } else {
                     return false;
@@ -195,12 +216,12 @@ impl RoleManage {
                     .any(|n| &n == node)
             }
             RoleType::Action => {
-                let start = if let Some(n) = self.h3.get(start) {
+                let start = if let Some(n) = self.h3.get(&start) {
                     n
                 } else {
                     return false;
                 };
-                let node = if let Some(n) = self.h3.get(req) {
+                let node = if let Some(n) = self.h3.get(&req) {
                     n
                 } else {
                     return false;
@@ -448,16 +469,16 @@ pub fn is_ip_in_cidr(ip: Option<IpAddr>, ip_policy: Option<IpPolicy>) -> bool {
 #[cfg(feature = "full-role")]
 fn build_graph(
     rules: &[CasbinRuleGroup],
-    hm: &mut HashMap<String, NodeIndex>,
+    hm: &mut HashMap<Uuid, NodeIndex>,
 ) -> StableDiGraph<RuleGroup, ()> {
     let mut g = StableDiGraph::<RuleGroup, ()>::new();
 
     for r in rules {
         let u = *hm
-            .entry(r.v0.clone())
+            .entry(r.v0)
             .or_insert_with(|| g.add_node(RuleGroup::from_v0(r)));
         let v = *hm
-            .entry(r.v1.clone())
+            .entry(r.v1)
             .or_insert_with(|| g.add_node(RuleGroup::from_v1(r)));
         g.add_edge(v, u, ());
     }

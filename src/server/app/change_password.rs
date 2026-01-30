@@ -8,11 +8,12 @@ use russh::server as ru_server;
 use russh::{ChannelId, Pty};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use crate::database::Uuid;
 
 static LOG_TYPE: &str = "password";
 
 pub(crate) struct ChangePassword {
-    handler_id: String,
+    handler_id: Uuid,
     tty: NoTtyEvent,
     send_to_tty: Sender<Vec<u8>>,
     recv_from_tty: Receiver<Vec<u8>>,
@@ -31,7 +32,7 @@ enum Status {
 }
 
 impl ChangePassword {
-    pub(crate) fn new(handler_id: String, user: Option<User>, log: HandlerLog) -> Self {
+    pub(crate) fn new(handler_id: Uuid, user: Option<User>, log: HandlerLog) -> Self {
         let (send_to_tty, recv_from_session) = unbounded();
         let (tty, recv_from_tty) = NoTtyEvent::new(recv_from_session);
         Self {
@@ -99,7 +100,7 @@ impl ChangePassword {
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
-        let handler_id = self.handler_id.clone();
+        let handler_id = self.handler_id;
         let handle_prompt = session.handle();
         let (send_status, mut recv_status) = mpsc::channel(1);
         let tty = self.tty.clone();
@@ -184,7 +185,7 @@ impl ChangePassword {
                 }
             }
         });
-        let handler_id = self.handler_id.clone();
+        let handler_id = self.handler_id;
 
         use reedline::{DefaultPrompt, DefaultPromptSegment, FileBackedHistory, Reedline, Signal};
         let history = Box::new(
@@ -317,7 +318,7 @@ impl ChangePassword {
         });
 
         let recv_from_tty = self.recv_from_tty.clone();
-        let handler_id = self.handler_id.clone();
+        let handler_id = self.handler_id;
         tokio::task::spawn_blocking(move || {
             while let Ok(data) = recv_from_tty.recv() {
                 if send_to_session_from_tty.blocking_send(data).is_err() {

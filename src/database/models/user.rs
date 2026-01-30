@@ -15,22 +15,22 @@ const MAX_USERNAME_LEN: usize = 40;
 /// User model for database storage
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, sqlx::Type)]
 pub struct User {
-    pub id: String,
+    pub id: Uuid,
     pub username: String,
     pub email: Option<String>,
     pub(in crate::database) password_hash: Option<String>, // For password authentication
     pub(in crate::database) authorized_keys: Option<StringArray>,
     pub force_init_pass: bool,
     pub is_active: bool,
-    pub updated_by: String,
+    pub updated_by: Uuid,
     pub updated_at: i64,
 }
 
 impl User {
-    pub fn new(updated_by: String) -> Self {
+    pub fn new(updated_by: Uuid) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
-            id: Uuid::new_v4().to_string(),
+            id: Uuid::new_v4(),
             username: String::new(),
             email: None,
             password_hash: None,

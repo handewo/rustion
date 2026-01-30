@@ -13,6 +13,7 @@ use ratatui::{
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
+use crate::database::Uuid;
 
 pub const HELP_TEXT: [&str; 2] = [
     "(Space) toggle | (←→) switch window | (↑↓) select item",
@@ -48,8 +49,8 @@ where
     editor_colors: EditorColors,
     backend: Arc<B>,
     t_handle: Handle,
-    handler_id: String,
-    user_id: String,
+    handler_id: Uuid,
+    user_id: Uuid,
     save_error: Option<Error>,
     pub help_text: [&'static str; 2],
 }
@@ -63,8 +64,8 @@ where
         secrets: Vec<SecretInfo>,
         backend: Arc<B>,
         t_handle: Handle,
-        handler_id: String,
-        user_id: String,
+        handler_id: Uuid,
+        user_id: Uuid,
     ) -> Self {
         Self {
             targets: targets.clone(),

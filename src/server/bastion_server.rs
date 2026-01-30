@@ -1,5 +1,6 @@
 use super::casbin;
 use crate::database::DatabaseRepository;
+use crate::database::Uuid;
 use aes_gcm::aead::Aead;
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
@@ -129,6 +130,64 @@ impl BastionServer {
             casbin::RoleManage::new(&g1, &g2, &g3)
         };
 
+        // Initialize global internal UUIDs (only once)
+        if !crate::database::common::InternalUuids::is_initialized() {
+            use crate::database::common::*;
+
+            let obj_login = database
+                .repository()
+                .get_internal_object_by_name(OBJ_LOGIN)
+                .await?
+                .ok_or_else(|| Error::Casbin(format!("Internal object '{}' not found", OBJ_LOGIN)))?
+                .id;
+            let obj_admin = database
+                .repository()
+                .get_internal_object_by_name(OBJ_ADMIN)
+                .await?
+                .ok_or_else(|| Error::Casbin(format!("Internal object '{}' not found", OBJ_ADMIN)))?
+                .id;
+            let act_shell = database
+                .repository()
+                .get_casbin_name_by_name(ACT_SHELL)
+                .await?
+                .ok_or_else(|| Error::Casbin(format!("Action '{}' not found", ACT_SHELL)))?
+                .id;
+            let act_pty = database
+                .repository()
+                .get_casbin_name_by_name(ACT_PTY)
+                .await?
+                .ok_or_else(|| Error::Casbin(format!("Action '{}' not found", ACT_PTY)))?
+                .id;
+            let act_exec = database
+                .repository()
+                .get_casbin_name_by_name(ACT_EXEC)
+                .await?
+                .ok_or_else(|| Error::Casbin(format!("Action '{}' not found", ACT_EXEC)))?
+                .id;
+            let act_login = database
+                .repository()
+                .get_casbin_name_by_name(ACT_LOGIN)
+                .await?
+                .ok_or_else(|| Error::Casbin(format!("Action '{}' not found", ACT_LOGIN)))?
+                .id;
+            let act_direct_tcpip = database
+                .repository()
+                .get_casbin_name_by_name(ACT_DIRECT_TCPIP)
+                .await?
+                .ok_or_else(|| Error::Casbin(format!("Action '{}' not found", ACT_DIRECT_TCPIP)))?
+                .id;
+
+            InternalUuids::init(InternalUuids {
+                obj_login,
+                obj_admin,
+                act_shell,
+                act_pty,
+                act_exec,
+                act_login,
+                act_direct_tcpip,
+            });
+        }
+
         Ok(Self {
             config,
             secret_key: token,
@@ -245,7 +304,7 @@ impl super::HandlerBackend for BastionServer {
 
     async fn get_target_by_id(
         &self,
-        id: &str,
+        id: &Uuid,
         active_only: bool,
     ) -> Result<Option<models::Target>, Error> {
         self.database
@@ -257,7 +316,7 @@ impl super::HandlerBackend for BastionServer {
     #[cfg(feature = "full-role")]
     async fn list_targets_for_user(
         &self,
-        user_id: &str,
+        user_id: &Uuid,
         active_only: bool,
     ) -> Result<Vec<models::TargetSecretName>, Error> {
         let mut res = Vec::new();
@@ -266,32 +325,23 @@ impl super::HandlerBackend for BastionServer {
             .repository()
             .list_casbin_rules_by_ptype("p")
             .await?;
-        let roles = self
-            .database
-            .repository()
-            .list_roles_by_user_id(user_id)
-            .await?;
-        let allowed_policies = self
-            .role_manager
-            .read()
-            .await
-            .match_sub(policies, &roles, user_id);
+        let allowed_policies = self.role_manager.read().await.match_sub(policies, *user_id);
 
+        // NOTE: Duplicate ids of target_secrets due to different policies.
         for pol in allowed_policies {
+            // Get all role IDs from object group
+            let role_manager = self.role_manager.read().await;
+            let role_ids = role_manager.fetch_role_from_start(pol.v1, casbin::RoleType::Object);
+            drop(role_manager); // Release the lock before awaiting database
+            let role_ids_ref: Vec<&Uuid> = role_ids.iter().collect();
+
             let ts = self
                 .database
                 .repository()
-                .list_targets_by_ids(
-                    &self
-                        .role_manager
-                        .read()
-                        .await
-                        .fetch_role_from_start(&pol.v1, casbin::RoleType::Object),
-                    &pol.id,
-                    active_only,
-                )
+                .list_targets_by_ids(&role_ids_ref, &pol.id, active_only)
                 .await?;
             if ts.is_empty() {
+                // Try pol.v1 directly as a target_secret ID
                 let t = self
                     .database
                     .repository()
@@ -310,7 +360,7 @@ impl super::HandlerBackend for BastionServer {
     #[cfg(feature = "light-role")]
     async fn list_targets_for_user(
         &self,
-        user_id: &str,
+        user_id: &Uuid,
         active_only: bool,
     ) -> Result<Vec<models::TargetSecretName>, Error> {
         self.database
@@ -322,7 +372,7 @@ impl super::HandlerBackend for BastionServer {
     async fn connect_to_target(
         &self,
         target: models::Target,
-        target_secret_id: &str,
+        target_secret_id: &Uuid,
         force_build_cconnect: bool,
     ) -> Result<Option<Arc<ru_client::Handle<models::Target>>>, Error> {
         let conn_key = format!("{}-{}", target_secret_id, target.id);
@@ -415,8 +465,8 @@ impl super::HandlerBackend for BastionServer {
 
     async fn insert_log(
         &self,
-        connection_id: String,
-        user_id: String,
+        connection_id: Uuid,
+        user_id: Uuid,
         log_type: String,
         detail: String,
     ) {
@@ -480,16 +530,16 @@ impl super::HandlerBackend for BastionServer {
     #[cfg(feature = "light-role")]
     async fn enforce(
         &self,
-        sub: &str,
-        obj: &str,
-        act: models::Action,
+        sub: Uuid,
+        obj: Uuid,
+        act: Uuid,
         ext: casbin::ExtendPolicyReq,
     ) -> Result<bool, Error> {
         // match sub
         let policies = self
             .database
             .repository()
-            .get_policies_for_user(sub)
+            .get_policies_for_user(&sub)
             .await?;
         if policies.is_empty() {
             return Ok(false);
@@ -500,7 +550,7 @@ impl super::HandlerBackend for BastionServer {
         let allowed_objects = self
             .database
             .repository()
-            .list_objects_for_user(sub, true)
+            .list_objects_for_user(&sub, true)
             .await?;
         if allowed_objects.is_empty() {
             return Ok(false);
@@ -514,24 +564,21 @@ impl super::HandlerBackend for BastionServer {
         for ao in allowed_objects.iter().filter(|v| v.id == obj) {
             if let Some(p) = policies.iter().find(|v| v.id == ao.pid) {
                 // match act
-                let actions = self
-                    .database
-                    .repository()
-                    .get_actions_for_policy(&p.v2)
-                    .await?;
-                if !actions.iter().any(|v| v == &act) {
-                    trace!(
-                        "Reject by action, sub: {}, act: {}, policy: {:?}",
-                        sub,
-                        act,
-                        p
-                    );
-                    continue;
-                }
-                // match ext
-                if casbin::verify_extend_policy(&ext, &p.v3)? {
-                    trace!("Accept sub: {}, policy: {:?}", sub, p);
-                    return Ok(true);
+                if let Some(policy_act) = p.v2 {
+                    if policy_act == act {
+                        // match ext
+                        if casbin::verify_extend_policy(&ext, &p.v3)? {
+                            trace!("Accept sub: {}, policy: {:?}", sub, p);
+                            return Ok(true);
+                        }
+                    } else {
+                        trace!(
+                            "Reject by action, sub: {}, act: {}, policy: {:?}",
+                            sub,
+                            act,
+                            p
+                        );
+                    }
                 }
             }
         }
@@ -541,9 +588,9 @@ impl super::HandlerBackend for BastionServer {
     #[cfg(feature = "full-role")]
     async fn enforce(
         &self,
-        sub: &str,
-        obj: &str,
-        act: models::Action,
+        sub: Uuid,
+        obj: Uuid,
+        act: Uuid,
         ext: casbin::ExtendPolicyReq,
     ) -> Result<bool, Error> {
         // match sub
@@ -552,16 +599,7 @@ impl super::HandlerBackend for BastionServer {
             .repository()
             .list_casbin_rules_by_ptype("p")
             .await?;
-        let roles = self
-            .database
-            .repository()
-            .list_roles_by_user_id(sub)
-            .await?;
-        let allowed_policies = self
-            .role_manager
-            .read()
-            .await
-            .match_sub(policies, &roles, sub);
+        let allowed_policies = self.role_manager.read().await.match_sub(policies, sub);
         trace!("sub: {} polices: {:?}", sub, allowed_policies);
 
         for pol in allowed_policies {
@@ -571,9 +609,9 @@ impl super::HandlerBackend for BastionServer {
                     .role_manager
                     .read()
                     .await
-                    .match_role(&pol.v1, obj, casbin::RoleType::Object)
+                    .match_role(pol.v1, obj, casbin::RoleType::Object)
             {
-                if !self.database.repository().check_object_active(obj).await? {
+                if !self.database.repository().check_object_active(&obj).await? {
                     trace!(
                         "Reject due to object not active, sub: {}, act: {}, policy: {:?}",
                         sub,
@@ -583,25 +621,27 @@ impl super::HandlerBackend for BastionServer {
                     continue;
                 }
                 // match act
-                if pol.v2 == act.to_sql_store()
-                    || self.role_manager.read().await.match_role(
-                        &pol.v2,
-                        &act.to_sql_store(),
-                        casbin::RoleType::Action,
-                    )
-                {
-                    // match ext
-                    if casbin::verify_extend_policy(&ext, &pol.v3)? {
-                        trace!("Accept sub: {}, policy: {:?}", sub, pol);
-                        return Ok(true);
+                if let Some(policy_act) = pol.v2 {
+                    if policy_act == act
+                        || self.role_manager.read().await.match_role(
+                            policy_act,
+                            act,
+                            casbin::RoleType::Action,
+                        )
+                    {
+                        // match ext
+                        if casbin::verify_extend_policy(&ext, &pol.v3)? {
+                            trace!("Accept sub: {}, policy: {:?}", sub, pol);
+                            return Ok(true);
+                        }
+                    } else {
+                        trace!(
+                            "Reject by action, sub: {}, act: {}, policy: {:?}",
+                            sub,
+                            act,
+                            pol
+                        );
                     }
-                } else {
-                    trace!(
-                        "Reject by action, sub: {}, act: {}, policy: {:?}",
-                        sub,
-                        act,
-                        pol
-                    );
                 }
             } else {
                 trace!(

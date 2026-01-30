@@ -4,7 +4,7 @@ pub(crate) mod target;
 pub(crate) mod target_secret;
 pub(crate) mod user;
 
-pub(crate) use casbin_rule::{Action, AllowedObjects, CasbinRule, CasbinRuleGroup, InternalObject};
+pub(crate) use casbin_rule::{CasbinName, CasbinRule, CasbinRuleGroup, InternalObject};
 pub use log::Log;
 pub(crate) use target::{Target, TargetInfo};
 pub(crate) use target_secret::{Secret, SecretInfo, TargetSecret, TargetSecretName};
@@ -12,16 +12,16 @@ pub(crate) use user::User;
 
 use serde::{Deserialize, Serialize};
 
-/// Wrapper around Vec<String> that is stored as JSON TEXT.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StringArray(pub Vec<String>);
-
 use sqlx::{
     decode::Decode,
     encode::{Encode, IsNull},
     sqlite::{Sqlite, SqliteArgumentValue, SqliteTypeInfo, SqliteValueRef},
     Type,
 };
+
+/// Wrapper around Vec<String> that is stored as JSON TEXT.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StringArray(pub Vec<String>);
 
 impl Type<Sqlite> for StringArray {
     fn type_info() -> SqliteTypeInfo {

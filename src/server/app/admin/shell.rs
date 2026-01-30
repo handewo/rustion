@@ -6,6 +6,7 @@ use reedline::{
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use crate::database::Uuid;
 
 use super::common::*;
 use super::{database, manage, Status};
@@ -15,8 +16,8 @@ pub(super) fn shell<B>(
     tty: NoTtyEvent,
     send_to_session: mpsc::Sender<Vec<u8>>,
     send_status: mpsc::Sender<Status>,
-    user_id: String,
-    handler_id: String,
+    user_id: Uuid,
+    handler_id: Uuid,
     backend: Arc<B>,
     t_handle: tokio::runtime::Handle,
 ) where
@@ -78,8 +79,8 @@ pub(super) fn shell<B>(
                         let _ = manage::manage(
                             tty.clone(),
                             SenderWriter::new(send_to_session.clone()),
-                            user_id.clone(),
-                            handler_id.clone(),
+                            user_id,
+                            handler_id,
                             backend.clone(),
                             t_handle.clone(),
                         );

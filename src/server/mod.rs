@@ -9,7 +9,7 @@ mod test;
 pub use bastion_server::BastionServer;
 pub use casbin::RuleGroup;
 
-use crate::database::models::{Action, Target, TargetSecretName, User};
+use crate::database::models::{Target, TargetSecretName, User};
 use crate::database::DatabaseRepository;
 use crate::error::Error;
 use crate::server::casbin::RoleType;
@@ -18,6 +18,7 @@ use petgraph::stable_graph::StableDiGraph;
 use russh::client as ru_client;
 use std::future::Future;
 use std::sync::Arc;
+use crate::database::Uuid;
 
 type HandlerLog = Arc<dyn Fn(String, String) -> BoxFuture<'static, ()> + Send + Sync>;
 
@@ -44,20 +45,20 @@ pub(super) trait HandlerBackend: Send + Clone {
 
     fn get_target_by_id(
         &self,
-        id: &str,
+        id: &Uuid,
         active_only: bool,
     ) -> impl Future<Output = Result<Option<Target>, Error>> + Send;
 
     fn list_targets_for_user(
         &self,
-        user_id: &str,
+        user_id: &Uuid,
         active_only: bool,
     ) -> impl Future<Output = Result<Vec<TargetSecretName>, Error>> + Send;
 
     fn insert_log(
         &self,
-        connection_id: String,
-        user_id: String,
+        connection_id: Uuid,
+        user_id: Uuid,
         log_type: String,
         detail: String,
     ) -> impl Future<Output = ()> + Send;
@@ -78,7 +79,7 @@ pub(super) trait HandlerBackend: Send + Clone {
     fn connect_to_target(
         &self,
         target: Target,
-        target_secret_id: &str,
+        target_secret_id: &Uuid,
         force_build_connect: bool,
     ) -> impl Future<Output = Result<Option<Arc<ru_client::Handle<Target>>>, Error>> + Send;
 
@@ -110,9 +111,9 @@ pub(super) trait HandlerBackend: Send + Clone {
     ///
     fn enforce(
         &self,
-        sub: &str,
-        obj: &str,
-        act: Action,
+        sub: Uuid,
+        obj: Uuid,
+        act: Uuid,
         ext: casbin::ExtendPolicyReq,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 

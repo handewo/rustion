@@ -1,5 +1,5 @@
 use crate::database::common as db_common;
-use crate::database::models::{Action, User};
+use crate::database::models::User;
 use crate::error::Error;
 use crate::server::casbin;
 use crate::server::HandlerLog;
@@ -8,6 +8,7 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 use crossterm::event::NoTtyEvent;
 use log::{debug, trace, warn};
 use tokio::sync::mpsc;
+use crate::database::Uuid;
 
 use russh::server as ru_server;
 use russh::{Channel, ChannelId, Pty};
@@ -25,7 +26,7 @@ mod widgets;
 const LOG_TYPE: &str = "admin";
 
 pub(crate) struct Admin {
-    handler_id: String,
+    handler_id: Uuid,
     user: Option<User>,
 
     // shell
@@ -37,7 +38,7 @@ pub(crate) struct Admin {
 }
 
 impl Admin {
-    pub(crate) fn new(handler_id: String, user: Option<User>, log: HandlerLog) -> Self {
+    pub(crate) fn new(handler_id: Uuid, user: Option<User>, log: HandlerLog) -> Self {
         Self {
             handler_id,
             user,
@@ -94,8 +95,9 @@ impl Admin {
         _session: &mut ru_server::Session,
         ip: Option<std::net::IpAddr>,
     ) -> Result<bool, Error> {
+        let uuids = db_common::InternalUuids::get();
         if !self
-            .check_permission(backend, db_common::OBJ_ADMIN, Action::Login, ip)
+            .check_permission(backend, uuids.obj_admin, uuids.act_login, ip)
             .await?
         {
             debug!(
@@ -115,8 +117,8 @@ impl Admin {
     pub async fn check_permission<B>(
         &mut self,
         backend: Arc<B>,
-        object: &str,
-        action: Action,
+        object: Uuid,
+        action: Uuid,
         ip: Option<std::net::IpAddr>,
     ) -> Result<bool, Error>
     where
@@ -129,7 +131,7 @@ impl Admin {
         };
 
         backend
-            .enforce(&user.id, object, action, casbin::ExtendPolicyReq::new(ip))
+            .enforce(user.id, object, action, casbin::ExtendPolicyReq::new(ip))
             .await
     }
 
@@ -170,12 +172,12 @@ impl Admin {
             .take()
             .unwrap_or_else(|| panic!("[{}] user should not be none", self.handler_id));
         let username = user.username.clone();
-        let user_id = user.id.clone();
+        let user_id = user.id;
         let handle_session = session.handle();
         let (send_to_session, mut recv_from_shell) = mpsc::channel::<Vec<u8>>(1);
         let (send_status, mut recv_status) = mpsc::channel(1);
         let send_to_session_from_tty = send_to_session.clone();
-        let handler_id = self.handler_id.clone();
+        let handler_id = self.handler_id;
 
         let tty = if let Some(tty) = self.tty.clone() {
             tty
@@ -200,7 +202,7 @@ impl Admin {
             }
         });
 
-        let handler_id = self.handler_id.clone();
+        let handler_id = self.handler_id;
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -223,7 +225,7 @@ impl Admin {
             }
         });
 
-        let handler_id = self.handler_id.clone();
+        let handler_id = self.handler_id;
         let tokio_handle = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
             shell::shell(

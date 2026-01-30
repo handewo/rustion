@@ -2,10 +2,11 @@ use async_trait::async_trait;
 use chrono::Utc;
 use log::{debug, info};
 use sqlx::{sqlite::SqlitePool, Pool, Row, Sqlite};
+use uuid::Uuid;
 
 use crate::database::models::{
-    Action, AllowedObjects, CasbinRule, CasbinRuleGroup, InternalObject, Log, Secret, SecretInfo,
-    Target, TargetInfo, TargetSecret, TargetSecretName, User,
+    CasbinName, CasbinRule, CasbinRuleGroup, InternalObject, Log, Secret, SecretInfo, Target,
+    TargetInfo, TargetSecret, TargetSecretName, User,
 };
 use crate::database::DatabaseRepository;
 use crate::error::Error;
@@ -32,14 +33,14 @@ impl SqliteRepository {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
+                id BLOB PRIMARY KEY,
                 username TEXT UNIQUE NOT NULL,
                 email TEXT,
                 password_hash TEXT,
                 authorized_keys TEXT,  -- Stores JSON array
                 force_init_pass BOOLEAN NOT NULL CHECK (force_init_pass IN (0, 1)),
                 is_active BOOLEAN NOT NULL CHECK (is_active IN (0, 1)),
-                updated_by TEXT NOT NULL,
+                updated_by BLOB NOT NULL,
                 updated_at INTEGER NOT NULL,
                 CHECK (json_valid(authorized_keys) OR authorized_keys IS NULL)
             )
@@ -52,14 +53,14 @@ impl SqliteRepository {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS targets (
-                id TEXT PRIMARY KEY,
+                id BLOB PRIMARY KEY,
                 name TEXT UNIQUE NOT NULL,
                 hostname TEXT NOT NULL,
                 port INTEGER NOT NULL,
                 server_public_key TEXT NOT NULL,
                 description TEXT,
                 is_active BOOLEAN NOT NULL CHECK (is_active IN (0, 1)),
-                updated_by TEXT NOT NULL,
+                updated_by BLOB NOT NULL,
                 updated_at INTEGER NOT NULL,
                 FOREIGN KEY (updated_by) REFERENCES users (id)
             )
@@ -72,14 +73,14 @@ impl SqliteRepository {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS secrets (
-                id TEXT PRIMARY KEY,
+                id BLOB PRIMARY KEY,
                 name TEXT UNIQUE NOT NULL,
                 user TEXT NOT NULL,
                 password TEXT,
                 private_key TEXT,
                 public_key TEXT,
                 is_active BOOLEAN NOT NULL CHECK (is_active IN (0, 1)),
-                updated_by TEXT NOT NULL,
+                updated_by BLOB NOT NULL,
                 updated_at INTEGER NOT NULL,
                 FOREIGN KEY (updated_by) REFERENCES users (id)
             )
@@ -92,11 +93,11 @@ impl SqliteRepository {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS target_secrets (
-                id TEXT PRIMARY KEY,
-                target_id TEXT NOT NULL,
-                secret_id TEXT NOT NULL,
+                id BLOB PRIMARY KEY,
+                target_id BLOB NOT NULL,
+                secret_id BLOB NOT NULL,
                 is_active BOOLEAN NOT NULL CHECK (is_active IN (0, 1)),
-                updated_by TEXT NOT NULL,
+                updated_by BLOB NOT NULL,
                 updated_at INTEGER NOT NULL,
                 FOREIGN KEY (updated_by) REFERENCES users (id)
                 FOREIGN KEY (secret_id) REFERENCES secrets (id)
@@ -108,19 +109,19 @@ impl SqliteRepository {
         .execute(&self.pool)
         .await?;
 
-        // Create casbin_rule table
+        // Create casbin_rule table - v0, v1, v2 are UUIDs stored as BLOB
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS casbin_rule (
-                id TEXT PRIMARY KEY,
+                id BLOB PRIMARY KEY,
                 ptype VARCHAR(12) NOT NULL,
-                v0 VARCHAR(256) NOT NULL,
-                v1 VARCHAR(256) NOT NULL,
-                v2 VARCHAR(256) NOT NULL,
-                v3 VARCHAR(256) NOT NULL,
-                v4 VARCHAR(256) NOT NULL,
-                v5 VARCHAR(256) NOT NULL,
-                updated_by TEXT NOT NULL,
+                v0 BLOB NOT NULL,
+                v1 BLOB NOT NULL,
+                v2 BLOB,
+                v3 VARCHAR(256) NOT NULL DEFAULT '',
+                v4 VARCHAR(256) NOT NULL DEFAULT '',
+                v5 VARCHAR(256) NOT NULL DEFAULT '',
+                updated_by BLOB NOT NULL,
                 updated_at INTEGER NOT NULL,
                 FOREIGN KEY (updated_by) REFERENCES users (id)
                 CONSTRAINT unique_key_sqlx_adapter UNIQUE(ptype, v0, v1, v2, v3, v4, v5)
@@ -130,13 +131,30 @@ impl SqliteRepository {
         .execute(&self.pool)
         .await?;
 
-        // Create internal_objects table
+        // Create casbin_names table - maps UUIDs to human-readable names
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS casbin_names (
+                id BLOB PRIMARY KEY,
+                ptype VARCHAR(12) NOT NULL,
+                name TEXT NOT NULL UNIQUE,
+                updated_by BLOB NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (updated_by) REFERENCES users (id)
+            );
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create internal_objects table - now uses BLOB id like other entities
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS internal_objects (
-                name TEXT PRIMARY KEY,
+                id BLOB PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
                 is_active BOOLEAN NOT NULL CHECK (is_active IN (0, 1)),
-                updated_by TEXT NOT NULL,
+                updated_by BLOB NOT NULL,
                 updated_at INTEGER NOT NULL
             )
             "#,
@@ -148,9 +166,9 @@ impl SqliteRepository {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS logs (
-                connection_id TEXT NOT NULL,
+                connection_id BLOB NOT NULL,
                 log_type TEXT NOT NULL,
-                user_id TEXT NOT NULL,
+                user_id BLOB NOT NULL,
                 detail TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 PRIMARY KEY (created_at, connection_id, detail)
@@ -193,14 +211,14 @@ impl DatabaseRepository for SqliteRepository {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
-        .bind(&user.id)
+        .bind(user.id)
         .bind(&user.username)
         .bind(&user.email)
         .bind(&user.password_hash)
         .bind(&user.authorized_keys)
         .bind(user.force_init_pass)
         .bind(user.is_active)
-        .bind(&user.updated_by)
+        .bind(user.updated_by)
         .bind(user.updated_at)
         .execute(&self.pool)
         .await?;
@@ -208,7 +226,7 @@ impl DatabaseRepository for SqliteRepository {
         Ok(user.clone())
     }
 
-    async fn get_user_by_id(&self, id: &str) -> Result<Option<User>, Error> {
+    async fn get_user_by_id(&self, id: &Uuid) -> Result<Option<User>, Error> {
         let row = sqlx::query_as::<_, User>(
             r#"SELECT id, username, email, password_hash, authorized_keys, force_init_pass, is_active,
             updated_by, updated_at
@@ -259,16 +277,16 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&updated_user.authorized_keys)
         .bind(updated_user.force_init_pass)
         .bind(updated_user.is_active)
-        .bind(&updated_user.updated_by)
+        .bind(updated_user.updated_by)
         .bind(updated_user.updated_at)
-        .bind(&updated_user.id)
+        .bind(updated_user.id)
         .execute(&self.pool)
         .await?;
 
         Ok(updated_user)
     }
 
-    async fn delete_user(&self, id: &str) -> Result<bool, Error> {
+    async fn delete_user(&self, id: &Uuid) -> Result<bool, Error> {
         let result = sqlx::query("DELETE FROM users WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -304,14 +322,14 @@ impl DatabaseRepository for SqliteRepository {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
-        .bind(&target.id)
+        .bind(target.id)
         .bind(&target.name)
         .bind(&target.hostname)
         .bind(target.port as i64)
         .bind(&target.server_public_key)
         .bind(&target.description)
         .bind(target.is_active)
-        .bind(&target.updated_by)
+        .bind(target.updated_by)
         .bind(target.updated_at)
         .execute(&self.pool)
         .await?;
@@ -319,7 +337,11 @@ impl DatabaseRepository for SqliteRepository {
         Ok(target.clone())
     }
 
-    async fn get_target_by_id(&self, id: &str, active_only: bool) -> Result<Option<Target>, Error> {
+    async fn get_target_by_id(
+        &self,
+        id: &Uuid,
+        active_only: bool,
+    ) -> Result<Option<Target>, Error> {
         let mut query = r#"SELECT id, name, hostname, port, server_public_key, description,
             is_active, updated_by, updated_at FROM targets WHERE id = ?"#
             .to_string();
@@ -334,7 +356,7 @@ impl DatabaseRepository for SqliteRepository {
         Ok(row)
     }
 
-    async fn get_targets_by_ids(&self, ids: &[&str]) -> Result<Vec<Target>, Error> {
+    async fn get_targets_by_ids(&self, ids: &[&Uuid]) -> Result<Vec<Target>, Error> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -356,7 +378,7 @@ impl DatabaseRepository for SqliteRepository {
 
     async fn get_targets_by_target_secret_ids(
         &self,
-        ids: &[&str],
+        ids: &[&Uuid],
         active_only: bool,
     ) -> Result<Vec<Target>, Error> {
         if ids.is_empty() {
@@ -426,16 +448,16 @@ impl DatabaseRepository for SqliteRepository {
         .bind(&updated_target.server_public_key)
         .bind(&updated_target.description)
         .bind(updated_target.is_active)
-        .bind(&updated_target.updated_by)
+        .bind(updated_target.updated_by)
         .bind(updated_target.updated_at)
-        .bind(&updated_target.id)
+        .bind(updated_target.id)
         .execute(&self.pool)
         .await?;
 
         Ok(updated_target)
     }
 
-    async fn delete_target(&self, id: &str) -> Result<bool, Error> {
+    async fn delete_target(&self, id: &Uuid) -> Result<bool, Error> {
         let result = sqlx::query("DELETE FROM targets WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -471,7 +493,7 @@ impl DatabaseRepository for SqliteRepository {
 
     async fn list_targets_for_user(
         &self,
-        user_id: &str,
+        user_id: &Uuid,
         active_only: bool,
     ) -> Result<Vec<TargetSecretName>, Error> {
         let mut query = r#"
@@ -499,8 +521,8 @@ impl DatabaseRepository for SqliteRepository {
 
     async fn list_targets_by_ids(
         &self,
-        ids: &[&str],
-        pid: &str,
+        ids: &[&Uuid],
+        pid: &Uuid,
         active_only: bool,
     ) -> Result<Vec<TargetSecretName>, Error> {
         if ids.is_empty() {
@@ -529,7 +551,8 @@ impl DatabaseRepository for SqliteRepository {
         Ok(targets)
     }
 
-    async fn get_actions_for_policy(&self, policy_act: &str) -> Result<Vec<Action>, Error> {
+    async fn get_actions_for_policy(&self, policy_act: &Uuid) -> Result<Vec<Uuid>, Error> {
+        // Look for action groups (g3) that include this action
         let rules = sqlx::query_as::<_, CasbinRule>(
             r#"
             SELECT * FROM casbin_rule WHERE v1 = ? AND ptype = 'g3'
@@ -540,57 +563,19 @@ impl DatabaseRepository for SqliteRepository {
         .await?;
 
         if rules.is_empty() {
-            return Ok(vec![policy_act.parse()?]);
+            // Return the action itself if no group membership
+            return Ok(vec![*policy_act]);
         }
 
         let mut actions = Vec::with_capacity(rules.len());
         for r in rules {
-            actions.push(r.v0.parse()?);
+            actions.push(r.v0);
         }
 
         Ok(actions)
     }
 
-    async fn list_objects_for_user(
-        &self,
-        user_id: &str,
-        active_only: bool,
-    ) -> Result<Vec<AllowedObjects>, Error> {
-        let mut res = self
-            .list_targets_for_user(user_id, active_only)
-            .await?
-            .into_iter()
-            .map(|v| AllowedObjects {
-                pid: v.pid,
-                id: v.id,
-            })
-            .collect::<Vec<AllowedObjects>>();
-
-        let mut query = r#"
-            WITH all_policy AS (SELECT id, v1 FROM casbin_rule WHERE v0 = ? AND ptype = 'p'
-            UNION ALL SELECT id, v1 FROM casbin_rule WHERE ptype = 'p' AND v0 IN
-            (SELECT v1 FROM casbin_rule WHERE v0 = ? AND ptype = 'g1'))
-            SELECT l.* FROM 
-            (SELECT p.id AS pid, c.v0 AS id FROM (SELECT * FROM casbin_rule WHERE ptype = 'g2') c INNER JOIN all_policy p ON p.v1 = c.v1
-            UNION ALL SELECT p.id AS pid, p.v1 AS id FROM all_policy p LEFT JOIN (SELECT * FROM casbin_rule WHERE ptype = 'g2') c
-            ON p.v1 = c.v1 WHERE c.v1 IS NULL) l INNER JOIN internal_objects io ON io.name = l.id
-        "#.to_string();
-        if active_only {
-            query.push_str(" WHERE io.is_active = 1");
-        }
-        let row = sqlx::query_as::<_, AllowedObjects>(&query)
-            .bind(user_id)
-            .bind(user_id)
-            .fetch_all(&self.pool)
-            .await?;
-
-        res.extend_from_slice(&row);
-
-        // query allowed internal actions for user
-        Ok(res)
-    }
-
-    async fn get_policies_for_user(&self, user_id: &str) -> Result<Vec<CasbinRule>, Error> {
+    async fn get_policies_for_user(&self, user_id: &Uuid) -> Result<Vec<CasbinRule>, Error> {
         let policies = sqlx::query_as::<_, CasbinRule>(
             r#"
             SELECT * FROM casbin_rule WHERE v0 = ? AND ptype = 'p'
@@ -618,7 +603,7 @@ impl DatabaseRepository for SqliteRepository {
             .map_err(Error::Sqlx)
     }
 
-    async fn list_roles_by_user_id(&self, user_id: &str) -> Result<Vec<CasbinRule>, Error> {
+    async fn list_roles_by_user_id(&self, user_id: &Uuid) -> Result<Vec<CasbinRule>, Error> {
         let query = r#"
         SELECT id, ptype, v0, v1, v2, v3, v4, v5, updated_by, updated_at
         FROM casbin_rule
@@ -642,9 +627,11 @@ impl DatabaseRepository for SqliteRepository {
     c.id,
     c.v0,
     u.username AS v0_label,
-    c.v1
+    c.v1,
+    cn.name AS v1_label
 FROM casbin_rule AS c
 LEFT JOIN users AS u ON c.v0 = u.id
+LEFT JOIN casbin_names AS cn ON c.v1 = cn.id
 WHERE c.ptype = 'g1';"#
             }
             "g2" => {
@@ -652,7 +639,8 @@ WHERE c.ptype = 'g1';"#
     cr.id,
     cr.v0,
     t.name AS v0_label,
-    cr.v1
+    cr.v1,
+    g.name AS v1_label
 FROM casbin_rule AS cr
 LEFT JOIN (
         /* unified id→name mapping for external + internal objects */
@@ -662,19 +650,22 @@ LEFT JOIN (
         LEFT JOIN targets  AS t ON ts.target_id = t.id
         LEFT JOIN secrets  AS s ON ts.secret_id = s.id
         UNION ALL
-        SELECT name AS id, name
-        FROM internal_objects
+        SELECT io.id, io.name
+        FROM internal_objects AS io
 ) AS t ON cr.v0 = t.id
+LEFT JOIN casbin_names AS g ON cr.v1 = g.id
 WHERE cr.ptype = 'g2';"#
             }
             "g3" => {
                 r#"SELECT                          
     c.id,
     c.v0,
-    io.name AS v0_label,
-    c.v1
+    cn0.name AS v0_label,
+    c.v1,
+    cn1.name AS v1_label
 FROM casbin_rule AS c
-LEFT JOIN internal_objects AS io ON c.v0 = io.name
+LEFT JOIN casbin_names AS cn0 ON c.v0 = cn0.id
+LEFT JOIN casbin_names AS cn1 ON c.v1 = cn1.id
 WHERE c.ptype = 'g3';"#
             }
             _ => unreachable!(),
@@ -709,15 +700,15 @@ WHERE c.ptype = 'g3';"#
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
-        .bind(&rule.id)
+        .bind(rule.id)
         .bind(&rule.ptype)
-        .bind(&rule.v0)
-        .bind(&rule.v1)
-        .bind(&rule.v2)
+        .bind(rule.v0)
+        .bind(rule.v1)
+        .bind(rule.v2)
         .bind(&rule.v3)
         .bind(&rule.v4)
         .bind(&rule.v5)
-        .bind(&rule.updated_by)
+        .bind(rule.updated_by)
         .bind(rule.updated_at)
         .execute(&self.pool)
         .await?;
@@ -738,28 +729,79 @@ WHERE c.ptype = 'g3';"#
         "#,
         )
         .bind(&updated_rule.ptype)
-        .bind(&updated_rule.v0)
-        .bind(&updated_rule.v1)
-        .bind(&updated_rule.v2)
+        .bind(updated_rule.v0)
+        .bind(updated_rule.v1)
+        .bind(updated_rule.v2)
         .bind(&updated_rule.v3)
         .bind(&updated_rule.v4)
         .bind(&updated_rule.v5)
-        .bind(&updated_rule.updated_by)
+        .bind(updated_rule.updated_by)
         .bind(updated_rule.updated_at)
-        .bind(&updated_rule.id)
+        .bind(updated_rule.id)
         .execute(&self.pool)
         .await?;
 
         Ok(updated_rule)
     }
 
-    async fn delete_casbin_rule(&self, id: &str) -> Result<bool, Error> {
+    async fn delete_casbin_rule(&self, id: &Uuid) -> Result<bool, Error> {
         let result = sqlx::query("DELETE FROM casbin_rule WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn create_casbin_name(&self, name: &CasbinName) -> Result<CasbinName, Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO casbin_names (id, ptype, name, updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(name.id)
+        .bind(&name.ptype)
+        .bind(&name.name)
+        .bind(name.updated_by)
+        .bind(name.updated_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(name.clone())
+    }
+
+    async fn get_casbin_name_by_name(&self, name: &str) -> Result<Option<CasbinName>, Error> {
+        let row = sqlx::query_as::<_, CasbinName>(
+            "SELECT id, ptype, name, updated_by, updated_at FROM casbin_names WHERE name = ?",
+        )
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
+
+    async fn get_casbin_name_by_id(&self, id: &Uuid) -> Result<Option<CasbinName>, Error> {
+        let row = sqlx::query_as::<_, CasbinName>(
+            "SELECT id, ptype, name, updated_by, updated_at FROM casbin_names WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
+
+    async fn list_casbin_names_by_ptype(&self, ptype: &str) -> Result<Vec<CasbinName>, Error> {
+        let rows = sqlx::query_as::<_, CasbinName>(
+            "SELECT id, ptype, name, updated_by, updated_at FROM casbin_names WHERE ptype = ?",
+        )
+        .bind(ptype)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
     }
 
     async fn list_secrets(&self, active_only: bool) -> Result<Vec<Secret>, Error> {
@@ -779,7 +821,7 @@ WHERE c.ptype = 'g3';"#
             .map_err(Error::Sqlx)
     }
 
-    async fn list_secrets_for_target(&self, target_id: &str) -> Result<Vec<SecretInfo>, Error> {
+    async fn list_secrets_for_target(&self, target_id: &Uuid) -> Result<Vec<SecretInfo>, Error> {
         let query = r#"
             SELECT s.id, s.name, s.user,
             CASE WHEN ts.is_active IS NULL THEN 0 ELSE ts.is_active END AS is_bound
@@ -802,14 +844,14 @@ WHERE c.ptype = 'g3';"#
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
-        .bind(&secret.id)
+        .bind(secret.id)
         .bind(&secret.name)
         .bind(&secret.user)
         .bind(&secret.password)
         .bind(&secret.private_key)
         .bind(&secret.public_key)
         .bind(secret.is_active)
-        .bind(&secret.updated_by)
+        .bind(secret.updated_by)
         .bind(secret.updated_at)
         .execute(&self.pool)
         .await?;
@@ -825,10 +867,10 @@ WHERE c.ptype = 'g3';"#
     /// Returns the number of rows affected (1 in both cases).
     async fn upsert_target_secret(
         &self,
-        target_id: &str,
-        secret_id: &str,
+        target_id: &Uuid,
+        secret_id: &Uuid,
         is_active: bool,
-        updated_by: &str,
+        updated_by: &Uuid,
     ) -> Result<(), Error> {
         // 1. Does the row already exist?
         let exists = sqlx::query_as::<_, TargetSecret>(
@@ -845,11 +887,7 @@ WHERE c.ptype = 'g3';"#
                 self.update_target_secret(&ts).await?;
             }
             None => {
-                let mut ts = TargetSecret::new(
-                    target_id.to_string(),
-                    secret_id.to_string(),
-                    updated_by.to_string(),
-                );
+                let mut ts = TargetSecret::new(*target_id, *secret_id, *updated_by);
                 ts.is_active = is_active;
                 self.create_target_secret(&ts).await?;
             }
@@ -860,7 +898,7 @@ WHERE c.ptype = 'g3';"#
 
     async fn get_secret_by_target_secret_id(
         &self,
-        id: &str,
+        id: &Uuid,
         active_only: bool,
     ) -> Result<Option<Secret>, Error> {
         let mut query = r#"SELECT s.id, s.name, s.user, s.password, s.private_key, s.public_key, s.is_active, s.updated_by,
@@ -879,7 +917,7 @@ WHERE c.ptype = 'g3';"#
         Ok(row)
     }
 
-    async fn get_secret_by_id(&self, id: &str) -> Result<Option<Secret>, Error> {
+    async fn get_secret_by_id(&self, id: &Uuid) -> Result<Option<Secret>, Error> {
         let row = sqlx::query_as::<_, Secret>(
             r#"SELECT id, name, user, password, private_key, public_key, is_active, updated_by,
             updated_at FROM secrets WHERE id = ?"#,
@@ -891,7 +929,7 @@ WHERE c.ptype = 'g3';"#
         Ok(row)
     }
 
-    async fn get_secrets_by_ids(&self, ids: &[&str]) -> Result<Vec<Secret>, Error> {
+    async fn get_secrets_by_ids(&self, ids: &[&Uuid]) -> Result<Vec<Secret>, Error> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -929,16 +967,16 @@ WHERE c.ptype = 'g3';"#
         .bind(&updated_secret.private_key)
         .bind(&updated_secret.public_key)
         .bind(updated_secret.is_active)
-        .bind(&updated_secret.updated_by)
+        .bind(updated_secret.updated_by)
         .bind(updated_secret.updated_at)
-        .bind(&updated_secret.id)
+        .bind(updated_secret.id)
         .execute(&self.pool)
         .await?;
 
         Ok(updated_secret)
     }
 
-    async fn delete_secret(&self, id: &str) -> Result<bool, Error> {
+    async fn delete_secret(&self, id: &Uuid) -> Result<bool, Error> {
         let result = sqlx::query("DELETE FROM secrets WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -971,15 +1009,15 @@ WHERE c.ptype = 'g3';"#
         let mut q = sqlx::query(&query);
         for r in rules {
             q = q
-                .bind(&r.id)
+                .bind(r.id)
                 .bind(&r.ptype)
-                .bind(&r.v0)
-                .bind(&r.v1)
-                .bind(&r.v2)
+                .bind(r.v0)
+                .bind(r.v1)
+                .bind(r.v2)
                 .bind(&r.v3)
                 .bind(&r.v4)
                 .bind(&r.v5)
-                .bind(&r.updated_by)
+                .bind(r.updated_by)
                 .bind(r.updated_at);
         }
 
@@ -1008,14 +1046,14 @@ WHERE c.ptype = 'g3';"#
 
         for u in users {
             q = q
-                .bind(&u.id)
+                .bind(u.id)
                 .bind(&u.username)
                 .bind(&u.email)
                 .bind(&u.password_hash)
                 .bind(&u.authorized_keys)
                 .bind(u.force_init_pass)
                 .bind(u.is_active)
-                .bind(&u.updated_by)
+                .bind(u.updated_by)
                 .bind(u.updated_at);
         }
 
@@ -1043,14 +1081,14 @@ WHERE c.ptype = 'g3';"#
 
         for t in targets {
             q = q
-                .bind(&t.id)
+                .bind(t.id)
                 .bind(&t.name)
                 .bind(&t.hostname)
                 .bind(t.port as i64)
                 .bind(&t.server_public_key)
                 .bind(&t.description)
                 .bind(t.is_active)
-                .bind(&t.updated_by)
+                .bind(t.updated_by)
                 .bind(t.updated_at);
         }
 
@@ -1086,11 +1124,11 @@ WHERE c.ptype = 'g3';"#
             VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
-        .bind(&target_secret.id)
-        .bind(&target_secret.target_id)
-        .bind(&target_secret.secret_id)
+        .bind(target_secret.id)
+        .bind(target_secret.target_id)
+        .bind(target_secret.secret_id)
         .bind(target_secret.is_active)
-        .bind(&target_secret.updated_by)
+        .bind(target_secret.updated_by)
         .bind(target_secret.updated_at)
         .execute(&self.pool)
         .await?;
@@ -1116,19 +1154,19 @@ WHERE c.ptype = 'g3';"#
         WHERE id = ?
         "#,
         )
-        .bind(&updated.target_id)
-        .bind(&updated.secret_id)
+        .bind(updated.target_id)
+        .bind(updated.secret_id)
         .bind(updated.is_active)
-        .bind(&updated.updated_by)
+        .bind(updated.updated_by)
         .bind(updated.updated_at)
-        .bind(&updated.id)
+        .bind(updated.id)
         .execute(&self.pool)
         .await?;
 
         Ok(updated)
     }
 
-    async fn delete_target_secret(&self, id: &str) -> Result<bool, Error> {
+    async fn delete_target_secret(&self, id: &Uuid) -> Result<bool, Error> {
         let result = sqlx::query("DELETE FROM target_secrets WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
@@ -1139,7 +1177,7 @@ WHERE c.ptype = 'g3';"#
 
     async fn list_internal_objects(&self, active_only: bool) -> Result<Vec<InternalObject>, Error> {
         let mut query = String::from(
-            r#"SELECT name, is_active, updated_by, updated_at
+            r#"SELECT id, name, is_active, updated_by, updated_at
            FROM internal_objects"#,
         );
 
@@ -1153,6 +1191,20 @@ WHERE c.ptype = 'g3';"#
             .map_err(Error::Sqlx)
     }
 
+    async fn get_internal_object_by_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<InternalObject>, Error> {
+        let row = sqlx::query_as::<_, InternalObject>(
+            r#"SELECT id, name, is_active, updated_by, updated_at FROM internal_objects WHERE name = ?"#,
+        )
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
+
     async fn update_internal_object(&self, obj: &InternalObject) -> Result<InternalObject, Error> {
         let mut updated_obj = obj.clone();
         updated_obj.updated_at = Utc::now().timestamp_millis();
@@ -1161,13 +1213,13 @@ WHERE c.ptype = 'g3';"#
             r#"
             UPDATE internal_objects 
             SET is_active = ?, updated_by = ?, updated_at = ?
-            WHERE name = ?
+            WHERE id = ?
             "#,
         )
         .bind(obj.is_active)
-        .bind(&obj.updated_by)
+        .bind(obj.updated_by)
         .bind(obj.updated_at)
-        .bind(&obj.name)
+        .bind(obj.id)
         .execute(&self.pool)
         .await?;
 
@@ -1178,13 +1230,14 @@ WHERE c.ptype = 'g3';"#
         sqlx::query(
             r#"
             INSERT INTO internal_objects
-            (name, is_active, updated_by, updated_at)  
-            VALUES (?, ?, ?, ?)
+            (id, name, is_active, updated_by, updated_at)  
+            VALUES (?, ?, ?, ?, ?)
             "#,
         )
+        .bind(obj.id)
         .bind(&obj.name)
         .bind(obj.is_active)
-        .bind(&obj.updated_by)
+        .bind(obj.updated_by)
         .bind(obj.updated_at)
         .execute(&self.pool)
         .await?;
@@ -1192,7 +1245,8 @@ WHERE c.ptype = 'g3';"#
         Ok(obj.clone())
     }
 
-    async fn check_object_active(&self, id: &str) -> Result<bool, Error> {
+    async fn check_object_active(&self, id: &Uuid) -> Result<bool, Error> {
+        // Check if it's an active target_secret
         let row = sqlx::query_as::<_, TargetSecret>(
             r#"SELECT ts.* FROM target_secrets ts INNER JOIN targets t ON ts.target_id = t.id
                INNER JOIN secrets s ON ts.secret_id = s.id WHERE ts.is_active = 1
@@ -1207,8 +1261,9 @@ WHERE c.ptype = 'g3';"#
             return Ok(true);
         }
 
+        // Check if it's an active internal_object
         let row = sqlx::query_as::<_, InternalObject>(
-            "SELECT * FROM internal_objects WHERE is_active = 1 AND name = ?",
+            "SELECT * FROM internal_objects WHERE is_active = 1 AND id = ?",
         )
         .bind(id)
         .fetch_all(&self.pool)
@@ -1240,14 +1295,14 @@ WHERE c.ptype = 'g3';"#
 
         for s in secrets {
             q = q
-                .bind(&s.id)
+                .bind(s.id)
                 .bind(&s.name)
                 .bind(&s.user)
                 .bind(&s.password)
                 .bind(&s.private_key)
                 .bind(&s.public_key)
                 .bind(s.is_active)
-                .bind(&s.updated_by)
+                .bind(s.updated_by)
                 .bind(s.updated_at);
         }
 
@@ -1278,11 +1333,11 @@ WHERE c.ptype = 'g3';"#
 
         for s in secrets {
             q = q
-                .bind(&s.id)
-                .bind(&s.target_id)
-                .bind(&s.secret_id)
+                .bind(s.id)
+                .bind(s.target_id)
+                .bind(s.secret_id)
                 .bind(s.is_active)
-                .bind(&s.updated_by)
+                .bind(s.updated_by)
                 .bind(s.updated_at);
         }
 
@@ -1300,22 +1355,23 @@ WHERE c.ptype = 'g3';"#
         }
 
         let rows = (0..objs.len())
-            .map(|_| "(?,?,?,?)")
+            .map(|_| "(?,?,?,?,?)")
             .collect::<Vec<_>>()
             .join(",");
 
         let query = format!(
             r"INSERT INTO internal_objects
-              (name, is_active, updated_by, updated_at)
+              (id, name, is_active, updated_by, updated_at)
               VALUES {rows}"
         );
         let mut q = sqlx::query(&query);
 
         for s in objs {
             q = q
+                .bind(s.id)
                 .bind(&s.name)
                 .bind(s.is_active)
-                .bind(&s.updated_by)
+                .bind(s.updated_by)
                 .bind(s.updated_at);
         }
 
@@ -1402,9 +1458,9 @@ WHERE c.ptype = 'g3';"#
             VALUES (?, ?, ?, ?, ?)
             "#,
         )
-        .bind(&log.connection_id)
+        .bind(log.connection_id)
         .bind(&log.log_type)
-        .bind(&log.user_id)
+        .bind(log.user_id)
         .bind(&log.detail)
         .bind(log.created_at)
         .execute(&self.pool)
