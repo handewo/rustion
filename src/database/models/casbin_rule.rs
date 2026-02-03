@@ -57,17 +57,19 @@ pub struct CasbinName {
     pub id: Uuid,
     pub ptype: String,
     pub name: String,
+    pub is_active: bool,
     pub updated_by: Uuid,
     pub updated_at: i64,
 }
 
 impl CasbinName {
-    pub fn new(ptype: String, name: String, updated_by: Uuid) -> Self {
+    pub fn new(ptype: String, name: String, is_active: bool, updated_by: Uuid) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
             id: Uuid::new_v4(),
             ptype,
             name,
+            is_active,
             updated_by,
             updated_at: now,
         }
@@ -81,26 +83,4 @@ pub struct CasbinRuleGroup {
     pub v0_label: Option<String>,
     pub v1: Uuid,
     pub v1_label: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct InternalObject {
-    pub id: Uuid,
-    pub name: String,
-    pub is_active: bool,
-    pub updated_by: Uuid,
-    pub updated_at: i64,
-}
-
-impl InternalObject {
-    pub fn new(name: String, updated_by: Uuid) -> Self {
-        let now = Utc::now().timestamp_millis();
-        Self {
-            id: Uuid::new_v4(),
-            name,
-            is_active: true,
-            updated_by,
-            updated_at: now,
-        }
-    }
 }

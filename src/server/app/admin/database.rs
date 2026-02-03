@@ -1,7 +1,7 @@
 use super::table::{AdminTable, DisplayMode, FieldsToArray, TableData as TD};
 use crate::database::common::{
-    TABLE_CASBIN_RULE, TABLE_INTERNAL_OBJECTS, TABLE_LIST, TABLE_LOGS, TABLE_SECRETS,
-    TABLE_TARGETS, TABLE_TARGET_SECRETS, TABLE_USERS,
+    TABLE_CASBIN_NAMES, TABLE_CASBIN_RULE, TABLE_LIST, TABLE_LOGS, TABLE_SECRETS, TABLE_TARGETS,
+    TABLE_TARGET_SECRETS, TABLE_USERS,
 };
 use crate::database::models::*;
 use crate::error::Error;
@@ -171,10 +171,10 @@ where
                         .unwrap_or_default(),
                 );
             }
-            TABLE_INTERNAL_OBJECTS => {
-                self.items = TableData::InternalObjects(
+            TABLE_CASBIN_NAMES => {
+                self.items = TableData::CasbinNames(
                     self.t_handle
-                        .block_on(self.backend.db_repository().list_internal_objects(false))
+                        .block_on(self.backend.db_repository().list_casbin_names(false))
                         .unwrap_or_default(),
                 );
             }
@@ -248,7 +248,7 @@ enum TableData {
     Targets(Vec<Target>),
     Secrets(Vec<Secret>),
     TargetSecrets(Vec<TargetSecret>),
-    InternalObjects(Vec<InternalObject>),
+    CasbinNames(Vec<CasbinName>),
     CasbinRule(Vec<CasbinRule>),
     Logs(Vec<Log>),
 }
@@ -372,7 +372,7 @@ impl TableData {
                     Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
-            Self::InternalObjects(ref data) => {
+            Self::CasbinNames(ref data) => {
                 let name_len = data
                     .iter()
                     .map(|v| v.name.as_str())
@@ -381,7 +381,11 @@ impl TableData {
                     .unwrap_or(0)
                     .max(4);
 
+                let ptype_len = data.iter().map(|v| v.ptype.len()).max().unwrap_or(0).max(5);
+
                 vec![
+                    Constraint::Length(LENGTH_UUID), // id
+                    Constraint::Length(ptype_len as u16),
                     Constraint::Length(name_len as u16),
                     Constraint::Length(9), // is_active
                     Constraint::Length(LENGTH_UUID),
@@ -460,7 +464,7 @@ impl super::table::TableData for TableData {
             Self::Targets(ref data) => data.len(),
             Self::Secrets(ref data) => data.len(),
             Self::TargetSecrets(ref data) => data.len(),
-            Self::InternalObjects(ref data) => data.len(),
+            Self::CasbinNames(ref data) => data.len(),
             Self::CasbinRule(ref data) => data.len(),
             Self::Logs(ref data) => data.len(),
         }
@@ -484,7 +488,7 @@ impl super::table::TableData for TableData {
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::InternalObjects(ref data) => data
+            Self::CasbinNames(ref data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
@@ -550,8 +554,15 @@ impl super::table::TableData for TableData {
                     "updated_at",
                 ]
             }
-            Self::InternalObjects(_) => {
-                vec!["name", "is_active", "updated_by", "updated_at"]
+            Self::CasbinNames(_) => {
+                vec![
+                    "id",
+                    "ptype",
+                    "name",
+                    "is_active",
+                    "updated_by",
+                    "updated_at",
+                ]
             }
             Self::CasbinRule(_) => {
                 vec![

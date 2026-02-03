@@ -5,8 +5,8 @@ use sqlx::{sqlite::SqlitePool, Pool, Row, Sqlite};
 use uuid::Uuid;
 
 use crate::database::models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, InternalObject, Log, Secret, SecretInfo, Target,
-    TargetInfo, TargetSecret, TargetSecretName, User,
+    CasbinName, CasbinRule, CasbinRuleGroup, Log, Secret, SecretInfo, Target, TargetInfo,
+    TargetSecret, TargetSecretName, User,
 };
 use crate::database::DatabaseRepository;
 use crate::error::Error;
@@ -138,25 +138,11 @@ impl SqliteRepository {
                 id BLOB PRIMARY KEY,
                 ptype VARCHAR(12) NOT NULL,
                 name TEXT NOT NULL UNIQUE,
+                is_active BOOLEAN NOT NULL CHECK (is_active IN (0, 1)),
                 updated_by BLOB NOT NULL,
                 updated_at INTEGER NOT NULL,
                 FOREIGN KEY (updated_by) REFERENCES users (id)
             );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        // Create internal_objects table - now uses BLOB id like other entities
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS internal_objects (
-                id BLOB PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                is_active BOOLEAN NOT NULL CHECK (is_active IN (0, 1)),
-                updated_by BLOB NOT NULL,
-                updated_at INTEGER NOT NULL
-            )
             "#,
         )
         .execute(&self.pool)
@@ -651,7 +637,8 @@ LEFT JOIN (
         LEFT JOIN secrets  AS s ON ts.secret_id = s.id
         UNION ALL
         SELECT io.id, io.name
-        FROM internal_objects AS io
+        FROM casbin_names AS io
+        WHERE io.ptype = '__internal_object_type'
 ) AS t ON cr.v0 = t.id
 LEFT JOIN casbin_names AS g ON cr.v1 = g.id
 WHERE cr.ptype = 'g2';"#
@@ -756,13 +743,14 @@ WHERE c.ptype = 'g3';"#
     async fn create_casbin_name(&self, name: &CasbinName) -> Result<CasbinName, Error> {
         sqlx::query(
             r#"
-            INSERT INTO casbin_names (id, ptype, name, updated_by, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO casbin_names (id, ptype, name, is_active, updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(name.id)
         .bind(&name.ptype)
         .bind(&name.name)
+        .bind(name.is_active)
         .bind(name.updated_by)
         .bind(name.updated_at)
         .execute(&self.pool)
@@ -773,7 +761,7 @@ WHERE c.ptype = 'g3';"#
 
     async fn get_casbin_name_by_name(&self, name: &str) -> Result<Option<CasbinName>, Error> {
         let row = sqlx::query_as::<_, CasbinName>(
-            "SELECT id, ptype, name, updated_by, updated_at FROM casbin_names WHERE name = ?",
+            "SELECT id, ptype, name, is_active, updated_by, updated_at FROM casbin_names WHERE name = ?",
         )
         .bind(name)
         .fetch_optional(&self.pool)
@@ -784,7 +772,7 @@ WHERE c.ptype = 'g3';"#
 
     async fn get_casbin_name_by_id(&self, id: &Uuid) -> Result<Option<CasbinName>, Error> {
         let row = sqlx::query_as::<_, CasbinName>(
-            "SELECT id, ptype, name, updated_by, updated_at FROM casbin_names WHERE id = ?",
+            "SELECT id, ptype, name, is_active, updated_by, updated_at FROM casbin_names WHERE id = ?",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -793,15 +781,101 @@ WHERE c.ptype = 'g3';"#
         Ok(row)
     }
 
-    async fn list_casbin_names_by_ptype(&self, ptype: &str) -> Result<Vec<CasbinName>, Error> {
-        let rows = sqlx::query_as::<_, CasbinName>(
-            "SELECT id, ptype, name, updated_by, updated_at FROM casbin_names WHERE ptype = ?",
-        )
-        .bind(ptype)
-        .fetch_all(&self.pool)
-        .await?;
+    async fn list_casbin_names(&self, active_only: bool) -> Result<Vec<CasbinName>, Error> {
+        let mut query = String::from(
+            "SELECT id, ptype, name, is_active, updated_by, updated_at FROM casbin_names",
+        );
+
+        if active_only {
+            query.push_str(" WHERE is_active = 1");
+        }
+
+        let rows = sqlx::query_as::<_, CasbinName>(&query)
+            .fetch_all(&self.pool)
+            .await?;
 
         Ok(rows)
+    }
+
+    async fn list_casbin_names_by_ptype(
+        &self,
+        ptype: &str,
+        active_only: bool,
+    ) -> Result<Vec<CasbinName>, Error> {
+        let mut query = String::from(
+            "SELECT id, ptype, name, is_active, updated_by, updated_at FROM casbin_names WHERE ptype = ?",
+        );
+
+        if active_only {
+            query.push_str(" AND is_active = 1");
+        }
+
+        let rows = sqlx::query_as::<_, CasbinName>(&query)
+            .bind(ptype)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows)
+    }
+
+    async fn update_casbin_name(&self, rule: &CasbinName) -> Result<CasbinName, Error> {
+        let mut updated_rule = rule.clone();
+        updated_rule.updated_at = Utc::now().timestamp_millis();
+
+        sqlx::query(
+            r#"
+        UPDATE casbin_names
+        SET ptype = ?, name = ?, is_active = ?, updated_by = ?, updated_at = ?
+        WHERE id = ?
+        "#,
+        )
+        .bind(&updated_rule.ptype)
+        .bind(&updated_rule.name)
+        .bind(updated_rule.is_active)
+        .bind(updated_rule.updated_by)
+        .bind(updated_rule.updated_at)
+        .bind(updated_rule.id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(updated_rule)
+    }
+
+    async fn create_casbin_names_batch(
+        &self,
+        casbin_names: &[CasbinName],
+    ) -> Result<Vec<CasbinName>, Error> {
+        if casbin_names.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Build “VALUES (?,?,?,?,…), (?,?,?,?,…), …”
+        let rows = casbin_names
+            .iter()
+            .map(|_| "(?,?,?,?,?,?)")
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let query = format!(
+            r"INSERT INTO casbin_names
+              (id, ptype, name, is_active, updated_by, updated_at)
+              VALUES {rows}"
+        );
+
+        let mut q = sqlx::query(&query);
+        for r in casbin_names {
+            q = q
+                .bind(r.id)
+                .bind(&r.ptype)
+                .bind(&r.name)
+                .bind(r.is_active)
+                .bind(r.updated_by)
+                .bind(r.updated_at);
+        }
+
+        q.execute(&self.pool).await?;
+
+        Ok(casbin_names.to_vec())
     }
 
     async fn list_secrets(&self, active_only: bool) -> Result<Vec<Secret>, Error> {
@@ -1175,76 +1249,6 @@ WHERE c.ptype = 'g3';"#
         Ok(result.rows_affected() > 0)
     }
 
-    async fn list_internal_objects(&self, active_only: bool) -> Result<Vec<InternalObject>, Error> {
-        let mut query = String::from(
-            r#"SELECT id, name, is_active, updated_by, updated_at
-           FROM internal_objects"#,
-        );
-
-        if active_only {
-            query.push_str(" WHERE is_active = 1");
-        }
-
-        sqlx::query_as::<_, InternalObject>(&query)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(Error::Sqlx)
-    }
-
-    async fn get_internal_object_by_name(
-        &self,
-        name: &str,
-    ) -> Result<Option<InternalObject>, Error> {
-        let row = sqlx::query_as::<_, InternalObject>(
-            r#"SELECT id, name, is_active, updated_by, updated_at FROM internal_objects WHERE name = ?"#,
-        )
-        .bind(name)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        Ok(row)
-    }
-
-    async fn update_internal_object(&self, obj: &InternalObject) -> Result<InternalObject, Error> {
-        let mut updated_obj = obj.clone();
-        updated_obj.updated_at = Utc::now().timestamp_millis();
-
-        sqlx::query(
-            r#"
-            UPDATE internal_objects 
-            SET is_active = ?, updated_by = ?, updated_at = ?
-            WHERE id = ?
-            "#,
-        )
-        .bind(obj.is_active)
-        .bind(obj.updated_by)
-        .bind(obj.updated_at)
-        .bind(obj.id)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(updated_obj)
-    }
-
-    async fn create_internal_object(&self, obj: &InternalObject) -> Result<InternalObject, Error> {
-        sqlx::query(
-            r#"
-            INSERT INTO internal_objects
-            (id, name, is_active, updated_by, updated_at)  
-            VALUES (?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(obj.id)
-        .bind(&obj.name)
-        .bind(obj.is_active)
-        .bind(obj.updated_by)
-        .bind(obj.updated_at)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(obj.clone())
-    }
-
     async fn check_object_active(&self, id: &Uuid) -> Result<bool, Error> {
         // Check if it's an active target_secret
         let row = sqlx::query_as::<_, TargetSecret>(
@@ -1262,8 +1266,8 @@ WHERE c.ptype = 'g3';"#
         }
 
         // Check if it's an active internal_object
-        let row = sqlx::query_as::<_, InternalObject>(
-            "SELECT * FROM internal_objects WHERE is_active = 1 AND id = ?",
+        let row = sqlx::query_as::<_, CasbinName>(
+            "SELECT * FROM casbin_names WHERE ptype = '__internal_object_type' AND is_active = 1 AND id = ?",
         )
         .bind(id)
         .fetch_all(&self.pool)
@@ -1344,39 +1348,6 @@ WHERE c.ptype = 'g3';"#
         q.execute(&self.pool).await?;
 
         Ok(secrets.to_vec())
-    }
-
-    async fn create_internal_objects_batch(
-        &self,
-        objs: &[InternalObject],
-    ) -> Result<Vec<InternalObject>, Error> {
-        if objs.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let rows = (0..objs.len())
-            .map(|_| "(?,?,?,?,?)")
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let query = format!(
-            r"INSERT INTO internal_objects
-              (id, name, is_active, updated_by, updated_at)
-              VALUES {rows}"
-        );
-        let mut q = sqlx::query(&query);
-
-        for s in objs {
-            q = q
-                .bind(s.id)
-                .bind(&s.name)
-                .bind(s.is_active)
-                .bind(s.updated_by)
-                .bind(s.updated_at);
-        }
-
-        q.execute(&self.pool).await?;
-        Ok(objs.to_vec())
     }
 
     async fn search_users(&self, query: &str) -> Result<Vec<User>, Error> {

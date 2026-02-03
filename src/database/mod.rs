@@ -6,8 +6,8 @@ pub(crate) mod sqlite;
 use crate::error::Error;
 use async_trait::async_trait;
 use models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, InternalObject, Log, Secret, SecretInfo, Target,
-    TargetInfo, TargetSecret, TargetSecretName, User,
+    CasbinName, CasbinRule, CasbinRuleGroup, Log, Secret, SecretInfo, Target, TargetInfo,
+    TargetSecret, TargetSecretName, User,
 };
 pub use uuid::Uuid;
 
@@ -119,18 +119,19 @@ pub trait DatabaseRepository: Send + Sync {
 
     /// CasbinName operations - maps UUIDs to human-readable names
     async fn create_casbin_name(&self, name: &CasbinName) -> Result<CasbinName, Error>;
+    async fn update_casbin_name(&self, rule: &CasbinName) -> Result<CasbinName, Error>;
     async fn get_casbin_name_by_name(&self, name: &str) -> Result<Option<CasbinName>, Error>;
     async fn get_casbin_name_by_id(&self, id: &Uuid) -> Result<Option<CasbinName>, Error>;
-    async fn list_casbin_names_by_ptype(&self, ptype: &str) -> Result<Vec<CasbinName>, Error>;
-
-    /// InternalObject operations
-    async fn list_internal_objects(&self, active_only: bool) -> Result<Vec<InternalObject>, Error>;
-    async fn get_internal_object_by_name(
+    async fn list_casbin_names_by_ptype(
         &self,
-        name: &str,
-    ) -> Result<Option<InternalObject>, Error>;
-    async fn update_internal_object(&self, obj: &InternalObject) -> Result<InternalObject, Error>;
-    async fn create_internal_object(&self, obj: &InternalObject) -> Result<InternalObject, Error>;
+        ptype: &str,
+        active_only: bool,
+    ) -> Result<Vec<CasbinName>, Error>;
+    async fn list_casbin_names(&self, active_only: bool) -> Result<Vec<CasbinName>, Error>;
+    async fn create_casbin_names_batch(
+        &self,
+        rules: &[CasbinName],
+    ) -> Result<Vec<CasbinName>, Error>;
 
     /// Log operations
     async fn insert_log(&self, log: &Log) -> Result<(), Error>;
@@ -152,10 +153,6 @@ pub trait DatabaseRepository: Send + Sync {
         &self,
         rules: &[CasbinRule],
     ) -> Result<Vec<CasbinRule>, Error>;
-    async fn create_internal_objects_batch(
-        &self,
-        objs: &[InternalObject],
-    ) -> Result<Vec<InternalObject>, Error>;
 
     /// Search operations
     async fn search_users(&self, query: &str) -> Result<Vec<User>, Error>;

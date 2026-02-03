@@ -858,7 +858,7 @@ enum TableData {
     Targets(Vec<Target>),
     Secrets(Vec<Secret>),
     TargetSecrets(Vec<TargetSecret>),
-    InternalObjects(Vec<InternalObject>),
+    CasbinNames(Vec<CasbinName>),
     CasbinRule(Vec<CasbinRule>),
     Logs(Vec<Log>),
 }
@@ -997,7 +997,7 @@ impl TableData {
                     Constraint::Length(9),  // is_active
                 ]
             }
-            Self::InternalObjects(ref data) => {
+            Self::CasbinNames(ref data) => {
                 let name_len = data
                     .iter()
                     .map(|v| v.name.as_str())
@@ -1102,7 +1102,7 @@ impl super::table::TableData for TableData {
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::InternalObjects(ref data) => data
+            Self::CasbinNames(ref data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
@@ -1123,7 +1123,7 @@ impl super::table::TableData for TableData {
             Self::Targets(ref data) => data.len(),
             Self::Secrets(ref data) => data.len(),
             Self::TargetSecrets(ref data) => data.len(),
-            Self::InternalObjects(ref data) => data.len(),
+            Self::CasbinNames(ref data) => data.len(),
             Self::CasbinRule(ref data) => data.len(),
             Self::Logs(ref data) => data.len(),
         }
@@ -1163,7 +1163,7 @@ impl super::table::TableData for TableData {
                 "public_key",
                 "is_active",
             ],
-            Self::InternalObjects(_) => vec!["name", "is_active", "updated_by", "updated_at"],
+            Self::CasbinNames(_) => vec!["name", "is_active", "updated_by", "updated_at"],
             Self::CasbinRule(_) => vec![
                 "id",
                 "ptype",

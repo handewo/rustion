@@ -38,12 +38,12 @@ pub async fn init_service(config: Config) {
     }
     if !db
         .repository()
-        .list_internal_objects(false)
+        .list_casbin_names(false)
         .await
         .unwrap()
         .is_empty()
     {
-        panic!("Table: internal_objects is not empty");
+        panic!("Table: casbin_names is not empty");
     }
     if !db
         .repository()
@@ -63,57 +63,81 @@ pub async fn init_service(config: Config) {
     let u = db.repository().create_user(&u).await.unwrap();
 
     // Create UUIDs for actions and store in casbin_names
-    let action_login = CasbinName::new("act".to_string(), ACT_LOGIN.to_string(), u.id);
-    let action_shell = CasbinName::new("act".to_string(), ACT_SHELL.to_string(), u.id);
-    let action_exec = CasbinName::new("act".to_string(), ACT_EXEC.to_string(), u.id);
-    let action_pty = CasbinName::new("act".to_string(), ACT_PTY.to_string(), u.id);
-    let action_tcpip = CasbinName::new("act".to_string(), ACT_DIRECT_TCPIP.to_string(), u.id);
+    let action_login = CasbinName::new(
+        INTERNAL_ACTION_TYPE.to_string(),
+        ACT_LOGIN.to_string(),
+        true,
+        u.id,
+    );
+    let action_shell = CasbinName::new(
+        INTERNAL_ACTION_TYPE.to_string(),
+        ACT_SHELL.to_string(),
+        true,
+        u.id,
+    );
+    let action_exec = CasbinName::new(
+        INTERNAL_ACTION_TYPE.to_string(),
+        ACT_EXEC.to_string(),
+        true,
+        u.id,
+    );
+    let action_pty = CasbinName::new(
+        INTERNAL_ACTION_TYPE.to_string(),
+        ACT_PTY.to_string(),
+        true,
+        u.id,
+    );
+    let action_tcpip = CasbinName::new(
+        INTERNAL_ACTION_TYPE.to_string(),
+        ACT_DIRECT_TCPIP.to_string(),
+        true,
+        u.id,
+    );
+    let obj_login = CasbinName::new(
+        INTERNAL_OBJECT_TYPE.to_string(),
+        OBJ_LOGIN.to_string(),
+        true,
+        u.id,
+    );
+    let obj_admin = CasbinName::new(
+        INTERNAL_OBJECT_TYPE.to_string(),
+        OBJ_ADMIN.to_string(),
+        true,
+        u.id,
+    );
 
-    db.repository()
-        .create_casbin_name(&action_login)
-        .await
-        .unwrap();
-    db.repository()
-        .create_casbin_name(&action_shell)
-        .await
-        .unwrap();
-    db.repository()
-        .create_casbin_name(&action_exec)
-        .await
-        .unwrap();
-    db.repository()
-        .create_casbin_name(&action_pty)
-        .await
-        .unwrap();
-    db.repository()
-        .create_casbin_name(&action_tcpip)
-        .await
-        .unwrap();
-
-    // init built-in internal objects
-    let internal_objs = INTERNAL_OBJECTS
-        .iter()
-        .map(|o| InternalObject::new(o.to_string(), u.id))
-        .collect::<Vec<_>>();
-    db.repository()
-        .create_internal_objects_batch(&internal_objs)
+    let casbin_names_rows = db
+        .repository()
+        .create_casbin_names_batch(&[
+            action_tcpip,
+            action_pty,
+            action_exec,
+            action_shell,
+            action_login,
+            obj_login,
+            obj_admin,
+        ])
         .await
         .unwrap();
 
     // Get UUIDs for internal objects (OBJ_LOGIN, OBJ_ADMIN)
-    let obj_login_id = internal_objs
+    let obj_login_id = casbin_names_rows
         .iter()
         .find(|o| o.name == OBJ_LOGIN)
         .unwrap()
         .id;
-    let obj_admin_id = internal_objs
+    let obj_admin_id = casbin_names_rows
         .iter()
         .find(|o| o.name == OBJ_ADMIN)
         .unwrap()
         .id;
+    let action_login = casbin_names_rows
+        .iter()
+        .find(|o| o.name == ACT_LOGIN)
+        .unwrap();
 
     // Create login_group UUID and store in casbin_names
-    let login_group = CasbinName::new("g1".to_string(), "login_group".to_string(), u.id);
+    let login_group = CasbinName::new("g1".to_string(), "login_group".to_string(), true, u.id);
     db.repository()
         .create_casbin_name(&login_group)
         .await

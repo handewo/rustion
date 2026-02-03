@@ -133,13 +133,13 @@ impl BastionServer {
 
             let obj_login = database
                 .repository()
-                .get_internal_object_by_name(OBJ_LOGIN)
+                .get_casbin_name_by_name(OBJ_LOGIN)
                 .await?
                 .ok_or_else(|| Error::Casbin(format!("Internal object '{}' not found", OBJ_LOGIN)))?
                 .id;
             let obj_admin = database
                 .repository()
-                .get_internal_object_by_name(OBJ_ADMIN)
+                .get_casbin_name_by_name(OBJ_ADMIN)
                 .await?
                 .ok_or_else(|| Error::Casbin(format!("Internal object '{}' not found", OBJ_ADMIN)))?
                 .id;

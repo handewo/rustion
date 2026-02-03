@@ -31,7 +31,7 @@ mod tests {
     use super::*;
     use crate::database::{
         models::{target_secret::TargetSecret, CasbinRule, Secret},
-        CasbinName, InternalObject, Target, User,
+        CasbinName, Target, User,
     };
     use serde::{Deserialize, Serialize};
     use serde_json;
@@ -46,7 +46,6 @@ mod tests {
         target_secrets: Vec<TargetSecret>,
         casbin_rule: Vec<CasbinRule>,
         casbin_names: Vec<CasbinName>,
-        internal_objects: Vec<InternalObject>,
     }
 
     async fn create_test_service() -> DatabaseService {
@@ -105,13 +104,8 @@ mod tests {
             .create_target_secrets_batch(&raw_data.target_secrets)
             .await
             .unwrap();
-
-        db.repository()
-            .create_internal_object(&raw_data.internal_objects.pop().unwrap())
-            .await
-            .unwrap();
-        db.repository()
-            .create_internal_objects_batch(&raw_data.internal_objects)
+        db.repository
+            .create_casbin_names_batch(&raw_data.casbin_names)
             .await
             .unwrap();
 
@@ -147,11 +141,11 @@ mod tests {
         assert_eq!(
             service
                 .repository
-                .list_internal_objects(false)
+                .list_casbin_names(false)
                 .await
                 .unwrap()
                 .len(),
-            2
+            20
         );
     }
 }

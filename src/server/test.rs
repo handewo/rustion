@@ -2,8 +2,8 @@
 mod tests {
     use crate::database::common::OBJ_LOGIN;
     use crate::database::models::{
-        casbin_rule::CasbinName, target_secret::TargetSecret, CasbinRule, InternalObject, Secret,
-        Target, TargetSecretName, User,
+        casbin_rule::CasbinName, target_secret::TargetSecret, CasbinRule, Secret, Target,
+        TargetSecretName, User,
     };
     use crate::database::{common, service::DatabaseService, DatabaseConfig};
     use crate::server::casbin::{ExtendPolicy, ExtendPolicyReq, IpPolicy};
@@ -24,7 +24,6 @@ mod tests {
         target_secrets: Vec<TargetSecret>,
         casbin_names: Vec<CasbinName>,
         casbin_rule: Vec<CasbinRule>,
-        internal_objects: Vec<InternalObject>,
     }
 
     #[tokio::test]
@@ -81,9 +80,6 @@ mod tests {
             .unwrap();
 
         // Create internal objects first
-        for obj in &raw_data.internal_objects {
-            db.repository().create_internal_object(obj).await.unwrap();
-        }
 
         for cn in &raw_data.casbin_names {
             db.repository().create_casbin_name(cn).await.unwrap();
@@ -346,7 +342,7 @@ mod tests {
             .unwrap());
         let mut io = db
             .repository()
-            .list_internal_objects(true)
+            .list_casbin_names(true)
             .await
             .unwrap()
             .iter()
@@ -355,7 +351,7 @@ mod tests {
             .unwrap()
             .clone();
         io.is_active = false;
-        db.repository().update_internal_object(&io).await.unwrap();
+        db.repository().update_casbin_name(&io).await.unwrap();
         assert!(!server
             .enforce(alice.id, obj_login, login_uuid, ExtendPolicyReq::default(),)
             .await
@@ -709,10 +705,6 @@ mod tests {
             .create_target_secrets_batch(&raw_data.target_secrets)
             .await
             .unwrap();
-
-        for obj in &raw_data.internal_objects {
-            db.repository().create_internal_object(obj).await.unwrap();
-        }
 
         for cn in &raw_data.casbin_names {
             db.repository().create_casbin_name(cn).await.unwrap();

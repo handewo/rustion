@@ -366,11 +366,13 @@ impl FieldsToArray for Secret {
     }
 }
 
-impl FieldsToArray for InternalObject {
+impl FieldsToArray for CasbinName {
     fn to_array(&self, mode: DisplayMode) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 vec![
+                    self.id.to_string(),
+                    self.ptype.clone(),
                     self.name.clone(),
                     self.is_active.to_string(),
                     self.updated_by.to_string(),
