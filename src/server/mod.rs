@@ -7,10 +7,11 @@ pub mod init_service;
 mod test;
 
 pub use bastion_server::BastionServer;
-pub use casbin::RuleGroup;
+pub use casbin::{Label, RuleGroup};
 
 use crate::database::models::{Target, TargetSecretName, User};
 use crate::database::DatabaseRepository;
+use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::casbin::RoleType;
 use futures::future::BoxFuture;
@@ -18,7 +19,6 @@ use petgraph::stable_graph::StableDiGraph;
 use russh::client as ru_client;
 use std::future::Future;
 use std::sync::Arc;
-use crate::database::Uuid;
 
 type HandlerLog = Arc<dyn Fn(String, String) -> BoxFuture<'static, ()> + Send + Sync>;
 

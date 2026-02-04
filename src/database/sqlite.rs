@@ -612,21 +612,26 @@ impl DatabaseRepository for SqliteRepository {
                 r#"SELECT
     c.id,
     c.v0,
-    u.username AS v0_label,
+    NULL AS v0_object_label,
+    cn0.name AS v0_group_label,
     c.v1,
-    cn.name AS v1_label
+    u1.username AS v1_object_label,
+    cn1.name AS v1_group_label
 FROM casbin_rule AS c
-LEFT JOIN users AS u ON c.v0 = u.id
-LEFT JOIN casbin_names AS cn ON c.v1 = cn.id
+LEFT JOIN users AS u1 ON c.v1 = u1.id
+LEFT JOIN casbin_names AS cn0 ON c.v0 = cn0.id
+LEFT JOIN casbin_names AS cn1 ON c.v1 = cn1.id
 WHERE c.ptype = 'g1';"#
             }
             "g2" => {
                 r#"SELECT
     cr.id,
     cr.v0,
-    t.name AS v0_label,
+    t.name AS v0_object_label,
+    cn0.name AS v0_group_label,
     cr.v1,
-    g.name AS v1_label
+    NULL AS v1_object_label,
+    cn1.name AS v1_group_label
 FROM casbin_rule AS cr
 LEFT JOIN (
         /* unified id→name mapping for external + internal objects */
@@ -640,19 +645,23 @@ LEFT JOIN (
         FROM casbin_names AS io
         WHERE io.ptype = '__internal_object_type'
 ) AS t ON cr.v0 = t.id
-LEFT JOIN casbin_names AS g ON cr.v1 = g.id
+LEFT JOIN casbin_names AS cn0 ON cr.v0 = cn0.id
+LEFT JOIN casbin_names AS cn1 ON cr.v1 = cn1.id
 WHERE cr.ptype = 'g2';"#
             }
             "g3" => {
                 r#"SELECT                          
     c.id,
     c.v0,
-    cn0.name AS v0_label,
+    cn0.name AS v0_object_label,
+    cn2.name AS v0_group_label,
     c.v1,
-    cn1.name AS v1_label
+    NULL AS v1_object_label,
+    cn1.name AS v1_group_label
 FROM casbin_rule AS c
-LEFT JOIN casbin_names AS cn0 ON c.v0 = cn0.id
-LEFT JOIN casbin_names AS cn1 ON c.v1 = cn1.id
+LEFT JOIN (SELECT * FROM casbin_names WHERE ptype = '__internal_action_type') AS cn0 ON c.v0 = cn0.id
+LEFT JOIN (SELECT * FROM casbin_names WHERE ptype <> '__internal_action_type') AS cn2 ON c.v0 = cn2.id
+LEFT JOIN (SELECT * FROM casbin_names WHERE ptype <> '__internal_action_type') AS cn1 ON c.v1 = cn1.id
 WHERE c.ptype = 'g3';"#
             }
             _ => unreachable!(),

@@ -1,4 +1,4 @@
-use crate::server::RuleGroup;
+use crate::server::{Label, RuleGroup};
 use petgraph::graph::NodeIndex;
 use petgraph::stable_graph::StableDiGraph;
 use petgraph::Direction::{Incoming, Outgoing};
@@ -34,9 +34,16 @@ fn build_tree_item(
 }
 
 fn set_style(rg: &RuleGroup) -> Span<'static> {
-    if let RuleGroup::V0(ref v) = rg {
-        if v.v0_label.is_some() {
-            return rg.label().set_style(Style::default());
+    match rg {
+        RuleGroup::V0(ref v) => {
+            if let Label::Object(_) = v.label {
+                return rg.label().set_style(Style::default());
+            }
+        }
+        RuleGroup::V1(ref v) => {
+            if let Label::Object(_) = v.label {
+                return rg.label().set_style(Style::default());
+            }
         }
     }
     rg.label().set_style(Style::default().bold())

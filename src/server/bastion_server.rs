@@ -124,7 +124,7 @@ impl BastionServer {
                 .list_casbin_rule_group_by_ptype("g3")
                 .await?;
 
-            casbin::RoleManage::new(&g1, &g2, &g3)
+            casbin::RoleManage::new(&g1, &g2, &g3)?
         };
 
         // Initialize global internal UUIDs (only once)
@@ -214,7 +214,7 @@ impl BastionServer {
             .await?;
 
         let mut m = self.role_manager.write().await;
-        *m = casbin::RoleManage::new(&g1, &g2, &g3);
+        *m = casbin::RoleManage::new(&g1, &g2, &g3)?;
         Ok(())
     }
 
