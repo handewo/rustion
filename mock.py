@@ -15,7 +15,7 @@ DB_FILE = "rustion.db"
 # 2.  Helpers
 # ------------------------------------------------------------------
 def uuid4():
-    return str(uuid.uuid4())
+    return uuid.uuid4().bytes
 
 
 def now_ts():
@@ -45,6 +45,17 @@ def generate():
         0
     ]
 
+    internal_action_shell = cur.execute(
+        "SELECT id FROM casbin_names WHERE name = '__internal_action_shell'"
+    ).fetchone()[0]
+    internal_action_exec = cur.execute(
+        "SELECT id FROM casbin_names WHERE name = '__internal_action_exec'"
+    ).fetchone()[0]
+
+    login_group = cur.execute(
+        "SELECT id FROM casbin_names WHERE name = 'login_group'"
+    ).fetchone()[0]
+
     # 3.1  Users ----------------------------------------------------
     users = []
     for i in range(1, 6):
@@ -53,7 +64,7 @@ def generate():
             "username": f"user{i}",
             "email": f"user{i}@example.com",
             "password_hash": f"hash{i}",
-            "authorized_keys": json.dumps([f"ssh-rsa key{i}"]),
+            "authorized_keys": json.dumps([]),
             "force_init_pass": random.choice([0, 1]),
             "is_active": 1,
             "updated_by": admin_id,
@@ -150,8 +161,31 @@ def generate():
         target_secrets,
     )
 
+    casbin_names = []
+    g2_dict = {"apple": uuid4(), "banana": uuid4(), "peach": uuid4()}
+    for k, v in g2_dict.items():
+        cn = {
+            "id": v,
+            "ptype": "g2",
+            "name": k,
+            "is_active": True,
+            "updated_by": random.choice(users)["id"],
+            "updated_at": now_ts() * 1000 + random.randint(0, 1000),
+        }
+        casbin_names.append(cn)
+
+    cur.executemany(
+        """
+        INSERT INTO casbin_names
+        (id, ptype, name, is_active, updated_by, updated_at)
+        VALUES
+        (:id, :ptype, :name, :is_active, :updated_by, :updated_at)
+        """,
+        casbin_names,
+    )
+
     casbin_rule = []
-    for g in ["apple", "banana", "peach"]:
+    for g in g2_dict.values():
         ts_chosen = random.sample(target_secrets, 100)
         for t in ts_chosen:
             cr = {
@@ -159,7 +193,7 @@ def generate():
                 "ptype": "g2",
                 "v0": t["id"],
                 "v1": g,
-                "v2": "",
+                "v2": None,
                 "v3": "",
                 "v4": "",
                 "v5": "",
@@ -172,9 +206,9 @@ def generate():
         cr = {
             "id": uuid4(),
             "ptype": "g1",
-            "v0": u["id"],
-            "v1": "login_group",
-            "v2": "",
+            "v0": login_group,
+            "v1": u["id"],
+            "v2": None,
             "v3": "",
             "v4": "",
             "v5": "",
@@ -188,8 +222,8 @@ def generate():
             "id": uuid4(),
             "ptype": "p",
             "v0": u["id"],
-            "v1": random.choice(["apple", "banana", "peach"]),
-            "v2": random.choice(["exec", "shell"]),
+            "v1": random.choice(list(g2_dict.values())),
+            "v2": random.choice([internal_action_shell, internal_action_exec]),
             "v3": "",
             "v4": "",
             "v5": "",
