@@ -185,3 +185,16 @@ impl std::fmt::Display for ValidateError {
         }
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, sqlx::Type)]
+pub struct UserWithRole {
+    #[sqlx(flatten)]
+    pub user: User,
+    pub role: String,
+}
+
+impl UserWithRole {
+    pub fn user(&self) -> User {
+        self.user.clone()
+    }
+}

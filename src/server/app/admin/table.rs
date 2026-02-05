@@ -256,6 +256,27 @@ pub trait FieldsToArray {
     fn to_array(&self, mode: DisplayMode) -> Vec<String>;
 }
 
+impl FieldsToArray for UserWithRole {
+    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+        match mode {
+            DisplayMode::Full => {
+                todo!()
+            }
+            DisplayMode::Manage => {
+                vec![
+                    self.user.username.clone(),
+                    self.user.email.clone().unwrap_or_default(),
+                    self.user.print_password(),
+                    self.user.print_authorized_keys(),
+                    self.user.force_init_pass.to_string(),
+                    self.user.is_active.to_string(),
+                    self.role.clone(),
+                ]
+            }
+        }
+    }
+}
+
 impl FieldsToArray for User {
     fn to_array(&self, mode: DisplayMode) -> Vec<String> {
         match mode {

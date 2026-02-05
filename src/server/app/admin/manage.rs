@@ -148,7 +148,7 @@ where
 {
     fn new(backend: Arc<B>, t_handle: Handle, user_id: Uuid, handler_id: Uuid) -> Self {
         let data = TableData::Users(
-            match t_handle.block_on(backend.db_repository().list_users(false)) {
+            match t_handle.block_on(backend.db_repository().list_users_with_role(false)) {
                 Ok(d) => d,
                 Err(e) => {
                     error!("Failed to list users: {}", e);
@@ -663,7 +663,7 @@ where
             SelectedTab::Users => {
                 self.items = TableData::Users(
                     self.t_handle
-                        .block_on(self.backend.db_repository().list_users(false))
+                        .block_on(self.backend.db_repository().list_users_with_role(false))
                         .unwrap_or_default(),
                 );
             }
@@ -854,7 +854,7 @@ where
 }
 
 enum TableData {
-    Users(Vec<User>),
+    Users(Vec<UserWithRole>),
     Targets(Vec<Target>),
     Secrets(Vec<Secret>),
     TargetSecrets(Vec<TargetSecret>),
@@ -874,7 +874,7 @@ impl TableData {
 
     fn get_user(&self, i: usize) -> Option<User> {
         if let TableData::Users(data) = self {
-            data.get(i).cloned()
+            data.get(i).map(|u| u.user())
         } else {
             None
         }
@@ -893,7 +893,7 @@ impl TableData {
             Self::Users(ref data) => {
                 let username_len = data
                     .iter()
-                    .map(|v| v.username.as_str())
+                    .map(|v| v.user.username.as_str())
                     .map(UnicodeWidthStr::width)
                     .max()
                     .unwrap_or(0)
@@ -901,11 +901,19 @@ impl TableData {
 
                 let email_len = data
                     .iter()
-                    .map(|v| v.email.as_deref().unwrap_or(""))
+                    .map(|v| v.user.email.as_deref().unwrap_or(""))
                     .map(UnicodeWidthStr::width)
                     .max()
                     .unwrap_or(0)
                     .max(5);
+
+                let role_len = data
+                    .iter()
+                    .map(|v| v.role.as_str())
+                    .map(UnicodeWidthStr::width)
+                    .max()
+                    .unwrap_or(0)
+                    .max(4);
 
                 vec![
                     Constraint::Length(username_len as u16),
@@ -914,6 +922,7 @@ impl TableData {
                     Constraint::Length(15),
                     Constraint::Length(15),
                     Constraint::Length(9),
+                    Constraint::Length(role_len as u16),
                 ]
             }
             Self::Targets(ref data) => {
@@ -1138,6 +1147,7 @@ impl super::table::TableData for TableData {
                 "authorized_keys",
                 "force_init_pass",
                 "is_active",
+                "role",
             ],
             Self::Targets(_) => vec![
                 "name",

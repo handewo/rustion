@@ -3,10 +3,10 @@ pub(crate) mod models;
 pub(crate) mod service;
 pub(crate) mod sqlite;
 
-use crate::error::Error;
+use crate::{database::models::UserWithRole, error::Error};
 use async_trait::async_trait;
 use models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, Log, Secret, SecretInfo, Target, TargetInfo,
+    CasbinName, CasbinRule, CasbinRuleGroup, Log, Role, Secret, SecretInfo, Target, TargetInfo,
     TargetSecret, TargetSecretName, User,
 };
 pub use uuid::Uuid;
@@ -57,6 +57,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn update_user(&self, user: &User) -> Result<User, Error>;
     async fn delete_user(&self, id: &Uuid) -> Result<bool, Error>;
     async fn list_users(&self, active_only: bool) -> Result<Vec<User>, Error>;
+    async fn list_users_with_role(&self, active_only: bool) -> Result<Vec<UserWithRole>, Error>;
 
     /// Target operations
     async fn create_target(&self, target: &Target) -> Result<Target, Error>;
@@ -112,7 +113,7 @@ pub trait DatabaseRepository: Send + Sync {
         &self,
         ptype: &str,
     ) -> Result<Vec<CasbinRuleGroup>, Error>;
-    async fn list_roles_by_user_id(&self, user_id: &Uuid) -> Result<Vec<CasbinRule>, Error>;
+    async fn list_roles_by_user_id(&self, user_id: &Uuid) -> Result<Vec<Role>, Error>;
     async fn create_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error>;
     async fn update_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error>;
     async fn delete_casbin_rule(&self, id: &Uuid) -> Result<bool, Error>;

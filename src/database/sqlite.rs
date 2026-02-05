@@ -5,8 +5,8 @@ use sqlx::{sqlite::SqlitePool, Pool, Row, Sqlite};
 use uuid::Uuid;
 
 use crate::database::models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, Log, Secret, SecretInfo, Target, TargetInfo,
-    TargetSecret, TargetSecretName, User,
+    CasbinName, CasbinRule, CasbinRuleGroup, Log, Role, Secret, SecretInfo, Target, TargetInfo,
+    TargetSecret, TargetSecretName, User, UserWithRole,
 };
 use crate::database::DatabaseRepository;
 use crate::error::Error;
@@ -279,6 +279,41 @@ impl DatabaseRepository for SqliteRepository {
             .await?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn list_users_with_role(&self, active_only: bool) -> Result<Vec<UserWithRole>, Error> {
+        let mut query = String::from(
+            r#"SELECT
+    u.id,
+    u.username,
+    u.email,
+    u.password_hash,
+    u.authorized_keys,
+    u.force_init_pass,
+    u.is_active,
+    r.role,
+    u.updated_by,
+    u.updated_at
+FROM users u
+LEFT JOIN (
+    SELECT
+        ru.v1 AS user_id,
+        GROUP_CONCAT(cn.name, ', ') AS role
+    FROM casbin_rule ru
+    LEFT JOIN casbin_names cn ON ru.v0 = cn.id
+    GROUP BY ru.v1
+) r ON u.id = r.user_id"#,
+        );
+
+        if active_only {
+            query.push_str(" WHERE is_active = 1");
+        }
+        query.push_str(" ORDER BY username");
+
+        sqlx::query_as::<_, UserWithRole>(&query)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(Error::Sqlx)
     }
 
     async fn list_users(&self, active_only: bool) -> Result<Vec<User>, Error> {
@@ -589,14 +624,26 @@ impl DatabaseRepository for SqliteRepository {
             .map_err(Error::Sqlx)
     }
 
-    async fn list_roles_by_user_id(&self, user_id: &Uuid) -> Result<Vec<CasbinRule>, Error> {
+    async fn list_roles_by_user_id(&self, user_id: &Uuid) -> Result<Vec<Role>, Error> {
         let query = r#"
-        SELECT id, ptype, v0, v1, v2, v3, v4, v5, updated_by, updated_at
-        FROM casbin_rule
-        WHERE ptype = 'g1' AND v0 = ?
+        SELECT 
+    u.id as uid,
+    cr.rid,
+    username,
+    role
+FROM users u
+LEFT JOIN (
+    SELECT 
+        ru.v0 AS rid,
+        ru.v1 AS id,
+        GROUP_CONCAT(name, ',') AS role
+    FROM casbin_rule ru
+    LEFT JOIN casbin_names cn ON ru.v0 = cn.id
+    GROUP BY ru.v1
+) cr ON u.id = cr.id WHERE u.id = ?
     "#;
 
-        sqlx::query_as::<_, CasbinRule>(query)
+        sqlx::query_as::<_, Role>(query)
             .bind(user_id)
             .fetch_all(&self.pool)
             .await

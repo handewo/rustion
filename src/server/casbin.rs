@@ -1,6 +1,5 @@
 use crate::database::Uuid;
 use crate::error::Error;
-use base64::write;
 use ipnetwork::IpNetwork;
 use log::trace;
 use std::fmt;
