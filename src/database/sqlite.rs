@@ -627,20 +627,21 @@ LEFT JOIN (
     async fn list_roles_by_user_id(&self, user_id: &Uuid) -> Result<Vec<Role>, Error> {
         let query = r#"
         SELECT 
-    u.id as uid,
-    cr.rid,
-    username,
-    role
-FROM users u
+    cn.id AS rid,
+    cr.id AS rule_id,
+    name AS role,
+    CASE 
+        WHEN cr.id IS NULL THEN 0 
+        ELSE 1 
+    END AS is_bound
+FROM casbin_names cn
 LEFT JOIN (
-    SELECT 
-        ru.v0 AS rid,
-        ru.v1 AS id,
-        GROUP_CONCAT(name, ',') AS role
-    FROM casbin_rule ru
-    LEFT JOIN casbin_names cn ON ru.v0 = cn.id
-    GROUP BY ru.v1
-) cr ON u.id = cr.id WHERE u.id = ?
+    SELECT * 
+    FROM casbin_rule 
+    WHERE ptype = 'g1' 
+      AND v1 = ?
+) cr ON cn.id = cr.v0
+WHERE cn.ptype = 'g1';
     "#;
 
         sqlx::query_as::<_, Role>(query)

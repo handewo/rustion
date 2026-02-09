@@ -22,6 +22,7 @@ use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
 
 mod bind;
+mod grant_role;
 mod role;
 mod secret;
 mod target;
@@ -29,6 +30,11 @@ mod user;
 
 const HELP_TEXT: [&str; 2] = [
     "(a) add | (e) edit | (d) delete | (Esc) quit | (↑↓←→) move around",
+    "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
+];
+
+const USER_HELP_TEXT: [&str; 2] = [
+    "(a) add | (e) edit | (d) delete | (r) grant role | (Esc) quit | (↑↓←→) move around",
     "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
 ];
 
@@ -202,6 +208,25 @@ where
             SelectedTab::Bind => unreachable!(),
             SelectedTab::Role => unreachable!(),
         }
+    }
+
+    fn grant_role_form(&mut self) -> bool {
+        self.popup = Popup::Edit;
+        let idx = self.table.state.selected().unwrap();
+        let user = match self.items.get_user(idx) {
+            Some(u) => u,
+            None => {
+                return false;
+            }
+        };
+        self.editor = Editor::GrantRole(Box::new(grant_role::GrantRoleEditor::new(
+            user.id,
+            self.backend.clone(),
+            self.t_handle.clone(),
+            self.handler_id,
+            self.user_id,
+        )));
+        true
     }
 
     fn edit_form(&mut self) -> bool {
@@ -424,6 +449,12 @@ where
                                     self.clear_form();
                                 }
                             }
+                            KeyCode::Char('r') => {
+                                self.table.colors.gray();
+                                if !self.grant_role_form() {
+                                    self.clear_form();
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -451,6 +482,7 @@ where
                     Editor::Secret(ref mut e) => {
                         let _ = e.as_mut().handle_paste_event(paste);
                     }
+                    Editor::GrantRole(_) => {}
                     Editor::Bind(_) => unreachable!(),
                     Editor::Role(_) => unreachable!(),
                     Editor::None => {}
@@ -597,6 +629,12 @@ where
                         let msg = vec![format!("Secret {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
+                    self.clear_form();
+                    self.refresh_data();
+                }
+            }
+            Editor::GrantRole(ref mut e) => {
+                if e.as_mut().handle_key_event(key.code, key.modifiers) {
                     self.clear_form();
                     self.refresh_data();
                 }
@@ -774,6 +812,7 @@ where
                 Editor::User(_) => Line::styled("Add New User", Style::default().bold()),
                 Editor::Target(_) => Line::styled("Add New Target", Style::default().bold()),
                 Editor::Secret(_) => Line::styled("Add New Secret", Style::default().bold()),
+                Editor::GrantRole(_) => unreachable!(),
                 Editor::Bind(_) => unreachable!(),
                 Editor::Role(_) => unreachable!(),
                 Editor::None => unreachable!(),
@@ -782,6 +821,7 @@ where
                 Editor::User(_) => Line::styled("Edit User", Style::default().bold()),
                 Editor::Target(_) => Line::styled("Edit Target", Style::default().bold()),
                 Editor::Secret(_) => Line::styled("Edit Secret", Style::default().bold()),
+                Editor::GrantRole(_) => Line::styled("Grant Role", Style::default().bold()),
                 Editor::Bind(_) => unreachable!(),
                 Editor::Role(_) => unreachable!(),
                 Editor::None => unreachable!(),
@@ -833,7 +873,14 @@ where
             Editor::Secret(ref e) => e.as_ref().help_text,
             Editor::Bind(ref e) => e.as_ref().help_text,
             Editor::Role(ref e) => e.as_ref().help_text,
-            Editor::None => HELP_TEXT,
+            Editor::GrantRole(ref e) => e.as_ref().help_text,
+            Editor::None => {
+                if self.selected_tab == SelectedTab::Users {
+                    USER_HELP_TEXT
+                } else {
+                    HELP_TEXT
+                }
+            }
         };
 
         let info_footer = Paragraph::new(Text::from_iter(text))
@@ -1206,6 +1253,7 @@ where
     Secret(Box<secret::SecretEditor>),
     Bind(Box<bind::BindEditor<B>>),
     Role(Box<role::RoleEditor<B>>),
+    GrantRole(Box<grant_role::GrantRoleEditor<B>>),
     None,
 }
 
@@ -1225,6 +1273,9 @@ where
                 e.render(area, buf);
             }
             Editor::Secret(ref mut e) => {
+                e.render(area, buf);
+            }
+            Editor::GrantRole(ref mut e) => {
                 e.render(area, buf);
             }
             Editor::Bind(ref mut e) => {

@@ -89,7 +89,8 @@ pub struct CasbinRuleGroup {
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Role {
-    pub uid: Uuid,
     pub rid: Uuid,
+    pub rule_id: Option<Uuid>,
     pub role: String,
+    pub is_bound: bool,
 }
