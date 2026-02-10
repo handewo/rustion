@@ -393,8 +393,6 @@ impl TableData {
                 ]
             }
             Self::CasbinRule(ref data) => {
-                // UUIDs have fixed width of 36 characters
-                let uuid_len = 36;
                 let v3_len = data
                     .iter()
                     .map(|v| v.v3.as_str())
@@ -420,9 +418,9 @@ impl TableData {
                 vec![
                     Constraint::Length(LENGTH_UUID),
                     Constraint::Length(5),
-                    Constraint::Length(uuid_len as u16),
-                    Constraint::Length(uuid_len as u16),
-                    Constraint::Length(uuid_len as u16),
+                    Constraint::Length(LENGTH_UUID),
+                    Constraint::Length(LENGTH_UUID),
+                    Constraint::Length(LENGTH_UUID),
                     Constraint::Length(v3_len as u16),
                     Constraint::Length(v4_len as u16),
                     Constraint::Length(v5_len as u16),
