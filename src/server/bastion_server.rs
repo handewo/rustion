@@ -1,9 +1,9 @@
 use super::casbin;
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
-use aes_gcm::aead::Aead;
+use aes_gcm::aead::{rand_core::RngCore, Aead};
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+    password_hash::{PasswordHasher, SaltString},
     Argon2,
 };
 use log::{error, info, trace, warn};
@@ -11,6 +11,7 @@ use moka::future::Cache;
 use moka::ops::compute::{CompResult, Op};
 use petgraph::stable_graph::StableDiGraph;
 use russh::client as ru_client;
+use russh::keys::ssh_key::rand_core::OsRng;
 use russh::keys::Algorithm;
 use russh::server::{Config as RusshConfig, Server};
 
@@ -21,7 +22,6 @@ use crate::database::service::DatabaseService;
 use crate::error::Error;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::{engine::general_purpose, Engine as _};
-use rand_core::RngCore;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -226,7 +226,7 @@ impl BastionServer {
         } else {
             warn!("Server key file not found, generating a random key",);
             vec![
-                russh::keys::PrivateKey::random(&mut rand_core::OsRng, Algorithm::Ed25519)
+                russh::keys::PrivateKey::random(&mut OsRng, Algorithm::Ed25519)
                     .map_err(russh::Error::from)?,
             ]
         };
