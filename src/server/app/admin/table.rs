@@ -407,6 +407,24 @@ impl FieldsToArray for CasbinName {
     }
 }
 
+impl FieldsToArray for PermissionPolicy {
+    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+        match mode {
+            DisplayMode::Full => {
+                todo!()
+            }
+            DisplayMode::Manage => {
+                vec![
+                    self.user_role.clone(),
+                    self.target_group.clone(),
+                    self.action_group.clone(),
+                    self.rule.v3.clone(),
+                ]
+            }
+        }
+    }
+}
+
 impl FieldsToArray for CasbinRule {
     fn to_array(&self, mode: DisplayMode) -> Vec<String> {
         match mode {

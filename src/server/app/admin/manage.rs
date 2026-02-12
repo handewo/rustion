@@ -92,7 +92,8 @@ enum SelectedTab {
     Targets = 1,
     Secrets = 2,
     Bind = 3,
-    Role = 4,
+    Permissions = 4,
+    Role = 5,
 }
 
 impl fmt::Display for SelectedTab {
@@ -102,6 +103,7 @@ impl fmt::Display for SelectedTab {
             SelectedTab::Targets => write!(f, "Targets"),
             SelectedTab::Secrets => write!(f, "Secrets"),
             SelectedTab::Bind => write!(f, "Bind"),
+            SelectedTab::Permissions => write!(f, "Permissions"),
             SelectedTab::Role => write!(f, "Role"),
         }
     }
@@ -113,7 +115,8 @@ impl SelectedTab {
             SelectedTab::Users => SelectedTab::Targets,
             SelectedTab::Targets => SelectedTab::Secrets,
             SelectedTab::Secrets => SelectedTab::Bind,
-            SelectedTab::Bind => SelectedTab::Role,
+            SelectedTab::Bind => SelectedTab::Permissions,
+            SelectedTab::Permissions => SelectedTab::Role,
             SelectedTab::Role => SelectedTab::Users,
         }
     }
@@ -124,7 +127,8 @@ impl SelectedTab {
             SelectedTab::Targets => SelectedTab::Users,
             SelectedTab::Secrets => SelectedTab::Targets,
             SelectedTab::Bind => SelectedTab::Secrets,
-            SelectedTab::Role => SelectedTab::Bind,
+            SelectedTab::Permissions => SelectedTab::Bind,
+            SelectedTab::Role => SelectedTab::Permissions,
         }
     }
 }
@@ -205,6 +209,7 @@ where
                     self.user_id,
                 ))))
             }
+            SelectedTab::Permissions => todo!(),
             SelectedTab::Bind => unreachable!(),
             SelectedTab::Role => unreachable!(),
         }
@@ -263,6 +268,7 @@ where
                 };
                 self.editor = Editor::Secret(Box::new(secret::SecretEditor::new(secret)));
             }
+            SelectedTab::Permissions => todo!(),
             SelectedTab::Bind => unreachable!(),
             SelectedTab::Role => unreachable!(),
         }
@@ -338,6 +344,7 @@ where
                     self.refresh_data();
                 }
             }
+            SelectedTab::Permissions => todo!(),
             SelectedTab::Bind => unreachable!(),
             SelectedTab::Role => unreachable!(),
         }
@@ -360,6 +367,7 @@ where
                     return true;
                 }
             }
+            SelectedTab::Permissions => todo!(),
             SelectedTab::Bind => unreachable!(),
             SelectedTab::Role => unreachable!(),
         }
@@ -746,6 +754,13 @@ where
                     self.user_id,
                 )));
             }
+            SelectedTab::Permissions => {
+                self.items = TableData::Permissions(
+                    self.t_handle
+                        .block_on(self.backend.db_repository().list_permission_polices())
+                        .unwrap_or_default(),
+                );
+            }
             SelectedTab::Role => {
                 self.editor = Editor::Role(Box::new(role::RoleEditor::new(
                     self.backend.clone(),
@@ -849,6 +864,7 @@ where
                             &["Delete selected secret?".to_string()],
                         );
                     }
+                    SelectedTab::Permissions => todo!(),
                     SelectedTab::Bind => unreachable!(),
                     SelectedTab::Role => unreachable!(),
                 }
@@ -904,10 +920,8 @@ enum TableData {
     Users(Vec<UserWithRole>),
     Targets(Vec<Target>),
     Secrets(Vec<Secret>),
-    TargetSecrets(Vec<TargetSecret>),
     CasbinNames(Vec<CasbinName>),
-    CasbinRule(Vec<CasbinRule>),
-    Logs(Vec<Log>),
+    Permissions(Vec<PermissionPolicy>),
 }
 
 impl TableData {
@@ -1013,14 +1027,6 @@ impl TableData {
                     Constraint::Length(9), // is_active
                 ]
             }
-            Self::TargetSecrets(_) => vec![
-                Constraint::Length(LENGTH_UUID), // id
-                Constraint::Length(LENGTH_UUID), // target_id
-                Constraint::Length(LENGTH_UUID), // secret_id
-                Constraint::Length(9),           // is_active
-                Constraint::Length(LENGTH_UUID), // created_by
-                Constraint::Length(LENGTH_TIMESTAMP),
-            ],
             Self::Secrets(ref data) => {
                 let name_len = data
                     .iter()
@@ -1069,70 +1075,43 @@ impl TableData {
                     Constraint::Length(LENGTH_TIMESTAMP),
                 ]
             }
-            Self::CasbinRule(ref data) => {
-                // UUIDs have fixed width of 36 characters
-                let uuid_len = 36;
-
-                let v3_len = data
+            Self::Permissions(ref data) => {
+                let user_role_len = data
                     .iter()
-                    .map(|v| v.v3.as_str())
+                    .map(|v| v.user_role.as_str())
                     .map(UnicodeWidthStr::width)
                     .max()
                     .unwrap_or(0)
-                    .max(2);
+                    .max(9);
 
-                let v4_len = data
+                let target_group_len = data
                     .iter()
-                    .map(|v| v.v4.as_str())
+                    .map(|v| v.target_group.as_str())
                     .map(UnicodeWidthStr::width)
                     .max()
                     .unwrap_or(0)
-                    .max(2);
+                    .max(12);
 
-                let v5_len = data
+                let action_group_len = data
                     .iter()
-                    .map(|v| v.v5.as_str())
+                    .map(|v| v.action_group.as_str())
                     .map(UnicodeWidthStr::width)
                     .max()
                     .unwrap_or(0)
-                    .max(2);
+                    .max(12);
+
+                let ext_len = data
+                    .iter()
+                    .map(|v| v.rule.v3.len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(13);
 
                 vec![
-                    Constraint::Length(LENGTH_UUID),
-                    Constraint::Length(5),
-                    Constraint::Length(uuid_len as u16),
-                    Constraint::Length(uuid_len as u16),
-                    Constraint::Length(uuid_len as u16),
-                    Constraint::Length(v3_len as u16),
-                    Constraint::Length(v4_len as u16),
-                    Constraint::Length(v5_len as u16),
-                    Constraint::Length(LENGTH_UUID),
-                    Constraint::Length(LENGTH_TIMESTAMP),
-                ]
-            }
-            Self::Logs(ref data) => {
-                let log_type_len = data
-                    .iter()
-                    .map(|v| v.log_type.as_str())
-                    .map(UnicodeWidthStr::width)
-                    .max()
-                    .unwrap_or(0)
-                    .max(8);
-
-                let detail_len = data
-                    .iter()
-                    .map(|v| v.detail.as_str())
-                    .map(UnicodeWidthStr::width)
-                    .max()
-                    .unwrap_or(0)
-                    .max(6);
-
-                vec![
-                    Constraint::Length(LENGTH_UUID),
-                    Constraint::Length(log_type_len as u16),
-                    Constraint::Length(LENGTH_UUID),
-                    Constraint::Length(detail_len as u16),
-                    Constraint::Length(LENGTH_TIMESTAMP),
+                    Constraint::Length(user_role_len as u16),
+                    Constraint::Length(target_group_len as u16),
+                    Constraint::Length(action_group_len as u16),
+                    Constraint::Length(ext_len as u16),
                 ]
             }
         }
@@ -1154,19 +1133,11 @@ impl super::table::TableData for TableData {
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::TargetSecrets(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
             Self::CasbinNames(ref data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::CasbinRule(ref data) => data
-                .iter()
-                .map(|v| v as &dyn FieldsToArray)
-                .collect::<Vec<_>>(),
-            Self::Logs(ref data) => data
+            Self::Permissions(ref data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
@@ -1178,10 +1149,8 @@ impl super::table::TableData for TableData {
             Self::Users(ref data) => data.len(),
             Self::Targets(ref data) => data.len(),
             Self::Secrets(ref data) => data.len(),
-            Self::TargetSecrets(ref data) => data.len(),
             Self::CasbinNames(ref data) => data.len(),
-            Self::CasbinRule(ref data) => data.len(),
-            Self::Logs(ref data) => data.len(),
+            Self::Permissions(ref data) => data.len(),
         }
     }
 
@@ -1204,14 +1173,6 @@ impl super::table::TableData for TableData {
                 "description",
                 "is_active",
             ],
-            Self::TargetSecrets(_) => vec![
-                "id",
-                "target_id",
-                "secret_id",
-                "is_active",
-                "updated_by",
-                "updated_at",
-            ],
             Self::Secrets(_) => vec![
                 "name",
                 "user",
@@ -1221,25 +1182,9 @@ impl super::table::TableData for TableData {
                 "is_active",
             ],
             Self::CasbinNames(_) => vec!["name", "is_active", "updated_by", "updated_at"],
-            Self::CasbinRule(_) => vec![
-                "id",
-                "ptype",
-                "p0",
-                "p1",
-                "p2",
-                "p3",
-                "p4",
-                "p5",
-                "updated_by",
-                "updated_at",
-            ],
-            Self::Logs(_) => vec![
-                "connection_id",
-                "log_type",
-                "user_id",
-                "detail",
-                "created_at",
-            ],
+            Self::Permissions(_) => {
+                vec!["user/role", "target/group", "action/group", "extend policy"]
+            }
         }
     }
 }

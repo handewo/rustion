@@ -5,8 +5,8 @@ use sqlx::{sqlite::SqlitePool, Pool, Row, Sqlite};
 use uuid::Uuid;
 
 use crate::database::models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, Log, Role, Secret, SecretInfo, Target, TargetInfo,
-    TargetSecret, TargetSecretName, User, UserWithRole,
+    CasbinName, CasbinRule, CasbinRuleGroup, Log, PermissionPolicy, Role, Secret, SecretInfo,
+    Target, TargetInfo, TargetSecret, TargetSecretName, User, UserWithRole,
 };
 use crate::database::DatabaseRepository;
 use crate::error::Error;
@@ -1506,5 +1506,41 @@ WHERE c.ptype = 'g3';"#
         .await?;
 
         Ok(logs)
+    }
+
+    async fn list_permission_polices(&self) -> Result<Vec<PermissionPolicy>, Error> {
+        let pols = sqlx::query_as::<_, PermissionPolicy>(
+            r#"SELECT 
+    cr.*,
+    n1.name AS user_role,
+    n2.name AS target_group,
+    n3.name AS action_group
+FROM 
+    casbin_rule cr
+LEFT JOIN (
+    SELECT id, name FROM casbin_names
+    UNION ALL
+    SELECT id, username FROM users
+) n1 ON n1.id = cr.v0
+LEFT JOIN (
+    SELECT 
+        ts.id,
+        s.user || '@' || t.name || ':' || t.port AS name
+    FROM target_secrets AS ts
+    LEFT JOIN targets AS t ON ts.target_id = t.id
+    LEFT JOIN secrets AS s ON ts.secret_id = s.id
+    UNION ALL
+    SELECT id, name FROM casbin_names
+) n2 ON n2.id = cr.v1
+LEFT JOIN (
+    SELECT id, name FROM casbin_names
+) n3 ON n3.id = cr.v2
+WHERE 
+    cr.ptype = 'p'"#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(pols)
     }
 }

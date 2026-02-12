@@ -6,8 +6,8 @@ pub(crate) mod sqlite;
 use crate::{database::models::UserWithRole, error::Error};
 use async_trait::async_trait;
 use models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, Log, Role, Secret, SecretInfo, Target, TargetInfo,
-    TargetSecret, TargetSecretName, User,
+    CasbinName, CasbinRule, CasbinRuleGroup, Log, PermissionPolicy, Role, Secret, SecretInfo,
+    Target, TargetInfo, TargetSecret, TargetSecretName, User,
 };
 pub use uuid::Uuid;
 
@@ -177,6 +177,8 @@ pub trait DatabaseRepository: Send + Sync {
     async fn count_targets(&self) -> Result<i64, Error>;
     async fn count_active_users(&self) -> Result<i64, Error>;
     async fn count_active_targets(&self) -> Result<i64, Error>;
+
+    async fn list_permission_polices(&self) -> Result<Vec<PermissionPolicy>, Error>;
 }
 
 /// Database factory to create appropriate repository based on configuration

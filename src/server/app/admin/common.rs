@@ -16,15 +16,17 @@ pub const COMMAND_LIST: [&str; 5] = [
     CMD_EXIT,
 ];
 
-pub const MANAGE_USERS: &str = "users";
-pub const MANAGE_TARGETS: &str = "targets";
-pub const MANAGE_SECRETS: &str = "secrets";
-pub const MANAGE_BIND: &str = "bind";
-pub const MANAGE_ROLE: &str = "role";
-pub const MANAGE_LIST: [&str; 5] = [
+pub const MANAGE_USERS: &str = "Users";
+pub const MANAGE_TARGETS: &str = "Targets";
+pub const MANAGE_SECRETS: &str = "Secrets";
+pub const MANAGE_BIND: &str = "Bind";
+pub const MANAGE_ROLE: &str = "Role";
+pub const MANAGE_PERMISSIONS: &str = "Permissions";
+pub const MANAGE_LIST: [&str; 6] = [
     MANAGE_USERS,
     MANAGE_TARGETS,
     MANAGE_SECRETS,
     MANAGE_BIND,
+    MANAGE_PERMISSIONS,
     MANAGE_ROLE,
 ];

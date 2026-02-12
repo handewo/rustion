@@ -94,3 +94,12 @@ pub struct Role {
     pub role: String,
     pub is_bound: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct PermissionPolicy {
+    #[sqlx(flatten)]
+    pub rule: CasbinRule,
+    pub user_role: String,
+    pub target_group: String,
+    pub action_group: String,
+}
