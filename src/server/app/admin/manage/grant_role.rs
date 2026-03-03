@@ -152,6 +152,7 @@ where
 
     fn render_ui(&mut self, area: Rect, buf: &mut Buffer) {
         let area = centered_area(area, area.width - 2, area.height - 2);
+        self.role_table.size = (area.width, area.height);
 
         // Render left table (Targets)
         self.role_table.render(
