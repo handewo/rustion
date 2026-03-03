@@ -5,8 +5,8 @@ use sqlx::{sqlite::SqlitePool, Pool, Row, Sqlite};
 use uuid::Uuid;
 
 use crate::database::models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, Log, PermissionPolicy, Role, Secret, SecretInfo,
-    Target, TargetInfo, TargetSecret, TargetSecretName, User, UserWithRole,
+    CasbinName, CasbinRule, CasbinRuleGroup, Log, ObjectGroup, PermissionPolicy, Role, Secret,
+    SecretInfo, Target, TargetInfo, TargetSecret, TargetSecretName, User, UserWithRole,
 };
 use crate::database::DatabaseRepository;
 use crate::error::Error;
@@ -836,6 +836,86 @@ WHERE c.ptype = 'g3';"#
         .await?;
 
         Ok(row)
+    }
+
+    async fn list_user_group(&self) -> Result<Vec<ObjectGroup>, Error> {
+        let query = String::from(
+            r#"SELECT 
+    id, 
+    username AS name, 
+    0 AS is_group 
+FROM users 
+
+UNION ALL
+
+SELECT 
+    id, 
+    name, 
+    1 AS is_group 
+FROM casbin_names 
+WHERE ptype = 'g1';"#,
+        );
+
+        let rows = sqlx::query_as::<_, ObjectGroup>(&query)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows)
+    }
+
+    async fn list_target_group(&self) -> Result<Vec<ObjectGroup>, Error> {
+        let query = String::from(
+            r#"
+        SELECT 
+    ts.id, 
+    s.user || '@' || t.name || ':' || t.port AS name, 
+    0 AS is_group 
+FROM target_secrets AS ts 
+LEFT JOIN targets AS t ON ts.target_id = t.id 
+LEFT JOIN secrets AS s ON ts.secret_id = s.id 
+
+UNION ALL
+
+SELECT 
+    id, 
+    name, 
+    CASE 
+        WHEN ptype = 'g2' THEN 1 
+        ELSE 0 
+    END AS is_group 
+FROM casbin_names 
+WHERE ptype = 'g2' 
+   OR ptype = '__internal_object_type';
+        "#,
+        );
+
+        let rows = sqlx::query_as::<_, ObjectGroup>(&query)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows)
+    }
+
+    async fn list_action_group(&self) -> Result<Vec<ObjectGroup>, Error> {
+        let query = String::from(
+            r#"SELECT 
+    id, 
+    name, 
+    CASE 
+        WHEN ptype = 'g3' THEN 1 
+        ELSE 0 
+    END AS is_group 
+FROM casbin_names 
+WHERE ptype = 'g3' 
+   OR ptype = '__internal_action_type';
+"#,
+        );
+
+        let rows = sqlx::query_as::<_, ObjectGroup>(&query)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows)
     }
 
     async fn list_casbin_names(&self, active_only: bool) -> Result<Vec<CasbinName>, Error> {

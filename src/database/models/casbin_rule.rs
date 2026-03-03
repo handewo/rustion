@@ -103,3 +103,30 @@ pub struct PermissionPolicy {
     pub target_group: String,
     pub action_group: String,
 }
+
+impl PermissionPolicy {
+    pub fn new(updated_by: Uuid) -> Self {
+        Self {
+            rule: CasbinRule::new(
+                String::new(),
+                Uuid::default(),
+                Uuid::default(),
+                None,
+                String::new(),
+                String::new(),
+                String::new(),
+                updated_by,
+            ),
+            user_role: String::new(),
+            target_group: String::new(),
+            action_group: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ObjectGroup {
+    pub id: Uuid,
+    pub name: String,
+    pub is_group: bool,
+}
