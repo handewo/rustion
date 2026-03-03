@@ -1,5 +1,6 @@
 use super::super::table::{AdminTable, DisplayMode, FieldsToArray, TableData};
 use crate::database::models::{SecretInfo, TargetInfo};
+use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::app::admin::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -13,7 +14,6 @@ use ratatui::{
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
-use crate::database::Uuid;
 
 pub const HELP_TEXT: [&str; 2] = [
     "(Space) toggle | (←→) switch window | (↑↓) select item",
@@ -168,6 +168,8 @@ where
     }
 
     fn save_bindings(&mut self) -> Result<(), Error> {
+        // TODO: Verify target and secret if same target bind same
+        // system user more than once.
         let t_idx = self.target_table.state.selected().unwrap();
         let s_idx = self.secret_table.state.selected().unwrap();
         let t = self.targets.get(t_idx).unwrap();
