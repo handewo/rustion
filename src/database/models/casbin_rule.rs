@@ -122,8 +122,46 @@ impl PermissionPolicy {
             action_group: String::new(),
         }
     }
+
+    pub fn verify(&self) -> Result<(), PermissionPolicyEmptyError> {
+        if self.user_role == String::new() {
+            return Err(PermissionPolicyEmptyError::UserRole);
+        }
+
+        if self.target_group == String::new() {
+            return Err(PermissionPolicyEmptyError::TargetGroup);
+        }
+
+        if self.action_group == String::new() {
+            return Err(PermissionPolicyEmptyError::ActionGroup);
+        }
+        Ok(())
+    }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum PermissionPolicyEmptyError {
+    UserRole,
+    TargetGroup,
+    ActionGroup,
+}
+
+impl std::fmt::Display for PermissionPolicyEmptyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use PermissionPolicyEmptyError::*;
+        match self {
+            UserRole => {
+                write!(f, "User/Role cannot be empty")
+            }
+            TargetGroup => {
+                write!(f, "Target/Group cannot be empty")
+            }
+            ActionGroup => {
+                write!(f, "Action/Group cannot be empty")
+            }
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ObjectGroup {
     pub id: Uuid,
