@@ -868,7 +868,7 @@ WHERE ptype = 'g1';"#,
             r#"
         SELECT 
     ts.id, 
-    s.user || '@' || t.name || ':' || t.port AS name, 
+    s.user || '(' || s.name || ')'|| '@' || t.name || ':' || t.port AS name, 
     0 AS is_group 
 FROM target_secrets AS ts 
 LEFT JOIN targets AS t ON ts.target_id = t.id 
@@ -1605,7 +1605,7 @@ LEFT JOIN (
 LEFT JOIN (
     SELECT 
         ts.id,
-        s.user || '@' || t.name || ':' || t.port AS name
+        s.user || '(' || s.name || ')'|| '@' || t.name || ':' || t.port AS name
     FROM target_secrets AS ts
     LEFT JOIN targets AS t ON ts.target_id = t.id
     LEFT JOIN secrets AS s ON ts.secret_id = s.id
