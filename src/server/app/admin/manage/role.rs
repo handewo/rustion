@@ -1,6 +1,7 @@
 use super::super::table::{AdminTable, DisplayMode, FieldsToArray, TableData};
 use super::super::tree;
 use crate::database::models::{SecretInfo, TargetInfo};
+use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::casbin::RoleType;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -16,7 +17,6 @@ use std::sync::Arc;
 use tokio::runtime::Handle;
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 use unicode_width::UnicodeWidthStr;
-use crate::database::Uuid;
 
 pub const HELP_TEXT: [&str; 2] = [
     "(Space) toggle | (←→) switch window | (↑↓) select item",
@@ -34,7 +34,7 @@ where
     backend: Arc<B>,
     t_handle: Handle,
     handler_id: Uuid,
-    user_id: Uuid,
+    admin_id: Uuid,
     save_error: Option<Error>,
     pub help_text: [&'static str; 2],
 }
@@ -43,7 +43,7 @@ impl<B> RoleEditor<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    pub fn new(backend: Arc<B>, t_handle: Handle, handler_id: Uuid, user_id: Uuid) -> Self {
+    pub fn new(backend: Arc<B>, t_handle: Handle, handler_id: Uuid, admin_id: Uuid) -> Self {
         let graph = t_handle.block_on(backend.get_role_graph(RoleType::Subject));
         // TODO: handle error
         let items = tree::build_tree(&graph).unwrap();
@@ -62,7 +62,7 @@ where
             backend,
             t_handle,
             handler_id,
-            user_id,
+            admin_id,
             save_error: None,
             help_text: HELP_TEXT,
         }

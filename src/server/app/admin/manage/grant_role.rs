@@ -31,7 +31,7 @@ where
     backend: Arc<B>,
     t_handle: Handle,
     handler_id: Uuid,
-    user_id: Uuid,
+    admin_id: Uuid,
     save_error: Option<Error>,
     pub help_text: [&'static str; 2],
 }
@@ -45,7 +45,7 @@ where
         backend: Arc<B>,
         t_handle: Handle,
         handler_id: Uuid,
-        user_id: Uuid,
+        admin_id: Uuid,
     ) -> Self {
         let mut save_error = None;
         let items = match t_handle.block_on(
@@ -67,7 +67,7 @@ where
             backend,
             t_handle,
             handler_id,
-            user_id,
+            admin_id,
             save_error,
             help_text: HELP_TEXT,
         }
@@ -141,7 +141,7 @@ where
                 String::new(),
                 String::new(),
                 String::new(),
-                self.user_id,
+                self.admin_id,
             );
             self.t_handle
                 .block_on(self.backend.db_repository().create_casbin_rule(&cr))?;

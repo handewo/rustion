@@ -148,7 +148,7 @@ where
     backend: Arc<B>,
     t_handle: Handle,
     handler_id: Uuid,
-    user_id: Uuid,
+    admin_id: Uuid,
     editor: Editor<B>,
     message: Option<Message>,
 }
@@ -157,7 +157,7 @@ impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    fn new(backend: Arc<B>, t_handle: Handle, user_id: Uuid, handler_id: Uuid) -> Self {
+    fn new(backend: Arc<B>, t_handle: Handle, admin_id: Uuid, handler_id: Uuid) -> Self {
         let data = TableData::Users(
             match t_handle.block_on(backend.db_repository().list_users_with_role(false)) {
                 Ok(d) => d,
@@ -179,7 +179,7 @@ where
             t_handle,
             handler_id,
             items: data,
-            user_id,
+            admin_id,
             editor: Editor::None,
             message: None,
         }
@@ -198,27 +198,28 @@ where
 
         match self.selected_tab {
             SelectedTab::Users => {
-                self.editor = Editor::User(Box::new(user::UserEditor::new(User::new(self.user_id))))
+                self.editor =
+                    Editor::User(Box::new(user::UserEditor::new(User::new(self.admin_id))))
             }
             SelectedTab::Targets => {
                 self.editor = Editor::Target(Box::new(target::TargetEditor::new(Target::new(
-                    self.user_id,
+                    self.admin_id,
                 ))))
             }
             SelectedTab::Secrets => {
                 self.editor = Editor::Secret(Box::new(secret::SecretEditor::new(Secret::new(
-                    self.user_id,
+                    self.admin_id,
                 ))))
             }
             SelectedTab::Permissions => {
-                let mut perm = PermissionPolicy::new(self.user_id);
+                let mut perm = PermissionPolicy::new(self.admin_id);
                 perm.rule.ptype = "p".to_string();
                 self.editor = Editor::Permission(Box::new(permission::PermissionEditor::new(
                     perm,
                     self.backend.clone(),
                     self.t_handle.clone(),
                     self.handler_id,
-                    self.user_id,
+                    self.admin_id,
                 )))
             }
             SelectedTab::Bind => unreachable!(),
@@ -240,7 +241,7 @@ where
             self.backend.clone(),
             self.t_handle.clone(),
             self.handler_id,
-            self.user_id,
+            self.admin_id,
         )));
         true
     }
@@ -292,7 +293,7 @@ where
                     self.backend.clone(),
                     self.t_handle.clone(),
                     self.handler_id,
-                    self.user_id,
+                    self.admin_id,
                 )));
             }
             SelectedTab::Bind => unreachable!(),
@@ -687,7 +688,7 @@ where
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
                     if !e.show_cancel_confirmation {
                         let mut perm = e.perm.to_owned();
-                        perm.rule.updated_by = self.user_id;
+                        perm.rule.updated_by = self.admin_id;
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
@@ -832,7 +833,7 @@ where
                     self.backend.clone(),
                     self.t_handle.clone(),
                     self.handler_id,
-                    self.user_id,
+                    self.admin_id,
                 )));
             }
             SelectedTab::Permissions => {
@@ -847,7 +848,7 @@ where
                     self.backend.clone(),
                     self.t_handle.clone(),
                     self.handler_id,
-                    self.user_id,
+                    self.admin_id,
                 )));
             }
         };

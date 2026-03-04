@@ -50,7 +50,7 @@ where
     backend: Arc<B>,
     t_handle: Handle,
     handler_id: Uuid,
-    user_id: Uuid,
+    admin_id: Uuid,
     save_error: Option<Error>,
     pub help_text: [&'static str; 2],
 }
@@ -65,7 +65,7 @@ where
         backend: Arc<B>,
         t_handle: Handle,
         handler_id: Uuid,
-        user_id: Uuid,
+        admin_id: Uuid,
     ) -> Self {
         Self {
             targets: targets.clone(),
@@ -79,7 +79,7 @@ where
             backend,
             t_handle,
             handler_id,
-            user_id,
+            admin_id,
             save_error: None,
             help_text: HELP_TEXT,
         }
@@ -180,7 +180,7 @@ where
                 &t.id,
                 &s.id,
                 !s.is_bound,
-                &self.user_id,
+                &self.admin_id,
             ))
     }
 
