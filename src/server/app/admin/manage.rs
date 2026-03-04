@@ -23,6 +23,7 @@ use unicode_width::UnicodeWidthStr;
 
 mod bind;
 mod grant_role;
+mod permission;
 mod role;
 mod secret;
 mod target;
@@ -209,7 +210,17 @@ where
                     self.user_id,
                 ))))
             }
-            SelectedTab::Permissions => todo!(),
+            SelectedTab::Permissions => {
+                let mut perm = PermissionPolicy::new(self.user_id);
+                perm.rule.ptype = "p".to_string();
+                self.editor = Editor::Permission(Box::new(permission::PermissionEditor::new(
+                    perm,
+                    self.backend.clone(),
+                    self.t_handle.clone(),
+                    self.handler_id,
+                    self.user_id,
+                )))
+            }
             SelectedTab::Bind => unreachable!(),
             SelectedTab::Role => unreachable!(),
         }
@@ -268,7 +279,22 @@ where
                 };
                 self.editor = Editor::Secret(Box::new(secret::SecretEditor::new(secret)));
             }
-            SelectedTab::Permissions => todo!(),
+            SelectedTab::Permissions => {
+                let idx = self.table.state.selected().unwrap();
+                let permission = match self.items.get_permission(idx) {
+                    Some(s) => s,
+                    None => {
+                        return false;
+                    }
+                };
+                self.editor = Editor::Permission(Box::new(permission::PermissionEditor::new(
+                    permission,
+                    self.backend.clone(),
+                    self.t_handle.clone(),
+                    self.handler_id,
+                    self.user_id,
+                )));
+            }
             SelectedTab::Bind => unreachable!(),
             SelectedTab::Role => unreachable!(),
         }
@@ -277,11 +303,10 @@ where
     }
 
     fn do_delete(&mut self, idx: usize) {
+        self.popup = Popup::None;
+        self.clear_form();
         match self.selected_tab {
             SelectedTab::Users => {
-                self.popup = Popup::None;
-                self.clear_form();
-
                 if let Some(u) = self.items.get_user(idx) {
                     let result = self
                         .t_handle
@@ -301,9 +326,6 @@ where
                 }
             }
             SelectedTab::Targets => {
-                self.popup = Popup::None;
-                self.clear_form();
-
                 if let Some(t) = self.items.get_target(idx) {
                     let result = self
                         .t_handle
@@ -323,9 +345,6 @@ where
                 }
             }
             SelectedTab::Secrets => {
-                self.popup = Popup::None;
-                self.clear_form();
-
                 if let Some(s) = self.items.get_secret(idx) {
                     let result = self
                         .t_handle
@@ -344,7 +363,25 @@ where
                     self.refresh_data();
                 }
             }
-            SelectedTab::Permissions => todo!(),
+            SelectedTab::Permissions => {
+                if let Some(p) = self.items.get_permission(idx) {
+                    let result = self
+                        .t_handle
+                        .block_on(self.backend.db_repository().delete_casbin_rule(&p.rule.id));
+
+                    if let Err(e) = result {
+                        self.message = Some(Message::Error(vec!["Internal error".into()]));
+                        warn!(
+                            "[{}] Delete casbin rule: {} failed, {}",
+                            self.handler_id, p.rule.id, e
+                        );
+                        return;
+                    }
+
+                    self.message = Some(Message::Success(vec!["Permission deleted".into()]));
+                    self.refresh_data();
+                }
+            }
             SelectedTab::Bind => unreachable!(),
             SelectedTab::Role => unreachable!(),
         }
@@ -367,7 +404,11 @@ where
                     return true;
                 }
             }
-            SelectedTab::Permissions => todo!(),
+            SelectedTab::Permissions => {
+                if self.items.get_permission(idx).is_some() {
+                    return true;
+                }
+            }
             SelectedTab::Bind => unreachable!(),
             SelectedTab::Role => unreachable!(),
         }
@@ -491,6 +532,7 @@ where
                         let _ = e.as_mut().handle_paste_event(paste);
                     }
                     Editor::GrantRole(_) => {}
+                    Editor::Permission(_) => {}
                     Editor::Bind(_) => unreachable!(),
                     Editor::Role(_) => unreachable!(),
                     Editor::None => {}
@@ -635,6 +677,45 @@ where
                             return Ok(());
                         }
                         let msg = vec![format!("Secret {}", action)];
+                        self.message = Some(Message::Success(msg));
+                    }
+                    self.clear_form();
+                    self.refresh_data();
+                }
+            }
+            Editor::Permission(ref mut e) => {
+                if e.as_mut().handle_key_event(key.code, key.modifiers) {
+                    if !e.show_cancel_confirmation {
+                        let mut perm = e.perm.to_owned();
+                        perm.rule.updated_by = self.user_id;
+                        let (action, result) = match self.popup {
+                            Popup::Add => (
+                                "added",
+                                self.t_handle.block_on(
+                                    self.backend.db_repository().create_casbin_rule(&perm.rule),
+                                ),
+                            ),
+                            Popup::Edit => (
+                                "updated",
+                                self.t_handle.block_on(
+                                    self.backend.db_repository().update_casbin_rule(&perm.rule),
+                                ),
+                            ),
+                            _ => unreachable!(),
+                        };
+                        if let Err(err) = result {
+                            let msg = match err {
+                                Error::Sqlx(sqlx::Error::Database(db_err))
+                                    if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
+                                {
+                                    "Permission already exists"
+                                }
+                                _ => "Internal error",
+                            };
+                            self.message = Some(Message::Error(vec![msg.into()]));
+                            return Ok(());
+                        }
+                        let msg = vec![format!("Permission {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
                     self.clear_form();
@@ -827,6 +908,9 @@ where
                 Editor::User(_) => Line::styled("Add New User", Style::default().bold()),
                 Editor::Target(_) => Line::styled("Add New Target", Style::default().bold()),
                 Editor::Secret(_) => Line::styled("Add New Secret", Style::default().bold()),
+                Editor::Permission(_) => {
+                    Line::styled("Add New Permission", Style::default().bold())
+                }
                 Editor::GrantRole(_) => unreachable!(),
                 Editor::Bind(_) => unreachable!(),
                 Editor::Role(_) => unreachable!(),
@@ -836,6 +920,7 @@ where
                 Editor::User(_) => Line::styled("Edit User", Style::default().bold()),
                 Editor::Target(_) => Line::styled("Edit Target", Style::default().bold()),
                 Editor::Secret(_) => Line::styled("Edit Secret", Style::default().bold()),
+                Editor::Permission(_) => Line::styled("Edit Permission", Style::default().bold()),
                 Editor::GrantRole(_) => Line::styled("Grant Role", Style::default().bold()),
                 Editor::Bind(_) => unreachable!(),
                 Editor::Role(_) => unreachable!(),
@@ -864,7 +949,13 @@ where
                             &["Delete selected secret?".to_string()],
                         );
                     }
-                    SelectedTab::Permissions => todo!(),
+                    SelectedTab::Permissions => {
+                        render_confirm_dialog(
+                            popup_area,
+                            frame.buffer_mut(),
+                            &["Delete selected permission?".to_string()],
+                        );
+                    }
                     SelectedTab::Bind => unreachable!(),
                     SelectedTab::Role => unreachable!(),
                 }
@@ -889,6 +980,7 @@ where
             Editor::Secret(ref e) => e.as_ref().help_text,
             Editor::Bind(ref e) => e.as_ref().help_text,
             Editor::Role(ref e) => e.as_ref().help_text,
+            Editor::Permission(ref e) => e.as_ref().help_text,
             Editor::GrantRole(ref e) => e.as_ref().help_text,
             Editor::None => {
                 if self.selected_tab == SelectedTab::Users {
@@ -943,6 +1035,14 @@ impl TableData {
 
     fn get_secret(&self, i: usize) -> Option<Secret> {
         if let TableData::Secrets(data) = self {
+            data.get(i).cloned()
+        } else {
+            None
+        }
+    }
+
+    fn get_permission(&self, i: usize) -> Option<PermissionPolicy> {
+        if let TableData::Permissions(data) = self {
             data.get(i).cloned()
         } else {
             None
@@ -1197,6 +1297,7 @@ where
     Target(Box<target::TargetEditor>),
     Secret(Box<secret::SecretEditor>),
     Bind(Box<bind::BindEditor<B>>),
+    Permission(Box<permission::PermissionEditor<B>>),
     Role(Box<role::RoleEditor<B>>),
     GrantRole(Box<grant_role::GrantRoleEditor<B>>),
     None,
@@ -1224,6 +1325,9 @@ where
                 e.render(area, buf);
             }
             Editor::Bind(ref mut e) => {
+                e.render(area, buf);
+            }
+            Editor::Permission(ref mut e) => {
                 e.render(area, buf);
             }
             Editor::Role(_) => {

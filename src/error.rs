@@ -39,6 +39,9 @@ pub enum Error {
     TargetValidator(#[from] crate::database::models::target::ValidateError),
 
     #[error(transparent)]
+    PermissionEditor(#[from] crate::database::models::casbin_rule::PermissionPolicyEmptyError),
+
+    #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
 
     #[error(transparent)]
