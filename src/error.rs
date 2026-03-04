@@ -2,6 +2,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    // External library errors (keep transparent)
     #[error(transparent)]
     Russh(#[from] russh::Error),
 
@@ -9,43 +10,29 @@ pub enum Error {
     RusshKey(#[from] russh::keys::Error),
 
     #[error(transparent)]
-    IO(#[from] std::io::Error),
-
-    #[error("{0}")]
-    Handler(String),
-
-    #[error("Server error: {0}")]
-    Server(String),
-
-    #[error("Casbin error: {0}")]
-    Casbin(String),
-
-    #[error("App error: {0}")]
-    App(String),
-
-    #[error("Configuration error: {0}")]
-    Config(String),
-
-    #[error(transparent)]
     RusshForkedKey(#[from] russh::keys::ssh_key::Error),
 
     #[error(transparent)]
-    SecretValidator(#[from] crate::database::models::target_secret::ValidateError),
-
-    #[error(transparent)]
-    UserValidator(#[from] crate::database::models::user::ValidateError),
-
-    #[error(transparent)]
-    TargetValidator(#[from] crate::database::models::target::ValidateError),
-
-    #[error(transparent)]
-    PermissionEditor(#[from] crate::database::models::casbin_rule::PermissionPolicyEmptyError),
+    IO(#[from] std::io::Error),
 
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
 
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+
+    // Module-level errors
+    #[error(transparent)]
+    Config(#[from] crate::config::error::ConfigError),
+
+    #[error(transparent)]
+    Database(#[from] crate::database::error::DatabaseError),
+
+    #[error(transparent)]
+    Server(#[from] crate::server::error::ServerError),
+
+    #[error(transparent)]
+    App(#[from] crate::server::app::error::AppError),
 
     #[error(transparent)]
     Record(#[from] crate::asciinema::Error),

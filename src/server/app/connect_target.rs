@@ -1,6 +1,7 @@
 use crate::asciinema;
 use crate::database::models::{Target, TargetSecretName, User};
 use crate::error::Error;
+use crate::server::app::error::AppError;
 use crate::server::{casbin, HandlerLog};
 use log::{debug, trace};
 use russh::client as ru_client;
@@ -349,10 +350,7 @@ impl ConnectTarget {
                 )
                 .is_some()
             {
-                return Err(Error::App(format!(
-                    "Channel: {} record already existed",
-                    channel
-                )));
+                return Err(Error::App(AppError::ChannelRecordExists));
             }
         }
 
@@ -475,10 +473,7 @@ impl ConnectTarget {
 
         let (send, mut recv) = mpsc::channel::<()>(1);
         if self.notify.insert(channel, send).is_some() {
-            return Err(Error::App(format!(
-                "Channel: {} notify already existed",
-                channel
-            )));
+            return Err(Error::App(AppError::ChannelNotifyExists));
         };
 
         let mut record = self.record_session.get(&channel).cloned();

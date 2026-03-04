@@ -1,3 +1,4 @@
+use crate::database::error::DatabaseError;
 use crate::database::models::target_secret::Secret;
 use crate::error::Error;
 use crate::server::app::admin::widgets::*;
@@ -326,7 +327,7 @@ impl SecretEditor {
 
         self.secret
             .validate(self.private_key_updated)
-            .map_err(Error::SecretValidator)
+            .map_err(|e| Error::Database(DatabaseError::SecretValidation(e)))
     }
 
     fn max_scroll_offset(&self) -> usize {

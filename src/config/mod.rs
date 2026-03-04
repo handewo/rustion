@@ -1,5 +1,8 @@
+pub mod error;
+
 use crate::database::DatabaseConfig;
 use crate::error::Error;
+use crate::config::error::ConfigError;
 use aes_gcm::KeyInit;
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -41,10 +44,9 @@ impl std::str::FromStr for LogLevel {
             "info" => Ok(LogLevel::Info),
             "debug" => Ok(LogLevel::Debug),
             "trace" => Ok(LogLevel::Trace),
-            _ => Err(Error::Config(format!(
-                "Invalid log level '{}'. Valid levels are: error, warn, info, debug, trace",
-                s
-            ))),
+            _ => Err(Error::Config(ConfigError::InvalidLogLevel {
+                level: s.to_string(),
+            })),
         }
     }
 }
@@ -132,7 +134,7 @@ impl Config {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let content = fs::read_to_string(path)?;
         let config: Config = toml::from_str(&content)
-            .map_err(|e| Error::Config(format!("Failed to parse TOML: {}", e)))?;
+            .map_err(|e| Error::Config(ConfigError::TomlParse { source: e }))?;
         Ok(config)
     }
 
@@ -171,7 +173,7 @@ impl Config {
     /// Save configuration to a TOML file
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
         let content = toml::to_string_pretty(self)
-            .map_err(|e| Error::Config(format!("Failed to serialize TOML: {}", e)))?;
+            .map_err(|e| Error::Config(ConfigError::TomlSerialize { source: e }))?;
         fs::write(path, content)?;
         Ok(())
     }
@@ -204,17 +206,22 @@ impl Config {
                         addr_str
                             .to_socket_addrs()
                             .map_err(|e| {
-                                Error::Config(format!(
-                                    "Failed to resolve address '{}': {}",
-                                    addr_str, e
-                                ))
+                                Error::Config(ConfigError::AddressResolutionFailed {
+                                    addr: addr_str.clone(),
+                                    reason: e.to_string(),
+                                })
                             })?
                             .next()
                             .ok_or_else(|| {
-                                Error::Config(format!("No address resolved for '{}'", addr_str))
+                                Error::Config(ConfigError::NoAddressResolved {
+                                    addr: addr_str.clone(),
+                                })
                             })
                     })
-                    .map_err(|e| Error::Config(format!("Invalid listen address '{}': {}", s, e)))
+                    .map_err(|e| Error::Config(ConfigError::InvalidListenAddress {
+                        addr: s.clone(),
+                        reason: e.to_string(),
+                    }))
             }
         }
     }
@@ -226,23 +233,23 @@ impl Config {
 
         // Validate max_auth_attempts
         if self.max_auth_attempts_per_conn == 0 {
-            return Err(Error::Config(
-                "max_auth_attempts must be greater than 0".to_string(),
-            ));
+            return Err(Error::Config(ConfigError::MaxAuthAttemptsZero));
         }
 
         let sk = match self.secret_key.as_ref() {
             Some(token) => token,
-            None => return Err(Error::Config("No secret token".to_string())),
+            None => return Err(Error::Config(ConfigError::MissingSecretToken)),
         };
         if sk.is_empty() {
-            return Err(Error::Config("Secret token is empty".to_string()));
+            return Err(Error::Config(ConfigError::EmptySecretToken));
         }
         let key = general_purpose::STANDARD
             .decode(sk)
-            .map_err(|e| Error::Config(format!("Failed to parse secret token: {}", e)))?;
+            .map_err(|e| Error::Config(ConfigError::SecretTokenDecode { source: e }))?;
         aes_gcm::Aes256Gcm::new_from_slice(&key)
-            .map_err(|e| Error::Config(format!("Failed to parse secret token: {}", e)))?;
+            .map_err(|e| Error::Config(ConfigError::SecretTokenKeyError {
+                reason: e.to_string(),
+            }))?;
 
         Ok(())
     }

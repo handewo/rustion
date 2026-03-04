@@ -1,4 +1,5 @@
 use super::super::table::{AdminTable, DisplayMode, FieldsToArray, TableData};
+use crate::database::error::DatabaseError;
 use crate::database::models::{ObjectGroup, PermissionPolicy};
 use crate::database::Uuid;
 use crate::error::Error;
@@ -299,7 +300,10 @@ where
     }
 
     fn verify_permission(&mut self) -> Result<(), Error> {
-        self.perm.verify().map_err(Error::PermissionEditor)
+        self.perm
+            .verify()
+            .map_err(|e| Error::Database(DatabaseError::PermissionPolicyValidation(e)))?;
+        Ok(())
     }
 
     fn max_scroll_offset(&self) -> usize {

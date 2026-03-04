@@ -1,4 +1,5 @@
-mod app;
+pub mod error;
+pub(super) mod app;
 mod bastion_handler;
 pub mod bastion_server;
 mod casbin;

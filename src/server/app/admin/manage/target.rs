@@ -1,3 +1,4 @@
+use crate::database::error::DatabaseError;
 use crate::database::models::target::ValidateError;
 use crate::database::models::Target;
 use crate::error::Error;
@@ -313,10 +314,16 @@ impl TargetEditor {
                 if (1..=65535).contains(&p) {
                     p
                 } else {
-                    return Err(Error::TargetValidator(ValidateError::PortInvalid));
+                    return Err(Error::Database(DatabaseError::TargetValidation(
+                        ValidateError::PortInvalid,
+                    )));
                 }
             }
-            Err(_) => return Err(Error::TargetValidator(ValidateError::PortNotNumber)),
+            Err(_) => {
+                return Err(Error::Database(DatabaseError::TargetValidation(
+                    ValidateError::PortNotNumber,
+                )))
+            }
         };
         self.target.port = port as u16;
         let server_public_key = self.server_public_key_text.get_input();
@@ -326,7 +333,9 @@ impl TargetEditor {
             .then(|| self.description_text.get_input().trim().to_string());
         self.target.description = description;
 
-        self.target.validate().map_err(Error::TargetValidator)
+        self.target
+            .validate()
+            .map_err(|e| Error::Database(DatabaseError::TargetValidation(e)))
     }
 
     fn max_scroll_offset(&self) -> usize {

@@ -3,6 +3,7 @@ use crate::database::models::{CasbinRule, Role};
 use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::app::admin::widgets::*;
+use crate::server::error::ServerError;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
@@ -128,7 +129,7 @@ where
             let id = t
                 .rule_id
                 .as_ref()
-                .ok_or(Error::Casbin("Rule ID is none".into()))?;
+                .ok_or(Error::Server(ServerError::MissingRuleId))?;
             self.t_handle
                 .block_on(self.backend.db_repository().delete_casbin_rule(id))?;
         } else {

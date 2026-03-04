@@ -1,3 +1,4 @@
+use crate::database::error::DatabaseError;
 use crate::database::models::user::ValidateError;
 use crate::database::models::User;
 use crate::error::Error;
@@ -298,7 +299,9 @@ impl UserEditor {
         self.authorized_keys_text.reset_lines(&authorized_keys);
         self.user
             .set_authorized_keys((!authorized_keys.is_empty()).then_some(authorized_keys));
-        self.user.validate().map_err(Error::UserValidator)
+        self.user
+            .validate()
+            .map_err(|e| Error::Database(DatabaseError::UserValidation(e)))
     }
 
     fn max_scroll_offset(&self) -> usize {
@@ -432,7 +435,10 @@ impl UserEditor {
         }
 
         if let Some(err) = self.save_error.as_ref() {
-            let e = if let Error::UserValidator(ValidateError::AuthorizedKeyInvalid(idx)) = err {
+            let e = if let Error::Database(DatabaseError::UserValidation(
+                ValidateError::AuthorizedKeyInvalid(idx),
+            )) = err
+            {
                 vec![
                     String::from("Invalid authorized keys"),
                     format!(

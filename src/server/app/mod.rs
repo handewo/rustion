@@ -1,3 +1,4 @@
+pub mod error;
 pub(super) mod admin;
 pub(super) mod change_password;
 pub(super) mod connect_target;

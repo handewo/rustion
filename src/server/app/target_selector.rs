@@ -1,5 +1,6 @@
 use crate::database::models::{TargetSecretName, User};
 use crate::error::Error;
+use crate::server::app::error::AppError;
 use crate::server::app::{Application, ConnectTarget};
 use crate::server::HandlerLog;
 use crossbeam_channel::{unbounded, Sender};
@@ -172,7 +173,7 @@ impl TargetSelector {
             .unwrap_or_else(|| panic!("[{}] at least one target available", handler_id));
 
         if allowed_targets.is_empty() {
-            return Err(Error::App("No target available".into()));
+            return Err(Error::App(AppError::NoTargetAvailable));
         }
 
         let (send_status, mut recv_status) = mpsc::channel(1);

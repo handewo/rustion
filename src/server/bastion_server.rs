@@ -1,6 +1,7 @@
 use super::casbin;
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
+use crate::server::error::ServerError;
 use aes_gcm::aead::{rand_core::RngCore, Aead};
 use argon2::{
     password_hash::{PasswordHasher, SaltString},
@@ -56,15 +57,17 @@ impl BastionServer {
     pub async fn with_config(mut config: Config) -> Result<Self, Error> {
         let b64_token = match config.take_secret_token() {
             Some(token) => token,
-            None => return Err(Error::Server("Invalid secret token".to_string())),
+            None => return Err(Error::Server(ServerError::MissingSecretToken)),
         };
 
         let plain_token = general_purpose::STANDARD
             .decode(b64_token)
-            .map_err(|e| Error::Server(format!("Failed to parse secret token: {}", e)))?;
+            .map_err(|e| Error::Server(ServerError::SecretTokenDecode { source: e }))?;
 
         let token = aes_gcm::Aes256Gcm::new_from_slice(&plain_token)
-            .map_err(|e| Error::Server(format!("Failed to parse secret token: {}", e)))?;
+            .map_err(|e| Error::Server(ServerError::EncryptionKeyError {
+                reason: e.to_string(),
+            }))?;
 
         // Initialize database service
         let database = DatabaseService::new(&config.database).await?;
@@ -135,43 +138,57 @@ impl BastionServer {
                 .repository()
                 .get_casbin_name_by_name(OBJ_LOGIN)
                 .await?
-                .ok_or_else(|| Error::Casbin(format!("Internal object '{}' not found", OBJ_LOGIN)))?
+                .ok_or_else(|| Error::Server(ServerError::InternalObjectNotFound {
+                    name: OBJ_LOGIN.to_string(),
+                }))?
                 .id;
             let obj_admin = database
                 .repository()
                 .get_casbin_name_by_name(OBJ_ADMIN)
                 .await?
-                .ok_or_else(|| Error::Casbin(format!("Internal object '{}' not found", OBJ_ADMIN)))?
+                .ok_or_else(|| Error::Server(ServerError::InternalObjectNotFound {
+                    name: OBJ_ADMIN.to_string(),
+                }))?
                 .id;
             let act_shell = database
                 .repository()
                 .get_casbin_name_by_name(ACT_SHELL)
                 .await?
-                .ok_or_else(|| Error::Casbin(format!("Action '{}' not found", ACT_SHELL)))?
+                .ok_or_else(|| Error::Server(ServerError::ActionNotFound {
+                    name: ACT_SHELL.to_string(),
+                }))?
                 .id;
             let act_pty = database
                 .repository()
                 .get_casbin_name_by_name(ACT_PTY)
                 .await?
-                .ok_or_else(|| Error::Casbin(format!("Action '{}' not found", ACT_PTY)))?
+                .ok_or_else(|| Error::Server(ServerError::ActionNotFound {
+                    name: ACT_PTY.to_string(),
+                }))?
                 .id;
             let act_exec = database
                 .repository()
                 .get_casbin_name_by_name(ACT_EXEC)
                 .await?
-                .ok_or_else(|| Error::Casbin(format!("Action '{}' not found", ACT_EXEC)))?
+                .ok_or_else(|| Error::Server(ServerError::ActionNotFound {
+                    name: ACT_EXEC.to_string(),
+                }))?
                 .id;
             let act_login = database
                 .repository()
                 .get_casbin_name_by_name(ACT_LOGIN)
                 .await?
-                .ok_or_else(|| Error::Casbin(format!("Action '{}' not found", ACT_LOGIN)))?
+                .ok_or_else(|| Error::Server(ServerError::ActionNotFound {
+                    name: ACT_LOGIN.to_string(),
+                }))?
                 .id;
             let act_direct_tcpip = database
                 .repository()
                 .get_casbin_name_by_name(ACT_DIRECT_TCPIP)
                 .await?
-                .ok_or_else(|| Error::Casbin(format!("Action '{}' not found", ACT_DIRECT_TCPIP)))?
+                .ok_or_else(|| Error::Server(ServerError::ActionNotFound {
+                    name: ACT_DIRECT_TCPIP.to_string(),
+                }))?
                 .id;
 
             InternalUuids::init(InternalUuids {
@@ -260,13 +277,15 @@ impl BastionServer {
     fn decrypt_with_secret_key(&self, text: String) -> Result<String, Error> {
         let encrypt_key = general_purpose::STANDARD
             .decode(text)
-            .map_err(|e| Error::Server(format!("Failed to decode base64 text: {}", e)))?;
+            .map_err(|e| Error::Server(ServerError::Base64Decode { source: e }))?;
         let (nonce, ciphertext) = encrypt_key.split_at(12);
         let nonce = Nonce::from_slice(nonce);
 
         match self.secret_key.decrypt(nonce, ciphertext.as_ref()) {
             Ok(plain) => Ok(String::from_utf8_lossy(&plain).to_string()),
-            Err(e) => Err(Error::Server(format!("Falied to decrypt secret: {}", e))),
+            Err(e) => Err(Error::Server(ServerError::DecryptionFailed {
+                reason: e.to_string(),
+            })),
         }
     }
 
@@ -274,7 +293,7 @@ impl BastionServer {
         let password = crate::common::gen_password(12);
         let h = self
             .hash_password(&password)
-            .map_err(|_| Error::Server("encrypt user's password failed".to_string()))?;
+            .map_err(|_| Error::Server(ServerError::PasswordHashFailed))?;
         user.set_password_hash(h);
         self.database.repository().update_user(&user).await?;
         Ok(password.to_string())
@@ -426,7 +445,7 @@ impl super::HandlerBackend for BastionServer {
     ) -> Result<models::User, Error> {
         let h = self
             .hash_password(&password)
-            .map_err(|_| Error::Server("encrypt user's password failed".to_string()))?;
+            .map_err(|_| Error::Server(ServerError::PasswordHashFailed))?;
         user.set_password_hash(h);
         self.database.repository().update_user(&user).await?;
         Ok(user)
@@ -435,7 +454,7 @@ impl super::HandlerBackend for BastionServer {
     fn set_password(&self, user: &mut models::User, password: &str) -> Result<(), Error> {
         let h = self
             .hash_password(password)
-            .map_err(|_| Error::Server("encrypt user's password failed".to_string()))?;
+            .map_err(|_| Error::Server(ServerError::PasswordHashFailed))?;
         user.set_password_hash(h);
         Ok(())
     }
@@ -603,7 +622,9 @@ impl super::HandlerBackend for BastionServer {
         let ciphertext = self
             .secret_key
             .encrypt(nonce, text.as_bytes())
-            .map_err(|e| Error::Server(format!("Failed to encrypt plain text: {}", e)))?;
+            .map_err(|e| Error::Server(ServerError::EncryptionFailed {
+                reason: e.to_string(),
+            }))?;
 
         let mut blob = Vec::with_capacity(nonce_bytes.len() + ciphertext.len());
         blob.extend_from_slice(&nonce_bytes);

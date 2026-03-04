@@ -1,4 +1,5 @@
 use super::app::{self, Application};
+use super::error::ServerError;
 use super::HandlerBackend;
 use crate::database::models::User;
 use crate::database::Uuid;
@@ -666,7 +667,7 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
                 let user = l.0.clone();
                 self.get_user(&user).await
             }
-            None => Err(Error::Handler("invalid login name".into())),
+            None => Err(Error::Server(ServerError::InvalidLoginName)),
         }
     }
 

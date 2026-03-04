@@ -1,5 +1,6 @@
 use crate::database::Uuid;
 use crate::error::Error;
+use crate::server::error::ServerError;
 use ipnetwork::IpNetwork;
 use log::trace;
 use std::fmt;
@@ -85,7 +86,7 @@ impl Label {
         match (&r.v0_object_label, &r.v0_group_label) {
             (Some(v), None) => Ok(Self::Object(v.clone())),
             (None, Some(v)) => Ok(Self::Group(v.clone())),
-            _ => Err(Error::Casbin(format!("Invalid CasbinRuleGroup: {:?}", r))),
+            _ => Err(Error::Server(ServerError::InvalidRuleGroup)),
         }
     }
 
@@ -93,7 +94,7 @@ impl Label {
         match (&r.v1_object_label, &r.v1_group_label) {
             (Some(v), None) => Ok(Self::Object(v.clone())),
             (None, Some(v)) => Ok(Self::Group(v.clone())),
-            _ => Err(Error::Casbin(format!("Invalid CasbinRuleGroup: {:?}", r))),
+            _ => Err(Error::Server(ServerError::InvalidRuleGroup)),
         }
     }
 }
@@ -289,7 +290,9 @@ pub enum IpPolicy {
 
 pub fn verify_extend_policy(ext_req: &ExtendPolicyReq, ext_str: &str) -> Result<bool, Error> {
     trace!("ext_req: {:?} ext_str: \"{}\"", ext_req, ext_str);
-    let ext: ExtendPolicy = ext_str.parse().map_err(Error::Casbin)?;
+    let ext: ExtendPolicy = ext_str
+        .parse()
+        .map_err(|e: String| Error::Server(ServerError::ExtendPolicyParseError { details: e }))?;
     if !is_ip_in_cidr(ext_req.ip, ext.ip_policy) {
         return Ok(false);
     }
