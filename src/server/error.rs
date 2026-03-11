@@ -2,6 +2,21 @@ use thiserror::Error;
 use base64::DecodeError;
 
 #[derive(Debug, Error)]
+pub enum ExtendPolicyParseError {
+    #[error("Invalid IP policy format: {0}")]
+    InvalidIpPolicy(String),
+
+    #[error("Invalid time format: {0}")]
+    InvalidTimeFormat(String),
+
+    #[error("Time consistency error: {0}")]
+    TimeConsistencyError(String),
+
+    #[error("Invalid expire date format: {0}")]
+    InvalidExpireDateFormat(String),
+}
+
+#[derive(Debug, Error)]
 pub enum ServerError {
     // Secret token errors
     #[error("Invalid secret token: secret token is missing")]
@@ -43,8 +58,9 @@ pub enum ServerError {
     #[error("Invalid Casbin rule group structure")]
     InvalidRuleGroup,
 
-    #[error("Extend policy parse error: {details}")]
-    ExtendPolicyParseError { details: String },
+    // ExtendPolicy errors
+    #[error(transparent)]
+    ExtendPolicyParse(#[from] ExtendPolicyParseError),
 
     #[error("Rule ID is none for bound role")]
     MissingRuleId,
@@ -61,10 +77,4 @@ pub enum ServerError {
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
-}
-
-impl From<String> for ServerError {
-    fn from(s: String) -> Self {
-        ServerError::ExtendPolicyParseError { details: s }
-    }
 }

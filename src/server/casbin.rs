@@ -1,6 +1,6 @@
 use crate::database::Uuid;
 use crate::error::Error;
-use crate::server::error::ServerError;
+use crate::server::error::{ExtendPolicyParseError, ServerError};
 use ipnetwork::IpNetwork;
 use log::trace;
 use std::fmt;
@@ -290,9 +290,7 @@ pub enum IpPolicy {
 
 pub fn verify_extend_policy(ext_req: &ExtendPolicyReq, ext_str: &str) -> Result<bool, Error> {
     trace!("ext_req: {:?} ext_str: \"{}\"", ext_req, ext_str);
-    let ext: ExtendPolicy = ext_str
-        .parse()
-        .map_err(|e: String| Error::Server(ServerError::ExtendPolicyParseError { details: e }))?;
+    let ext: ExtendPolicy = ext_str.parse().map_err(ServerError::ExtendPolicyParse)?;
     if !is_ip_in_cidr(ext_req.ip, ext.ip_policy) {
         return Ok(false);
     }
@@ -341,33 +339,43 @@ impl fmt::Display for ExtendPolicy {
 }
 
 impl FromStr for ExtendPolicy {
-    type Err = String;
+    type Err = ExtendPolicyParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split(',').collect();
 
         let ip_policy = if !parts.is_empty() && !parts[0].is_empty() {
             if parts[0].starts_with('!') {
-                Some(IpPolicy::Deny(
-                    parts[0][1..].parse().map_err(|e| format!("{}", e))?,
-                ))
+                Some(IpPolicy::Deny(parts[0][1..].parse().map_err(
+                    |e: ipnetwork::IpNetworkError| {
+                        ExtendPolicyParseError::InvalidIpPolicy(e.to_string())
+                    },
+                )?))
             } else {
-                Some(IpPolicy::Allow(
-                    parts[0].parse().map_err(|e| format!("{}", e))?,
-                ))
+                Some(IpPolicy::Allow(parts[0].parse().map_err(
+                    |e: ipnetwork::IpNetworkError| {
+                        ExtendPolicyParseError::InvalidIpPolicy(e.to_string())
+                    },
+                )?))
             }
         } else {
             None
         };
 
         let start_time = if parts.len() > 1 && !parts[1].is_empty() {
-            Some(parse_time(parts[1]).map_err(|e| format!("invalid start_time: {e}"))?)
+            Some(
+                parse_time(parts[1])
+                    .map_err(|e| ExtendPolicyParseError::InvalidTimeFormat(e.to_string()))?,
+            )
         } else {
             None
         };
 
         let end_time = if parts.len() > 2 && !parts[2].is_empty() {
-            Some(parse_time(parts[2]).map_err(|e| format!("invalid end_time: {e}"))?)
+            Some(
+                parse_time(parts[2])
+                    .map_err(|e| ExtendPolicyParseError::InvalidTimeFormat(e.to_string()))?,
+            )
         } else {
             None
         };
@@ -375,11 +383,15 @@ impl FromStr for ExtendPolicy {
         // ensure start_time and end_time are consistent
         match (&start_time, &end_time) {
             (Some(_), None) | (None, Some(_)) => {
-                return Err("start_time and end_time must both be present or both absent".into())
+                return Err(ExtendPolicyParseError::TimeConsistencyError(
+                    "start_time and end_time must both be present or both absent".into(),
+                ))
             }
             (Some(s), Some(e)) => {
                 if s.timezone() != e.timezone() {
-                    return Err("timezone of start_time and end_time must be equal".into());
+                    return Err(ExtendPolicyParseError::TimeConsistencyError(
+                        "timezone of start_time and end_time must be equal".into(),
+                    ));
                 }
             }
             _ => {}
@@ -388,7 +400,7 @@ impl FromStr for ExtendPolicy {
         let expire_date = if parts.len() > 3 && !parts[3].is_empty() {
             Some(
                 DateTime::parse_from_str(parts[3], "%Y-%m-%d %H:%M:%S %z")
-                    .map_err(|e| format!("invalid expire_date: {e}"))?,
+                    .map_err(|e| ExtendPolicyParseError::InvalidExpireDateFormat(e.to_string()))?,
             )
         } else {
             None
