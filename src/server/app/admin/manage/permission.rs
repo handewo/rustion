@@ -4,6 +4,8 @@ use crate::database::models::{ObjectGroup, PermissionPolicy};
 use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::app::admin::widgets::*;
+use crate::server::casbin::ExtendPolicy;
+use crate::server::error::ServerError;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
@@ -11,6 +13,7 @@ use ratatui::{
     style::palette::tailwind,
     widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
@@ -66,6 +69,7 @@ where
     longest_user_lens: Vec<Constraint>,
     longest_target_lens: Vec<Constraint>,
     longest_action_lens: Vec<Constraint>,
+    extend_policy_text: SingleLineText,
     scroll_offset: usize,
     colors: EditorColors,
     backend: Arc<B>,
@@ -118,6 +122,7 @@ where
         let longest_target_lens = table_len_calculator(&target_items);
         let longest_action_lens = table_len_calculator(&action_items);
 
+        let extend_policy_text = SingleLineText::new(Some(perm.rule.v3.clone()));
         Self {
             perm,
             user_table: AdminTable::new(&user_items, &tailwind::BLUE),
@@ -129,6 +134,7 @@ where
             longest_user_lens,
             longest_target_lens,
             longest_action_lens,
+            extend_policy_text,
             focused_field: InputField::User,
             scroll_offset: 0,
             colors: EditorColors::new(&tailwind::BLUE),
@@ -196,66 +202,78 @@ where
                     items_len = self.action_items.len();
                 }
                 InputField::ExtendPolicy => {
-                    todo!()
-                }
-            }
-            match key {
-                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Tab | KeyCode::BackTab => {
-                    self.editing_mode = false;
-                    self.help_text = HELP_EDITOR
-                }
-                KeyCode::Char('+') => {
-                    table.zoom_in();
-                }
-                KeyCode::Char('-') => {
-                    table.zoom_out();
-                }
-                KeyCode::PageDown => {
-                    table.next_page(items_len);
-                }
-                KeyCode::PageUp => {
-                    table.previous_page();
-                }
-                KeyCode::Char('f') if ctrl_pressed => {
-                    table.next_page(items_len);
-                }
-                KeyCode::Char('b') if ctrl_pressed => {
-                    table.previous_page();
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    table.next_row(items_len);
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    table.previous_row(items_len);
-                }
-                KeyCode::Char(' ') | KeyCode::Enter => {
-                    self.editing_mode = false;
-                    self.help_text = HELP_EDITOR;
-                    match self.focused_field {
-                        InputField::User => {
-                            let idx = self.user_table.state.selected().unwrap();
-                            let t = self.user_items.get(idx).unwrap();
-                            self.perm.user_role = t.name.clone();
-                            self.perm.rule.v0 = t.id;
-                        }
-                        InputField::Target => {
-                            let idx = self.target_table.state.selected().unwrap();
-                            let t = self.target_items.get(idx).unwrap();
-                            self.perm.target_group = t.name.clone();
-                            self.perm.rule.v1 = t.id;
-                        }
-                        InputField::Action => {
-                            let idx = self.action_table.state.selected().unwrap();
-                            let t = self.action_items.get(idx).unwrap();
-                            self.perm.action_group = t.name.clone();
-                            self.perm.rule.v2 = Some(t.id);
-                        }
-                        InputField::ExtendPolicy => {
-                            todo!()
-                        }
+                    if self.extend_policy_text.handle_input(key) {
+                        self.editing_mode = false;
+                        self.extend_policy_text.clear_style();
                     }
                 }
-                _ => {}
+            }
+            if self.focused_field != InputField::ExtendPolicy {
+                match key {
+                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Tab | KeyCode::BackTab => {
+                        self.editing_mode = false;
+                        self.help_text = HELP_EDITOR
+                    }
+                    KeyCode::Char('+') => {
+                        table.zoom_in();
+                    }
+                    KeyCode::Char('-') => {
+                        table.zoom_out();
+                    }
+                    KeyCode::PageDown => {
+                        table.next_page(items_len);
+                    }
+                    KeyCode::PageUp => {
+                        table.previous_page();
+                    }
+                    KeyCode::Char('f') if ctrl_pressed => {
+                        table.next_page(items_len);
+                    }
+                    KeyCode::Char('b') if ctrl_pressed => {
+                        table.previous_page();
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        table.next_row(items_len);
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        table.previous_row(items_len);
+                    }
+                    KeyCode::Char(' ') | KeyCode::Enter => {
+                        self.editing_mode = false;
+                        self.help_text = HELP_EDITOR;
+                        match self.focused_field {
+                            InputField::User => {
+                                let idx = self.user_table.state.selected().unwrap();
+                                let t = self.user_items.get(idx).unwrap();
+                                self.perm.user_role = t.name.clone();
+                                self.perm.rule.v0 = t.id;
+                            }
+                            InputField::Target => {
+                                let idx = self.target_table.state.selected().unwrap();
+                                let t = self.target_items.get(idx).unwrap();
+                                self.perm.target_group = t.name.clone();
+                                self.perm.rule.v1 = t.id;
+                            }
+                            InputField::Action => {
+                                let idx = self.action_table.state.selected().unwrap();
+                                let t = self.action_items.get(idx).unwrap();
+                                self.perm.action_group = t.name.clone();
+                                self.perm.rule.v2 = Some(t.id);
+                            }
+                            InputField::ExtendPolicy => {
+                                unreachable!()
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            } else {
+                match key {
+                    KeyCode::Esc | KeyCode::Enter | KeyCode::Char(_) => {
+                        return false;
+                    }
+                    _ => {}
+                }
             }
         } else {
             match key {
@@ -280,7 +298,24 @@ where
                         self.scroll_offset.saturating_sub(1)
                     };
                 }
-                KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('i') | KeyCode::Char('a') => {
+                KeyCode::Char('d')
+                    if !self.editing_mode && self.focused_field == InputField::ExtendPolicy =>
+                {
+                    self.extend_policy_text.clear_line();
+                }
+                KeyCode::Enter | KeyCode::Char('i') | KeyCode::Char('a')
+                    if self.focused_field == InputField::ExtendPolicy =>
+                {
+                    self.editing_mode = true;
+                    text_editing_style(
+                        self.colors.input_cursor,
+                        &mut self.extend_policy_text.textarea,
+                    );
+                    text_input_position(key, &mut self.extend_policy_text.textarea);
+                }
+                KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('i') | KeyCode::Char('a')
+                    if self.focused_field != InputField::ExtendPolicy =>
+                {
                     self.editing_mode = true;
                     self.help_text = HELP_TABLE
                 }
@@ -293,13 +328,27 @@ where
 
     fn next(&mut self) {
         self.focused_field = self.focused_field.next();
+        if self.focused_field == InputField::ExtendPolicy {
+            self.help_text = COMMON_HELP;
+        } else {
+            self.help_text = HELP_EDITOR;
+        }
     }
 
     fn previous(&mut self) {
         self.focused_field = self.focused_field.previous();
+        if self.focused_field == InputField::ExtendPolicy {
+            self.help_text = COMMON_HELP;
+        } else {
+            self.help_text = HELP_EDITOR;
+        }
     }
 
     fn verify_permission(&mut self) -> Result<(), Error> {
+        let extend_policy = self.extend_policy_text.get_input();
+        self.perm.rule.v3 = extend_policy.trim().into();
+        let _ =
+            ExtendPolicy::from_str(&self.perm.rule.v3).map_err(ServerError::ExtendPolicyParse)?;
         self.perm
             .verify()
             .map_err(|e| Error::Database(DatabaseError::PermissionPolicyValidation(e)))?;
@@ -378,8 +427,8 @@ where
             chunks[3],
             &mut editor_buf,
             "Extend Policy",
-            &SingleLineText::new(Some(String::new())),
-            false,
+            &self.extend_policy_text,
+            self.editing_mode,
             &self.colors,
             self.focused_field == InputField::ExtendPolicy,
         );
@@ -412,7 +461,7 @@ where
     }
 
     fn render_ui(&mut self, area: Rect, buf: &mut Buffer) {
-        if self.editing_mode {
+        if self.editing_mode && self.focused_field != InputField::ExtendPolicy {
             let area = centered_area(area, area.width - 2, area.height - 2);
             match self.focused_field {
                 InputField::User => {
@@ -445,7 +494,7 @@ where
                         DisplayMode::Manage,
                     );
                 }
-                InputField::ExtendPolicy => todo!(),
+                InputField::ExtendPolicy => unreachable!(),
             }
         } else {
             self.render_textarea(area, buf);
