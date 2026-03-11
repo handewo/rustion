@@ -1,4 +1,5 @@
 use crate::database::models::User;
+use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::HandlerLog;
 use crossbeam_channel::{unbounded, Receiver, Sender};
@@ -8,7 +9,6 @@ use russh::server as ru_server;
 use russh::{ChannelId, Pty};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use crate::database::Uuid;
 
 static LOG_TYPE: &str = "password";
 
@@ -111,7 +111,9 @@ impl ChangePassword {
             .user
             .take()
             .unwrap_or_else(|| panic!("[{}] user should not be none", handler_id));
-        let user_clone = user.clone();
+        let user_for_prompt = user.clone();
+        let username = user.username.clone();
+        let user_id = user.id;
         let log = self.log.clone();
 
         tokio::spawn(async move {
@@ -144,10 +146,12 @@ impl ChangePassword {
                                         let mut exit_status = 0;
                                         if backend.update_user_password(password.clone(),user).await.is_err() {
                                             exit_status = 1;
-                                             handle_prompt.data(channel, "\r\npassword updated failed.\r\n"
+                                            warn!("[{}] Password update failed for user '{}({})'", handler_id, username, user_id);
+                                            handle_prompt.data(channel, "\r\npassword updated failed.\r\n"
                                                 .into()).await.is_err().then(|| warn!("[{}] Fail to send password prompt to session from prompt", handler_id));
 
                                         } else {
+                                            debug!("[{}] Password updated successfully for user '{}({})'", handler_id, username, user_id);
                                             handle_prompt.data(channel, "\r\npassword updated successfully.\r\n"
                                                 .into()).await.is_err().then(|| warn!("[{}] Fail to send password prompt to session from prompt", handler_id));
                                             log(LOG_TYPE.into(),"password updated successfully".into()).await;
@@ -233,7 +237,7 @@ impl ChangePassword {
                                 password = p;
                                 if !is_valid_password(&password) {
                                     status = Status::Invalid;
-                                } else if user_clone.verify_password(&password) {
+                                } else if user_for_prompt.verify_password(&password) {
                                     status = Status::SameAsOri;
                                 } else {
                                     status = Status::Retype;

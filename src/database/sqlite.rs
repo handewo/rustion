@@ -191,6 +191,7 @@ impl DatabaseRepository for SqliteRepository {
 
     // User operations
     async fn create_user(&self, user: &User) -> Result<User, Error> {
+        debug!("Creating user: '{}({})'", user.username, user.id);
         sqlx::query(
             r#"
             INSERT INTO users (id, username, email, password_hash, authorized_keys, force_init_pass, is_active, updated_by, updated_at)
@@ -209,6 +210,7 @@ impl DatabaseRepository for SqliteRepository {
         .execute(&self.pool)
         .await?;
 
+        debug!("User created successfully: '{}({})'", user.username, user.id);
         Ok(user.clone())
     }
 
@@ -247,12 +249,13 @@ impl DatabaseRepository for SqliteRepository {
     }
 
     async fn update_user(&self, user: &User) -> Result<User, Error> {
+        debug!("Updating user: '{}({})'", user.username, user.id);
         let mut updated_user = user.clone();
         updated_user.updated_at = Utc::now().timestamp_millis();
 
         sqlx::query(
             r#"
-            UPDATE users 
+            UPDATE users
             SET username = ?, email = ?, password_hash = ?, authorized_keys = ?, force_init_pass = ?,
             is_active = ?, updated_by = ?, updated_at = ? WHERE id = ?
             "#,
@@ -269,16 +272,22 @@ impl DatabaseRepository for SqliteRepository {
         .execute(&self.pool)
         .await?;
 
+        debug!("User updated successfully: '{}({})'", updated_user.username, updated_user.id);
         Ok(updated_user)
     }
 
     async fn delete_user(&self, id: &Uuid) -> Result<bool, Error> {
+        debug!("Deleting user: id={}", id);
         let result = sqlx::query("DELETE FROM users WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;
 
-        Ok(result.rows_affected() > 0)
+        let deleted = result.rows_affected() > 0;
+        if deleted {
+            debug!("User deleted successfully: id={}", id);
+        }
+        Ok(deleted)
     }
 
     async fn list_users_with_role(&self, active_only: bool) -> Result<Vec<UserWithRole>, Error> {
@@ -336,6 +345,7 @@ LEFT JOIN (
 
     // Target operations
     async fn create_target(&self, target: &Target) -> Result<Target, Error> {
+        debug!("Creating target: '{}({})'", target.name, target.id);
         sqlx::query(
             r#"
             INSERT INTO targets
@@ -355,6 +365,7 @@ LEFT JOIN (
         .execute(&self.pool)
         .await?;
 
+        debug!("Target created successfully: '{}({})'", target.name, target.id);
         Ok(target.clone())
     }
 
@@ -452,12 +463,13 @@ LEFT JOIN (
     }
 
     async fn update_target(&self, target: &Target) -> Result<Target, Error> {
+        debug!("Updating target: '{}({})'", target.name, target.id);
         let mut updated_target = target.clone();
         updated_target.updated_at = Utc::now().timestamp_millis();
 
         sqlx::query(
             r#"
-            UPDATE targets 
+            UPDATE targets
             SET name = ?, hostname = ?, port = ?, server_public_key = ?, description = ?,
             is_active = ?, updated_by = ?, updated_at = ?
             WHERE id = ?
@@ -475,16 +487,22 @@ LEFT JOIN (
         .execute(&self.pool)
         .await?;
 
+        debug!("Target updated successfully: '{}({})'", updated_target.name, updated_target.id);
         Ok(updated_target)
     }
 
     async fn delete_target(&self, id: &Uuid) -> Result<bool, Error> {
+        debug!("Deleting target: id={}", id);
         let result = sqlx::query("DELETE FROM targets WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;
 
-        Ok(result.rows_affected() > 0)
+        let deleted = result.rows_affected() > 0;
+        if deleted {
+            debug!("Target deleted successfully: id={}", id);
+        }
+        Ok(deleted)
     }
 
     async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, Error> {
@@ -737,6 +755,7 @@ WHERE c.ptype = 'g3';"#
     }
 
     async fn create_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error> {
+        debug!("Creating casbin_rule: '({})'", rule.id);
         sqlx::query(
             r#"
             INSERT INTO casbin_rule
@@ -757,10 +776,12 @@ WHERE c.ptype = 'g3';"#
         .execute(&self.pool)
         .await?;
 
+        debug!("Casbin_rule created successfully: '({})'", rule.id);
         Ok(rule.clone())
     }
 
     async fn update_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error> {
+        debug!("Updating casbin_rule: '({})'", rule.id);
         let mut updated_rule = rule.clone();
         updated_rule.updated_at = Utc::now().timestamp_millis();
 
@@ -785,16 +806,22 @@ WHERE c.ptype = 'g3';"#
         .execute(&self.pool)
         .await?;
 
+        debug!("Casbin_rule updated successfully: '({})'", updated_rule.id);
         Ok(updated_rule)
     }
 
     async fn delete_casbin_rule(&self, id: &Uuid) -> Result<bool, Error> {
+        debug!("Deleting casbin_rule: '({})'", id);
         let result = sqlx::query("DELETE FROM casbin_rule WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;
 
-        Ok(result.rows_affected() > 0)
+        let deleted = result.rows_affected() > 0;
+        if deleted {
+            debug!("Casbin_rule deleted successfully: '({})'", id);
+        }
+        Ok(deleted)
     }
 
     async fn create_casbin_name(&self, name: &CasbinName) -> Result<CasbinName, Error> {
@@ -1048,6 +1075,7 @@ WHERE ptype = 'g3'
     }
 
     async fn create_secret(&self, secret: &Secret) -> Result<Secret, Error> {
+        debug!("Creating secret: '{}({})'", secret.name, secret.id);
         sqlx::query(
             r#"
             INSERT INTO secrets
@@ -1067,6 +1095,7 @@ WHERE ptype = 'g3'
         .execute(&self.pool)
         .await?;
 
+        debug!("Secret created successfully: '{}({})'", secret.name, secret.id);
         Ok(secret.clone())
     }
 
@@ -1083,6 +1112,7 @@ WHERE ptype = 'g3'
         is_active: bool,
         updated_by: &Uuid,
     ) -> Result<(), Error> {
+        debug!("Upserting target_secret binding: target_id={}, secret_id={}, is_active={}", target_id, secret_id, is_active);
         // 1. Does the row already exist?
         let exists = sqlx::query_as::<_, TargetSecret>(
             "SELECT * FROM target_secrets WHERE target_id = ? AND secret_id = ?",
@@ -1096,11 +1126,13 @@ WHERE ptype = 'g3'
             Some(mut ts) => {
                 ts.is_active = is_active;
                 self.update_target_secret(&ts).await?;
+                debug!("Target_secret binding updated: target_id={}, secret_id={}", target_id, secret_id);
             }
             None => {
                 let mut ts = TargetSecret::new(*target_id, *secret_id, *updated_by);
                 ts.is_active = is_active;
                 self.create_target_secret(&ts).await?;
+                debug!("Target_secret binding created: target_id={}, secret_id={}", target_id, secret_id);
             }
         };
 
@@ -1161,12 +1193,13 @@ WHERE ptype = 'g3'
     }
 
     async fn update_secret(&self, secret: &Secret) -> Result<Secret, Error> {
+        debug!("Updating secret: '{}({})'", secret.name, secret.id);
         let mut updated_secret = secret.clone();
         updated_secret.updated_at = Utc::now().timestamp_millis();
 
         sqlx::query(
             r#"
-            UPDATE secrets 
+            UPDATE secrets
             SET name = ?, user = ?, password = ?, private_key = ?, public_key = ?,
             is_active = ?, updated_by = ?, updated_at = ?
             WHERE id = ?
@@ -1184,16 +1217,22 @@ WHERE ptype = 'g3'
         .execute(&self.pool)
         .await?;
 
+        debug!("Secret updated successfully: '{}({})'", updated_secret.name, updated_secret.id);
         Ok(updated_secret)
     }
 
     async fn delete_secret(&self, id: &Uuid) -> Result<bool, Error> {
+        debug!("Deleting secret: id={}", id);
         let result = sqlx::query("DELETE FROM secrets WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;
 
-        Ok(result.rows_affected() > 0)
+        let deleted = result.rows_affected() > 0;
+        if deleted {
+            debug!("Secret deleted successfully: id={}", id);
+        }
+        Ok(deleted)
     }
 
     async fn create_casbin_rules_batch(

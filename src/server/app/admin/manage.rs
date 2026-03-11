@@ -4,7 +4,7 @@ use super::widgets::{centered_area, render_confirm_dialog, render_message_popup,
 use crate::database::models::*;
 use crate::database::Uuid;
 use crate::error::Error;
-use ::log::{error, warn};
+use ::log::{error, info, warn};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -316,12 +316,16 @@ where
                     if let Err(e) = result {
                         self.message = Some(Message::Error(vec!["Internal error".into()]));
                         warn!(
-                            "[{}] Delete user: {} failed, {}",
-                            self.handler_id, u.username, e
+                            "[{}] Delete user '{}({})' failed by admin_id={}: {}",
+                            self.handler_id, u.username, u.id, self.admin_id, e
                         );
                         return;
                     }
 
+                    info!(
+                        "[{}] User '{}({})' deleted by admin_id={}",
+                        self.handler_id, u.username, u.id, self.admin_id
+                    );
                     self.message = Some(Message::Success(vec!["User deleted".into()]));
                     self.refresh_data();
                 }
@@ -335,12 +339,16 @@ where
                     if let Err(e) = result {
                         self.message = Some(Message::Error(vec!["Internal error".into()]));
                         warn!(
-                            "[{}] Delete target: {} failed, {}",
-                            self.handler_id, t.name, e
+                            "[{}] Delete target '{}({})' failed by admin_id={}: {}",
+                            self.handler_id, t.name, t.id, self.admin_id, e
                         );
                         return;
                     }
 
+                    info!(
+                        "[{}] Target '{}({})' deleted by admin_id={}",
+                        self.handler_id, t.name, t.id, self.admin_id
+                    );
                     self.message = Some(Message::Success(vec!["Target deleted".into()]));
                     self.refresh_data();
                 }
@@ -354,12 +362,16 @@ where
                     if let Err(e) = result {
                         self.message = Some(Message::Error(vec!["Internal error".into()]));
                         warn!(
-                            "[{}] Delete secret: {} failed, {}",
-                            self.handler_id, s.name, e
+                            "[{}] Delete secret '{}({})' failed by admin_id={}: {}",
+                            self.handler_id, s.name, s.id, self.admin_id, e
                         );
                         return;
                     }
 
+                    info!(
+                        "[{}] Secret '{}({})' deleted by admin_id={}",
+                        self.handler_id, s.name, s.id, self.admin_id
+                    );
                     self.message = Some(Message::Success(vec!["Secret deleted".into()]));
                     self.refresh_data();
                 }
@@ -373,12 +385,16 @@ where
                     if let Err(e) = result {
                         self.message = Some(Message::Error(vec!["Internal error".into()]));
                         warn!(
-                            "[{}] Delete casbin rule: {} failed, {}",
-                            self.handler_id, p.rule.id, e
+                            "[{}] Delete permission '({})' failed by admin_id={}: {}",
+                            self.handler_id, p.rule.id, self.admin_id, e
                         );
                         return;
                     }
 
+                    info!(
+                        "[{}] Permission '({})' deleted by admin_id={}",
+                        self.handler_id, p.rule.id, self.admin_id
+                    );
                     self.message = Some(Message::Success(vec!["Permission deleted".into()]));
                     self.refresh_data();
                 }
@@ -569,20 +585,27 @@ where
                             _ => unreachable!(),
                         };
 
-                        if let Err(err) = result {
+                        if let Err(ref err) = result {
                             let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(db_err))
+                                Error::Sqlx(sqlx::Error::Database(ref db_err))
                                     if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
                                 {
                                     "Username already exists"
                                 }
                                 _ => "Internal error",
                             };
-
+                            warn!(
+                                "[{}] Failed to {} user '{}({})': {}",
+                                self.handler_id, action, user.username, user.id, err
+                            );
                             self.message = Some(Message::Error(vec![msg.into()]));
                             return Ok(());
                         }
 
+                        info!(
+                            "[{}] User '{}({})' {} by admin_id={}",
+                            self.handler_id, user.username, user.id, action, self.admin_id
+                        );
                         let mut msg = vec![format!("User {}", action)];
                         if !password.is_empty() {
                             msg.push(format!("New password: {}", password));
@@ -613,20 +636,27 @@ where
                             _ => unreachable!(),
                         };
 
-                        if let Err(err) = result {
+                        if let Err(ref err) = result {
                             let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(db_err))
+                                Error::Sqlx(sqlx::Error::Database(ref db_err))
                                     if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
                                 {
                                     "Target already exists"
                                 }
                                 _ => "Internal error",
                             };
-
+                            warn!(
+                                "[{}] Failed to {} target '{}({})': {}",
+                                self.handler_id, action, target.name, target.id, err
+                            );
                             self.message = Some(Message::Error(vec![msg.into()]));
                             return Ok(());
                         }
 
+                        info!(
+                            "[{}] Target '{}({})' {} by admin_id={}",
+                            self.handler_id, target.name, target.id, action, self.admin_id
+                        );
                         let msg = vec![format!("Target {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
@@ -665,18 +695,26 @@ where
                             ),
                             _ => unreachable!(),
                         };
-                        if let Err(err) = result {
+                        if let Err(ref err) = result {
                             let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(db_err))
+                                Error::Sqlx(sqlx::Error::Database(ref db_err))
                                     if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
                                 {
                                     "Secret already exists"
                                 }
                                 _ => "Internal error",
                             };
+                            warn!(
+                                "[{}] Failed to {} secret '{}({})': {}",
+                                self.handler_id, action, secret.name, secret.id, err
+                            );
                             self.message = Some(Message::Error(vec![msg.into()]));
                             return Ok(());
                         }
+                        info!(
+                            "[{}] Secret '{}({})' {} by admin_id={}",
+                            self.handler_id, secret.name, secret.id, action, self.admin_id
+                        );
                         let msg = vec![format!("Secret {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
@@ -704,18 +742,26 @@ where
                             ),
                             _ => unreachable!(),
                         };
-                        if let Err(err) = result {
+                        if let Err(ref err) = result {
                             let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(db_err))
+                                Error::Sqlx(sqlx::Error::Database(ref db_err))
                                     if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
                                 {
                                     "Permission already exists"
                                 }
                                 _ => "Internal error",
                             };
+                            warn!(
+                                "[{}] Failed to {} permission '({})': {}",
+                                self.handler_id, action, perm.rule.id, err
+                            );
                             self.message = Some(Message::Error(vec![msg.into()]));
                             return Ok(());
                         }
+                        info!(
+                            "[{}] Permission '({})' {} by admin_id={}",
+                            self.handler_id, perm.rule.id, action, self.admin_id
+                        );
                         let msg = vec![format!("Permission {}", action)];
                         self.message = Some(Message::Success(msg));
                     }

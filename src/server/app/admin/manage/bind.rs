@@ -3,6 +3,7 @@ use crate::database::models::{SecretInfo, TargetInfo};
 use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::app::admin::widgets::*;
+use ::log::info;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
@@ -175,13 +176,19 @@ where
         let t = self.targets.get(t_idx).unwrap();
         let s = self.secrets.get(s_idx).unwrap();
 
+        let action = if s.is_bound { "unbound from" } else { "bound to" };
         self.t_handle
             .block_on(self.backend.db_repository().upsert_target_secret(
                 &t.id,
                 &s.id,
                 !s.is_bound,
                 &self.admin_id,
-            ))
+            ))?;
+        info!(
+            "[{}] Secret '{}({})' {} target '{}({})' by admin_id={}",
+            self.handler_id, s.name, s.id, action, t.name, t.id, self.admin_id
+        );
+        Ok(())
     }
 
     fn refresh_secrets(&mut self) {

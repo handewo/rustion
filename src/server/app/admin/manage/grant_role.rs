@@ -4,6 +4,7 @@ use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::app::admin::widgets::*;
 use crate::server::error::ServerError;
+use ::log::info;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
@@ -132,6 +133,10 @@ where
                 .ok_or(Error::Server(ServerError::MissingRuleId))?;
             self.t_handle
                 .block_on(self.backend.db_repository().delete_casbin_rule(id))?;
+            info!(
+                "[{}] Role '{}({})' revoked from user_id={} by admin_id={}",
+                self.handler_id, t.role, t.rid, self.selected_user_id, self.admin_id
+            );
         } else {
             let cr = CasbinRule::new(
                 "g1".to_string(),
@@ -145,6 +150,10 @@ where
             );
             self.t_handle
                 .block_on(self.backend.db_repository().create_casbin_rule(&cr))?;
+            info!(
+                "[{}] Role '{}({})' granted to user_id={} by admin_id={}",
+                self.handler_id, t.role, t.rid, self.selected_user_id, self.admin_id
+            );
         }
         t.is_bound = !t.is_bound;
         self.t_handle.block_on(self.backend.load_role_manager())?;

@@ -62,6 +62,10 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 };
 
                 if user.force_init_pass {
+                    debug!(
+                        "[{}] User '{}({})' requires password change",
+                        self.id, user.username, user.id
+                    );
                     let app = Box::new(app::ChangePassword::new(
                         self.id,
                         self.user.take(),
@@ -72,6 +76,10 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 }
                 match login_parse.parse_mode() {
                     LoginMode::TargetSelector => {
+                        debug!(
+                            "[{}] Starting target selector for user '{}({})'",
+                            self.id, user.username, user.id
+                        );
                         let mut app = Box::new(app::TargetSelector::new(
                             self.id,
                             self.user.take(),
@@ -84,6 +92,10 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                         Ok(res)
                     }
                     LoginMode::Password => {
+                        debug!(
+                            "[{}] Starting password change for user '{}({})'",
+                            self.id, user.username, user.id
+                        );
                         let app = Box::new(app::ChangePassword::new(
                             self.id,
                             self.user.take(),
@@ -93,6 +105,10 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                         Ok(true)
                     }
                     LoginMode::Admin => {
+                        debug!(
+                            "[{}] Starting admin session for user '{}({})'",
+                            self.id, user.username, user.id
+                        );
                         let mut app =
                             Box::new(app::Admin::new(self.id, self.user.take(), self.log.clone()));
                         let res = app
@@ -106,14 +122,18 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                         self.app = Application::Admin(app);
                         Ok(res)
                     }
-                    LoginMode::TargetWithUser(user, target) => {
+                    LoginMode::TargetWithUser(target_user, target) => {
+                        info!(
+                            "[{}] Direct connection to '{}@{}' for user '{}({})'",
+                            self.id, target_user, target, user.username, user.id
+                        );
                         let mut app = Box::new(app::ConnectTarget::new(
                             self.id,
                             self.user.take(),
                             self.log.clone(),
                         ));
                         let res = app
-                            .init_target(self.backend.clone(), &user, &target)
+                            .init_target(self.backend.clone(), &target_user, &target)
                             .await?;
                         self.app = Application::ConnectTarget(app);
                         Ok(res)
@@ -690,8 +710,8 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
             .await?
         {
             debug!(
-                "[{}] User: {} has no permission to login",
-                self.id, user.username
+                "[{}] User: '{}({})' has no permission to login",
+                self.id, user.username, user.id
             );
             return Ok(false);
         };

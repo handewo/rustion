@@ -1,5 +1,6 @@
 use crate::asciinema;
 use crate::database::models::{Target, TargetSecretName, User};
+use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::app::error::AppError;
 use crate::server::{casbin, HandlerLog};
@@ -11,7 +12,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use crate::database::Uuid;
 
 static LOG_TYPE: &str = "target";
 
@@ -112,8 +112,8 @@ impl ConnectTarget {
             Some(t) => t,
             None => {
                 debug!(
-                    "[{}] No target with secret user found for user: {}",
-                    self.handler_id, &user.username
+                    "[{}] No target with secret user found for user: '{}({})', target: '{}@{}'",
+                    self.handler_id, &user.username, user.id, target_user, target_name
                 );
                 return Ok(false);
             }
@@ -129,6 +129,10 @@ impl ConnectTarget {
         };
 
         self.target_sec_name = Some(target_secret_name);
+        debug!(
+            "[{}] Target initialized: user='{}({})' target: '{}@{}'",
+            self.handler_id, user.username, user.id, target_user, target_name,
+        );
 
         Ok(true)
     }
@@ -604,6 +608,11 @@ impl ConnectTarget {
         self.target_handle = backend
             .connect_to_target(target.clone(), target_sec_id, false)
             .await?;
+
+        debug!(
+            "[{}] Connected to target '{}({})' ({}:{})",
+            self.handler_id, target.name, target.id, target.hostname, target.port
+        );
 
         Ok(())
     }
