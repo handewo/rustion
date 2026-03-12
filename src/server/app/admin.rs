@@ -225,6 +225,7 @@ impl Admin {
             }
         });
 
+        let log = self.log.clone();
         let handler_id = self.handler_id;
         let tokio_handle = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
@@ -236,6 +237,7 @@ impl Admin {
                 handler_id,
                 backend,
                 tokio_handle,
+                log,
             )
         });
 

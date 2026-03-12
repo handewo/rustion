@@ -4,6 +4,7 @@ use super::widgets::{centered_area, render_confirm_dialog, render_message_popup,
 use crate::database::models::*;
 use crate::database::Uuid;
 use crate::error::Error;
+use crate::server::HandlerLog;
 use ::log::{error, info, warn};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
@@ -29,6 +30,7 @@ mod secret;
 mod target;
 mod user;
 
+const LOG_TYPE: &str = "manage";
 const HELP_TEXT: [&str; 2] = [
     "(a) add | (e) edit | (d) delete | (Esc) quit | (↑↓←→) move around",
     "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
@@ -53,6 +55,7 @@ pub(super) fn manage<B, W: Write>(
     handler_id: Uuid,
     backend: Arc<B>,
     t_handle: Handle,
+    log: HandlerLog,
 ) -> Result<(), Error>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
@@ -61,7 +64,7 @@ where
     let mut terminal = Terminal::new(tty_backend)?;
     terminal.hide_cursor()?;
     terminal.flush()?;
-    App::new(backend, t_handle, user_id, handler_id).run(tty, &mut terminal)?;
+    App::new(backend, t_handle, user_id, handler_id, log).run(tty, &mut terminal)?;
     Ok(())
 }
 
@@ -151,13 +154,14 @@ where
     admin_id: Uuid,
     editor: Editor<B>,
     message: Option<Message>,
+    log: HandlerLog,
 }
 
 impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    fn new(backend: Arc<B>, t_handle: Handle, admin_id: Uuid, handler_id: Uuid) -> Self {
+    fn new(backend: Arc<B>, t_handle: Handle, admin_id: Uuid, handler_id: Uuid, log: HandlerLog) -> Self {
         let data = TableData::Users(
             match t_handle.block_on(backend.db_repository().list_users_with_role(false)) {
                 Ok(d) => d,
@@ -182,6 +186,7 @@ where
             admin_id,
             editor: Editor::None,
             message: None,
+            log,
         }
     }
 
@@ -242,6 +247,7 @@ where
             self.t_handle.clone(),
             self.handler_id,
             self.admin_id,
+            self.log.clone(),
         )));
         true
     }
@@ -326,6 +332,10 @@ where
                         "[{}] User '{}({})' deleted by admin_id={}",
                         self.handler_id, u.username, u.id, self.admin_id
                     );
+                    self.t_handle.block_on((self.log)(
+                        LOG_TYPE.into(),
+                        format!("User '{}({})' deleted", u.username, u.id),
+                    ));
                     self.message = Some(Message::Success(vec!["User deleted".into()]));
                     self.refresh_data();
                 }
@@ -349,6 +359,10 @@ where
                         "[{}] Target '{}({})' deleted by admin_id={}",
                         self.handler_id, t.name, t.id, self.admin_id
                     );
+                    self.t_handle.block_on((self.log)(
+                        LOG_TYPE.into(),
+                        format!("Target '{}({})' deleted", t.name, t.id),
+                    ));
                     self.message = Some(Message::Success(vec!["Target deleted".into()]));
                     self.refresh_data();
                 }
@@ -372,6 +386,10 @@ where
                         "[{}] Secret '{}({})' deleted by admin_id={}",
                         self.handler_id, s.name, s.id, self.admin_id
                     );
+                    self.t_handle.block_on((self.log)(
+                        LOG_TYPE.into(),
+                        format!("Secret '{}({})' deleted", s.name, s.id),
+                    ));
                     self.message = Some(Message::Success(vec!["Secret deleted".into()]));
                     self.refresh_data();
                 }
@@ -395,6 +413,10 @@ where
                         "[{}] Permission '({})' deleted by admin_id={}",
                         self.handler_id, p.rule.id, self.admin_id
                     );
+                    self.t_handle.block_on((self.log)(
+                        LOG_TYPE.into(),
+                        format!("Permission '({})' deleted", p.rule.id),
+                    ));
                     self.message = Some(Message::Success(vec!["Permission deleted".into()]));
                     self.refresh_data();
                 }
@@ -606,6 +628,10 @@ where
                             "[{}] User '{}({})' {} by admin_id={}",
                             self.handler_id, user.username, user.id, action, self.admin_id
                         );
+                        self.t_handle.block_on((self.log)(
+                            LOG_TYPE.into(),
+                            format!("User '{}({})' {}", user.username, user.id, action),
+                        ));
                         let mut msg = vec![format!("User {}", action)];
                         if !password.is_empty() {
                             msg.push(format!("New password: {}", password));
@@ -657,6 +683,10 @@ where
                             "[{}] Target '{}({})' {} by admin_id={}",
                             self.handler_id, target.name, target.id, action, self.admin_id
                         );
+                        self.t_handle.block_on((self.log)(
+                            LOG_TYPE.into(),
+                            format!("Target '{}({})' {}", target.name, target.id, action),
+                        ));
                         let msg = vec![format!("Target {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
@@ -715,6 +745,10 @@ where
                             "[{}] Secret '{}({})' {} by admin_id={}",
                             self.handler_id, secret.name, secret.id, action, self.admin_id
                         );
+                        self.t_handle.block_on((self.log)(
+                            LOG_TYPE.into(),
+                            format!("Secret '{}({})' {}", secret.name, secret.id, action),
+                        ));
                         let msg = vec![format!("Secret {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
@@ -762,6 +796,10 @@ where
                             "[{}] Permission '({})' {} by admin_id={}",
                             self.handler_id, perm.rule.id, action, self.admin_id
                         );
+                        self.t_handle.block_on((self.log)(
+                            LOG_TYPE.into(),
+                            format!("Permission '({})' {}", perm.rule.id, action),
+                        ));
                         let msg = vec![format!("Permission {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
@@ -880,6 +918,7 @@ where
                     self.t_handle.clone(),
                     self.handler_id,
                     self.admin_id,
+                    self.log.clone(),
                 )));
             }
             SelectedTab::Permissions => {

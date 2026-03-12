@@ -1,9 +1,9 @@
-pub mod error;
 pub(super) mod app;
 mod bastion_handler;
 pub mod bastion_server;
 mod casbin;
 mod connection_pool;
+pub mod error;
 pub mod init_service;
 mod test;
 

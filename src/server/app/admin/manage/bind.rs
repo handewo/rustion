@@ -3,6 +3,7 @@ use crate::database::models::{SecretInfo, TargetInfo};
 use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::app::admin::widgets::*;
+use crate::server::HandlerLog;
 use ::log::info;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
@@ -15,6 +16,8 @@ use ratatui::{
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
+
+use super::LOG_TYPE;
 
 pub const HELP_TEXT: [&str; 2] = [
     "(Space) toggle | (←→) switch window | (↑↓) select item",
@@ -53,6 +56,7 @@ where
     handler_id: Uuid,
     admin_id: Uuid,
     save_error: Option<Error>,
+    log: HandlerLog,
     pub help_text: [&'static str; 2],
 }
 
@@ -67,6 +71,7 @@ where
         t_handle: Handle,
         handler_id: Uuid,
         admin_id: Uuid,
+        log: HandlerLog,
     ) -> Self {
         Self {
             targets: targets.clone(),
@@ -82,6 +87,7 @@ where
             handler_id,
             admin_id,
             save_error: None,
+            log,
             help_text: HELP_TEXT,
         }
     }
@@ -188,6 +194,10 @@ where
             "[{}] Secret '{}({})' {} target '{}({})' by admin_id={}",
             self.handler_id, s.name, s.id, action, t.name, t.id, self.admin_id
         );
+        self.t_handle.block_on((self.log)(
+            LOG_TYPE.into(),
+            format!("Secret '{}({})' {} target '{}({})'", s.name, s.id, action, t.name, t.id),
+        ));
         Ok(())
     }
 

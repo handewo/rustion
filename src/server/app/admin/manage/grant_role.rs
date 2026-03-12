@@ -4,6 +4,7 @@ use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::app::admin::widgets::*;
 use crate::server::error::ServerError;
+use crate::server::HandlerLog;
 use ::log::info;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
@@ -15,6 +16,8 @@ use ratatui::{
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
+
+use super::LOG_TYPE;
 
 pub const HELP_TEXT: [&str; 2] = [
     "(Space) toggle | (↑↓) select item",
@@ -34,6 +37,7 @@ where
     handler_id: Uuid,
     admin_id: Uuid,
     save_error: Option<Error>,
+    log: HandlerLog,
     pub help_text: [&'static str; 2],
 }
 
@@ -47,6 +51,7 @@ where
         t_handle: Handle,
         handler_id: Uuid,
         admin_id: Uuid,
+        log: HandlerLog,
     ) -> Self {
         let mut save_error = None;
         let items = match t_handle.block_on(
@@ -70,6 +75,7 @@ where
             handler_id,
             admin_id,
             save_error,
+            log,
             help_text: HELP_TEXT,
         }
     }
@@ -137,6 +143,10 @@ where
                 "[{}] Role '{}({})' revoked from user_id={} by admin_id={}",
                 self.handler_id, t.role, t.rid, self.selected_user_id, self.admin_id
             );
+            self.t_handle.block_on((self.log)(
+                LOG_TYPE.into(),
+                format!("Role '{}({})' revoked from user_id={}", t.role, t.rid, self.selected_user_id),
+            ));
         } else {
             let cr = CasbinRule::new(
                 "g1".to_string(),
@@ -154,6 +164,10 @@ where
                 "[{}] Role '{}({})' granted to user_id={} by admin_id={}",
                 self.handler_id, t.role, t.rid, self.selected_user_id, self.admin_id
             );
+            self.t_handle.block_on((self.log)(
+                LOG_TYPE.into(),
+                format!("Role '{}({})' granted to user_id={}", t.role, t.rid, self.selected_user_id),
+            ));
         }
         t.is_bound = !t.is_bound;
         self.t_handle.block_on(self.backend.load_role_manager())?;

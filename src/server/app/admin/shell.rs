@@ -7,6 +7,7 @@ use reedline::{
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use crate::database::Uuid;
+use crate::server::HandlerLog;
 
 use super::common::*;
 use super::{database, manage, Status};
@@ -20,6 +21,7 @@ pub(super) fn shell<B>(
     handler_id: Uuid,
     backend: Arc<B>,
     t_handle: tokio::runtime::Handle,
+    log: HandlerLog,
 ) where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
@@ -83,6 +85,7 @@ pub(super) fn shell<B>(
                             handler_id,
                             backend.clone(),
                             t_handle.clone(),
+                            log.clone(),
                         );
                         let _ = crossterm::execute!(w, DisableBracketedPaste);
                     }
