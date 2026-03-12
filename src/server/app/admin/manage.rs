@@ -161,7 +161,13 @@ impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    fn new(backend: Arc<B>, t_handle: Handle, admin_id: Uuid, handler_id: Uuid, log: HandlerLog) -> Self {
+    fn new(
+        backend: Arc<B>,
+        t_handle: Handle,
+        admin_id: Uuid,
+        handler_id: Uuid,
+        log: HandlerLog,
+    ) -> Self {
         let data = TableData::Users(
             match t_handle.block_on(backend.db_repository().list_users_with_role(false)) {
                 Ok(d) => d,
@@ -223,8 +229,6 @@ where
                     perm,
                     self.backend.clone(),
                     self.t_handle.clone(),
-                    self.handler_id,
-                    self.admin_id,
                 )))
             }
             SelectedTab::Bind => unreachable!(),
@@ -298,8 +302,6 @@ where
                     permission,
                     self.backend.clone(),
                     self.t_handle.clone(),
-                    self.handler_id,
-                    self.admin_id,
                 )));
             }
             SelectedTab::Bind => unreachable!(),
@@ -1383,7 +1385,7 @@ where
     Target(Box<target::TargetEditor>),
     Secret(Box<secret::SecretEditor>),
     Bind(Box<bind::BindEditor<B>>),
-    Permission(Box<permission::PermissionEditor<B>>),
+    Permission(Box<permission::PermissionEditor>),
     Role(Box<role::RoleEditor<B>>),
     GrantRole(Box<grant_role::GrantRoleEditor<B>>),
     None,

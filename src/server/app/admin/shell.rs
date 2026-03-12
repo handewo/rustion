@@ -1,3 +1,5 @@
+use crate::database::Uuid;
+use crate::server::HandlerLog;
 use log::warn;
 use reedline::{
     default_emacs_keybindings, ColumnarMenu, DefaultPrompt, DefaultPromptSegment, Emacs,
@@ -6,13 +8,12 @@ use reedline::{
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use crate::database::Uuid;
-use crate::server::HandlerLog;
 
 use super::common::*;
 use super::{database, manage, Status};
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste, NoTtyEvent, SenderWriter};
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn shell<B>(
     tty: NoTtyEvent,
     send_to_session: mpsc::Sender<Vec<u8>>,

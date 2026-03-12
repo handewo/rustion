@@ -1,7 +1,6 @@
 use super::super::table::{AdminTable, DisplayMode, FieldsToArray, TableData};
 use crate::database::error::DatabaseError;
 use crate::database::models::{ObjectGroup, PermissionPolicy};
-use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::app::admin::widgets::*;
 use crate::server::casbin::ExtendPolicy;
@@ -54,10 +53,7 @@ impl InputField {
     }
 }
 
-pub(super) struct PermissionEditor<B>
-where
-    B: 'static + crate::server::HandlerBackend + Send + Sync,
-{
+pub(super) struct PermissionEditor {
     pub perm: PermissionPolicy,
     user_items: Vec<ObjectGroup>,
     target_items: Vec<ObjectGroup>,
@@ -72,27 +68,17 @@ where
     extend_policy_text: SingleLineText,
     scroll_offset: usize,
     colors: EditorColors,
-    backend: Arc<B>,
-    t_handle: Handle,
-    handler_id: Uuid,
-    admin_id: Uuid,
     pub show_cancel_confirmation: bool,
     editing_mode: bool,
     save_error: Option<Error>,
     pub help_text: [&'static str; 2],
 }
 
-impl<B> PermissionEditor<B>
-where
-    B: 'static + crate::server::HandlerBackend + Send + Sync,
-{
-    pub fn new(
-        perm: PermissionPolicy,
-        backend: Arc<B>,
-        t_handle: Handle,
-        handler_id: Uuid,
-        admin_id: Uuid,
-    ) -> Self {
+impl PermissionEditor {
+    pub fn new<B>(perm: PermissionPolicy, backend: Arc<B>, t_handle: Handle) -> Self
+    where
+        B: 'static + crate::server::HandlerBackend + Send + Sync,
+    {
         let mut save_error = None;
         let user_items = match t_handle.block_on(backend.db_repository().list_user_group()) {
             Ok(items) => items,
@@ -140,10 +126,6 @@ where
             colors: EditorColors::new(&tailwind::BLUE),
             show_cancel_confirmation: false,
             editing_mode: false,
-            backend,
-            t_handle,
-            handler_id,
-            admin_id,
             save_error,
             help_text: HELP_EDITOR,
         }
@@ -511,10 +493,7 @@ where
     }
 }
 
-impl<B> Widget for &mut PermissionEditor<B>
-where
-    B: 'static + crate::server::HandlerBackend + Send + Sync,
-{
+impl Widget for &mut PermissionEditor {
     fn render(self, area: Rect, buf: &mut Buffer) {
         self.render_ui(area, buf);
     }
