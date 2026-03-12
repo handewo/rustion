@@ -22,11 +22,13 @@ pub const MANAGE_SECRETS: &str = "Secrets";
 pub const MANAGE_BIND: &str = "Bind";
 pub const MANAGE_ROLE: &str = "Role";
 pub const MANAGE_PERMISSIONS: &str = "Permissions";
-pub const MANAGE_LIST: [&str; 6] = [
+pub const MANAGE_CASBIN_NAMES: &str = "Groups";
+pub const MANAGE_LIST: [&str; 7] = [
     MANAGE_USERS,
     MANAGE_TARGETS,
     MANAGE_SECRETS,
     MANAGE_BIND,
     MANAGE_PERMISSIONS,
+    MANAGE_CASBIN_NAMES,
     MANAGE_ROLE,
 ];

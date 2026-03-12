@@ -16,4 +16,7 @@ pub enum DatabaseError {
 
     #[error(transparent)]
     PermissionPolicyValidation(#[from] super::models::casbin_rule::PermissionPolicyEmptyError),
+
+    #[error(transparent)]
+    CasbinNameValidation(#[from] super::models::casbin_rule::ValidateError),
 }

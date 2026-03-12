@@ -74,6 +74,43 @@ impl CasbinName {
             updated_at: now,
         }
     }
+
+    pub fn is_internal(&self) -> bool {
+        matches!(
+            self.ptype.as_str(),
+            "__internal_action_type" | "__internal_object_type"
+        )
+    }
+
+    pub fn validate(&self) -> Result<(), ValidateError> {
+        if self.ptype.trim().is_empty() {
+            return Err(ValidateError::PtypeEmpty);
+        }
+        if !matches!(self.ptype.as_str(), "g1" | "g2" | "g3") {
+            return Err(ValidateError::PtypeInvalid);
+        }
+        if self.name.trim().is_empty() {
+            return Err(ValidateError::NameEmpty);
+        }
+        if self.name.starts_with('_') {
+            return Err(ValidateError::NameStartsWithUnderscore);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ValidateError {
+    #[error("Ptype cannot be empty")]
+    PtypeEmpty,
+    #[error("Ptype must be one of g1, g2, g3")]
+    PtypeInvalid,
+    #[error("Name cannot be empty")]
+    NameEmpty,
+    #[error("Name cannot start with underscore")]
+    NameStartsWithUnderscore,
+    #[error("Cannot modify internal types")]
+    InternalTypeModification,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

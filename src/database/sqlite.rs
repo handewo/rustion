@@ -4,6 +4,8 @@ use log::{debug, info};
 use sqlx::{sqlite::SqlitePool, Pool, Row, Sqlite};
 use uuid::Uuid;
 
+use crate::database::error::DatabaseError;
+use crate::database::models::casbin_rule::ValidateError;
 use crate::database::models::{
     CasbinName, CasbinRule, CasbinRuleGroup, Log, ObjectGroup, PermissionPolicy, Role, Secret,
     SecretInfo, Target, TargetInfo, TargetSecret, TargetSecretName, User, UserWithRole,
@@ -210,7 +212,10 @@ impl DatabaseRepository for SqliteRepository {
         .execute(&self.pool)
         .await?;
 
-        debug!("User created successfully: '{}({})'", user.username, user.id);
+        debug!(
+            "User created successfully: '{}({})'",
+            user.username, user.id
+        );
         Ok(user.clone())
     }
 
@@ -272,7 +277,10 @@ impl DatabaseRepository for SqliteRepository {
         .execute(&self.pool)
         .await?;
 
-        debug!("User updated successfully: '{}({})'", updated_user.username, updated_user.id);
+        debug!(
+            "User updated successfully: '{}({})'",
+            updated_user.username, updated_user.id
+        );
         Ok(updated_user)
     }
 
@@ -365,7 +373,10 @@ LEFT JOIN (
         .execute(&self.pool)
         .await?;
 
-        debug!("Target created successfully: '{}({})'", target.name, target.id);
+        debug!(
+            "Target created successfully: '{}({})'",
+            target.name, target.id
+        );
         Ok(target.clone())
     }
 
@@ -487,7 +498,10 @@ LEFT JOIN (
         .execute(&self.pool)
         .await?;
 
-        debug!("Target updated successfully: '{}({})'", updated_target.name, updated_target.id);
+        debug!(
+            "Target updated successfully: '{}({})'",
+            updated_target.name, updated_target.id
+        );
         Ok(updated_target)
     }
 
@@ -961,6 +975,25 @@ WHERE ptype = 'g3'
         Ok(rows)
     }
 
+    async fn list_casbin_names_user_visible(
+        &self,
+        active_only: bool,
+    ) -> Result<Vec<CasbinName>, Error> {
+        let mut query = String::from(
+            "SELECT id, ptype, name, is_active, updated_by, updated_at FROM casbin_names WHERE ptype NOT IN ('__internal_action_type', '__internal_object_type')",
+        );
+
+        if active_only {
+            query.push_str(" AND is_active = 1");
+        }
+
+        let rows = sqlx::query_as::<_, CasbinName>(&query)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows)
+    }
+
     async fn list_casbin_names_by_ptype(
         &self,
         ptype: &str,
@@ -983,6 +1016,18 @@ WHERE ptype = 'g3'
     }
 
     async fn update_casbin_name(&self, rule: &CasbinName) -> Result<CasbinName, Error> {
+        // Check if this is an existing internal type
+        if let Some(existing) = self.get_casbin_name_by_id(&rule.id).await? {
+            if existing.is_internal()
+                && (existing.ptype != rule.ptype || existing.name != rule.name)
+            {
+                // Prevent changing the ptype of internal types
+                return Err(Error::Database(DatabaseError::CasbinNameValidation(
+                    ValidateError::InternalTypeModification,
+                )));
+            }
+        }
+
         let mut updated_rule = rule.clone();
         updated_rule.updated_at = Utc::now().timestamp_millis();
 
@@ -1003,6 +1048,30 @@ WHERE ptype = 'g3'
         .await?;
 
         Ok(updated_rule)
+    }
+
+    async fn delete_casbin_name(&self, id: &Uuid) -> Result<bool, Error> {
+        debug!("Deleting casbin_name: id={}", id);
+
+        // Check if this is an internal type
+        if let Some(casbin_name) = self.get_casbin_name_by_id(id).await? {
+            if casbin_name.is_internal() {
+                return Err(Error::Database(DatabaseError::CasbinNameValidation(
+                    ValidateError::InternalTypeModification,
+                )));
+            }
+        }
+
+        let result = sqlx::query("DELETE FROM casbin_names WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        let deleted = result.rows_affected() > 0;
+        if deleted {
+            debug!("Casbin_name deleted successfully: id={}", id);
+        }
+        Ok(deleted)
     }
 
     async fn create_casbin_names_batch(
@@ -1095,7 +1164,10 @@ WHERE ptype = 'g3'
         .execute(&self.pool)
         .await?;
 
-        debug!("Secret created successfully: '{}({})'", secret.name, secret.id);
+        debug!(
+            "Secret created successfully: '{}({})'",
+            secret.name, secret.id
+        );
         Ok(secret.clone())
     }
 
@@ -1112,7 +1184,10 @@ WHERE ptype = 'g3'
         is_active: bool,
         updated_by: &Uuid,
     ) -> Result<(), Error> {
-        debug!("Upserting target_secret binding: target_id={}, secret_id={}, is_active={}", target_id, secret_id, is_active);
+        debug!(
+            "Upserting target_secret binding: target_id={}, secret_id={}, is_active={}",
+            target_id, secret_id, is_active
+        );
         // 1. Does the row already exist?
         let exists = sqlx::query_as::<_, TargetSecret>(
             "SELECT * FROM target_secrets WHERE target_id = ? AND secret_id = ?",
@@ -1126,13 +1201,19 @@ WHERE ptype = 'g3'
             Some(mut ts) => {
                 ts.is_active = is_active;
                 self.update_target_secret(&ts).await?;
-                debug!("Target_secret binding updated: target_id={}, secret_id={}", target_id, secret_id);
+                debug!(
+                    "Target_secret binding updated: target_id={}, secret_id={}",
+                    target_id, secret_id
+                );
             }
             None => {
                 let mut ts = TargetSecret::new(*target_id, *secret_id, *updated_by);
                 ts.is_active = is_active;
                 self.create_target_secret(&ts).await?;
-                debug!("Target_secret binding created: target_id={}, secret_id={}", target_id, secret_id);
+                debug!(
+                    "Target_secret binding created: target_id={}, secret_id={}",
+                    target_id, secret_id
+                );
             }
         };
 
@@ -1217,7 +1298,10 @@ WHERE ptype = 'g3'
         .execute(&self.pool)
         .await?;
 
-        debug!("Secret updated successfully: '{}({})'", updated_secret.name, updated_secret.id);
+        debug!(
+            "Secret updated successfully: '{}({})'",
+            updated_secret.name, updated_secret.id
+        );
         Ok(updated_secret)
     }
 

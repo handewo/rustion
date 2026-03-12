@@ -23,6 +23,7 @@ use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
 
 mod bind;
+mod casbin_name;
 mod grant_role;
 mod permission;
 mod role;
@@ -42,7 +43,6 @@ const USER_HELP_TEXT: [&str; 2] = [
 ];
 
 const LENGTH_UUID: u16 = 32;
-const LENGTH_TIMESTAMP: u16 = 14;
 pub const MAX_POPUP_WINDOW_COL: u16 = 60;
 pub const MAX_POPUP_WINDOW_ROW: u16 = 40;
 const MIN_WINDOW_COL: u16 = 20;
@@ -97,7 +97,8 @@ enum SelectedTab {
     Secrets = 2,
     Bind = 3,
     Permissions = 4,
-    Role = 5,
+    CasbinNames = 5,
+    Role = 6,
 }
 
 impl fmt::Display for SelectedTab {
@@ -109,6 +110,7 @@ impl fmt::Display for SelectedTab {
             SelectedTab::Bind => write!(f, "Bind"),
             SelectedTab::Permissions => write!(f, "Permissions"),
             SelectedTab::Role => write!(f, "Role"),
+            SelectedTab::CasbinNames => write!(f, "Groups"),
         }
     }
 }
@@ -120,7 +122,8 @@ impl SelectedTab {
             SelectedTab::Targets => SelectedTab::Secrets,
             SelectedTab::Secrets => SelectedTab::Bind,
             SelectedTab::Bind => SelectedTab::Permissions,
-            SelectedTab::Permissions => SelectedTab::Role,
+            SelectedTab::Permissions => SelectedTab::CasbinNames,
+            SelectedTab::CasbinNames => SelectedTab::Role,
             SelectedTab::Role => SelectedTab::Users,
         }
     }
@@ -132,7 +135,8 @@ impl SelectedTab {
             SelectedTab::Secrets => SelectedTab::Targets,
             SelectedTab::Bind => SelectedTab::Secrets,
             SelectedTab::Permissions => SelectedTab::Bind,
-            SelectedTab::Role => SelectedTab::Permissions,
+            SelectedTab::CasbinNames => SelectedTab::Permissions,
+            SelectedTab::Role => SelectedTab::CasbinNames,
         }
     }
 }
@@ -231,6 +235,11 @@ where
                     self.t_handle.clone(),
                 )))
             }
+            SelectedTab::CasbinNames => {
+                self.editor = Editor::CasbinName(Box::new(casbin_name::CasbinNameEditor::new(
+                    CasbinName::new(String::new(), String::new(), true, self.admin_id),
+                )))
+            }
             SelectedTab::Bind => unreachable!(),
             SelectedTab::Role => unreachable!(),
         }
@@ -303,6 +312,17 @@ where
                     self.backend.clone(),
                     self.t_handle.clone(),
                 )));
+            }
+            SelectedTab::CasbinNames => {
+                let idx = self.table.state.selected().unwrap();
+                let casbin_name = match self.items.get_casbin_name(idx) {
+                    Some(c) => c,
+                    None => {
+                        return false;
+                    }
+                };
+                self.editor =
+                    Editor::CasbinName(Box::new(casbin_name::CasbinNameEditor::new(casbin_name)));
             }
             SelectedTab::Bind => unreachable!(),
             SelectedTab::Role => unreachable!(),
@@ -423,6 +443,33 @@ where
                     self.refresh_data();
                 }
             }
+            SelectedTab::CasbinNames => {
+                if let Some(c) = self.items.get_casbin_name(idx) {
+                    let result = self
+                        .t_handle
+                        .block_on(self.backend.db_repository().delete_casbin_name(&c.id));
+
+                    if let Err(e) = result {
+                        self.message = Some(Message::Error(vec!["Internal error".into()]));
+                        warn!(
+                            "[{}] Delete casbin name '{}({})' failed by admin_id={}: {}",
+                            self.handler_id, c.name, c.id, self.admin_id, e
+                        );
+                        return;
+                    }
+
+                    info!(
+                        "[{}] Casbin name '{}({})' deleted by admin_id={}",
+                        self.handler_id, c.name, c.id, self.admin_id
+                    );
+                    self.t_handle.block_on((self.log)(
+                        LOG_TYPE.into(),
+                        format!("Casbin name '{}({})' deleted", c.name, c.id),
+                    ));
+                    self.message = Some(Message::Success(vec!["Group deleted".into()]));
+                    self.refresh_data();
+                }
+            }
             SelectedTab::Bind => unreachable!(),
             SelectedTab::Role => unreachable!(),
         }
@@ -447,6 +494,11 @@ where
             }
             SelectedTab::Permissions => {
                 if self.items.get_permission(idx).is_some() {
+                    return true;
+                }
+            }
+            SelectedTab::CasbinNames => {
+                if self.items.get_casbin_name(idx).is_some() {
                     return true;
                 }
             }
@@ -570,6 +622,9 @@ where
                         let _ = e.as_mut().handle_paste_event(paste);
                     }
                     Editor::Secret(ref mut e) => {
+                        let _ = e.as_mut().handle_paste_event(paste);
+                    }
+                    Editor::CasbinName(ref mut e) => {
                         let _ = e.as_mut().handle_paste_event(paste);
                     }
                     Editor::GrantRole(_) => {}
@@ -815,6 +870,70 @@ where
                     self.refresh_data();
                 }
             }
+            Editor::CasbinName(ref mut e) => {
+                if e.as_mut().handle_key_event(key.code, key.modifiers) {
+                    if !e.show_cancel_confirmation {
+                        let casbin_name = e.casbin_name.to_owned();
+
+                        let (action, result) = match self.popup {
+                            Popup::Add => (
+                                "added",
+                                self.t_handle.block_on(
+                                    self.backend
+                                        .db_repository()
+                                        .create_casbin_name(&casbin_name),
+                                ),
+                            ),
+                            Popup::Edit => (
+                                "updated",
+                                self.t_handle.block_on(
+                                    self.backend
+                                        .db_repository()
+                                        .update_casbin_name(&casbin_name),
+                                ),
+                            ),
+                            _ => unreachable!(),
+                        };
+
+                        if let Err(ref err) = result {
+                            let msg = match err {
+                                Error::Sqlx(sqlx::Error::Database(ref db_err))
+                                    if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
+                                {
+                                    "Group already exists"
+                                }
+                                _ => "Internal error",
+                            };
+                            warn!(
+                                "[{}] Failed to {} casbin name '{}({})': {}",
+                                self.handler_id, action, casbin_name.name, casbin_name.id, err
+                            );
+                            self.message = Some(Message::Error(vec![msg.into()]));
+                            return Ok(());
+                        }
+
+                        info!(
+                            "[{}] Casbin name '{}({})' {} by admin_id={}",
+                            self.handler_id,
+                            casbin_name.name,
+                            casbin_name.id,
+                            action,
+                            self.admin_id
+                        );
+                        self.t_handle.block_on((self.log)(
+                            LOG_TYPE.into(),
+                            format!(
+                                "Casbin name '{}({})' {}",
+                                casbin_name.name, casbin_name.id, action
+                            ),
+                        ));
+                        let msg = vec![format!("Group {}", action)];
+                        self.message = Some(Message::Success(msg));
+                    }
+                    self.clear_form();
+                    self.refresh_data();
+                }
+            }
             Editor::Bind(_) => unreachable!(),
             Editor::Role(_) => unreachable!(),
             Editor::None => unreachable!(),
@@ -938,6 +1057,17 @@ where
                     self.admin_id,
                 )));
             }
+            SelectedTab::CasbinNames => {
+                self.items = TableData::CasbinNames(
+                    self.t_handle
+                        .block_on(
+                            self.backend
+                                .db_repository()
+                                .list_casbin_names_user_visible(false),
+                        )
+                        .unwrap_or_default(),
+                );
+            }
         };
 
         self.longest_item_lens = self.items.constraint_len_calculator();
@@ -1003,6 +1133,7 @@ where
                 Editor::Bind(_) => unreachable!(),
                 Editor::Role(_) => unreachable!(),
                 Editor::None => unreachable!(),
+                Editor::CasbinName(_) => Line::styled("Add New Group", Style::default().bold()),
             },
             Popup::Edit => match self.editor {
                 Editor::User(_) => Line::styled("Edit User", Style::default().bold()),
@@ -1013,6 +1144,7 @@ where
                 Editor::Bind(_) => unreachable!(),
                 Editor::Role(_) => unreachable!(),
                 Editor::None => unreachable!(),
+                Editor::CasbinName(_) => Line::styled("Edit Group", Style::default().bold()),
             },
             Popup::Delete(_) => {
                 match self.selected_tab {
@@ -1046,6 +1178,13 @@ where
                     }
                     SelectedTab::Bind => unreachable!(),
                     SelectedTab::Role => unreachable!(),
+                    SelectedTab::CasbinNames => {
+                        render_confirm_dialog(
+                            popup_area,
+                            frame.buffer_mut(),
+                            &["Delete selected group?".to_string()],
+                        );
+                    }
                 }
                 return;
             }
@@ -1070,6 +1209,7 @@ where
             Editor::Role(ref e) => e.as_ref().help_text,
             Editor::Permission(ref e) => e.as_ref().help_text,
             Editor::GrantRole(ref e) => e.as_ref().help_text,
+            Editor::CasbinName(ref e) => e.as_ref().help_text,
             Editor::None => {
                 if self.selected_tab == SelectedTab::Users {
                     USER_HELP_TEXT
@@ -1131,6 +1271,14 @@ impl TableData {
 
     fn get_permission(&self, i: usize) -> Option<PermissionPolicy> {
         if let TableData::Permissions(data) = self {
+            data.get(i).cloned()
+        } else {
+            None
+        }
+    }
+
+    fn get_casbin_name(&self, i: usize) -> Option<CasbinName> {
+        if let TableData::CasbinNames(data) = self {
             data.get(i).cloned()
         } else {
             None
@@ -1248,6 +1396,8 @@ impl TableData {
                 ]
             }
             Self::CasbinNames(ref data) => {
+                let ptype_len = data.iter().map(|v| v.ptype.len()).max().unwrap_or(0).max(5);
+
                 let name_len = data
                     .iter()
                     .map(|v| v.name.as_str())
@@ -1257,10 +1407,9 @@ impl TableData {
                     .max(4);
 
                 vec![
+                    Constraint::Length(ptype_len as u16),
                     Constraint::Length(name_len as u16),
                     Constraint::Length(9), // is_active
-                    Constraint::Length(LENGTH_UUID),
-                    Constraint::Length(LENGTH_TIMESTAMP),
                 ]
             }
             Self::Permissions(ref data) => {
@@ -1369,7 +1518,7 @@ impl super::table::TableData for TableData {
                 "public_key",
                 "is_active",
             ],
-            Self::CasbinNames(_) => vec!["name", "is_active", "updated_by", "updated_at"],
+            Self::CasbinNames(_) => vec!["ptype", "name", "is_active"],
             Self::Permissions(_) => {
                 vec!["user/role", "target/group", "action/group", "extend policy"]
             }
@@ -1388,6 +1537,7 @@ where
     Permission(Box<permission::PermissionEditor>),
     Role(Box<role::RoleEditor<B>>),
     GrantRole(Box<grant_role::GrantRoleEditor<B>>),
+    CasbinName(Box<casbin_name::CasbinNameEditor>),
     None,
 }
 
@@ -1416,6 +1566,9 @@ where
                 e.render(area, buf);
             }
             Editor::Permission(ref mut e) => {
+                e.render(area, buf);
+            }
+            Editor::CasbinName(ref mut e) => {
                 e.render(area, buf);
             }
             Editor::Role(_) => {

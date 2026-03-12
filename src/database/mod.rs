@@ -122,6 +122,7 @@ pub trait DatabaseRepository: Send + Sync {
     /// CasbinName operations - maps UUIDs to human-readable names
     async fn create_casbin_name(&self, name: &CasbinName) -> Result<CasbinName, Error>;
     async fn update_casbin_name(&self, rule: &CasbinName) -> Result<CasbinName, Error>;
+    async fn delete_casbin_name(&self, id: &Uuid) -> Result<bool, Error>;
     async fn get_casbin_name_by_name(&self, name: &str) -> Result<Option<CasbinName>, Error>;
     async fn get_casbin_name_by_id(&self, id: &Uuid) -> Result<Option<CasbinName>, Error>;
     async fn list_casbin_names_by_ptype(
@@ -130,6 +131,10 @@ pub trait DatabaseRepository: Send + Sync {
         active_only: bool,
     ) -> Result<Vec<CasbinName>, Error>;
     async fn list_casbin_names(&self, active_only: bool) -> Result<Vec<CasbinName>, Error>;
+    async fn list_casbin_names_user_visible(
+        &self,
+        active_only: bool,
+    ) -> Result<Vec<CasbinName>, Error>;
     async fn create_casbin_names_batch(
         &self,
         rules: &[CasbinName],

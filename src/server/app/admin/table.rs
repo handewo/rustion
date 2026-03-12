@@ -401,7 +401,11 @@ impl FieldsToArray for CasbinName {
                 ]
             }
             DisplayMode::Manage => {
-                todo!()
+                vec![
+                    self.ptype.clone(),
+                    self.name.clone(),
+                    self.is_active.to_string(),
+                ]
             }
         }
     }
