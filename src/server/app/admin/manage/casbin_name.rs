@@ -10,6 +10,13 @@ use ratatui::{
     widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
 
+// Radio button options for ptype selection (static for RadioButtons widget)
+const PTYPE_OPTIONS: [RadioOption; 3] = [
+    RadioOption::new("Rule", "g1"),   // g1 - user groups/roles
+    RadioOption::new("Target", "g2"), // g2 - object groups
+    RadioOption::new("Action", "g3"), // g3 - action groups
+];
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum InputField {
     Ptype,
@@ -39,8 +46,8 @@ impl InputField {
 pub struct CasbinNameEditor {
     pub casbin_name: CasbinName,
     focused_field: InputField,
-    ptype_text: SingleLineText,
     name_text: SingleLineText,
+    ptype_radio: RadioButtons,
     scroll_offset: usize,
     colors: EditorColors,
     pub show_cancel_confirmation: bool,
@@ -51,33 +58,28 @@ pub struct CasbinNameEditor {
 
 impl CasbinNameEditor {
     pub fn new(casbin_name: CasbinName) -> Self {
-        let ptype_text = SingleLineText::new(Some(casbin_name.ptype.clone()));
         let name_text = SingleLineText::new(Some(casbin_name.name.clone()));
+        let ptype_radio = RadioButtons::new(&PTYPE_OPTIONS, &casbin_name.ptype);
 
         Self {
             casbin_name,
             focused_field: InputField::Ptype,
-            ptype_text,
             name_text,
+            ptype_radio,
             scroll_offset: 0,
             colors: EditorColors::new(&tailwind::BLUE),
             show_cancel_confirmation: false,
             editing_mode: false,
             save_error: None,
-            help_text: COMMON_HELP,
+            help_text: RADIO_HELP,
         }
     }
 
     pub fn handle_paste_event(&mut self, paste: &str) -> bool {
-        if self.editing_mode {
-            match self.focused_field {
-                InputField::Ptype => self.ptype_text.handle_paste(paste),
-                InputField::Name => self.name_text.handle_paste(paste),
-                InputField::IsActive => false,
-            }
-        } else {
-            false
+        if let InputField::Name = self.focused_field {
+            return self.name_text.handle_paste(paste);
         }
+        false
     }
 
     pub fn handle_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) -> bool {
@@ -121,9 +123,9 @@ impl CasbinNameEditor {
         if self.editing_mode {
             match self.focused_field {
                 InputField::Ptype => {
-                    if self.ptype_text.handle_input(key) {
+                    if self.ptype_radio.handle_input(key) {
                         self.editing_mode = false;
-                        self.ptype_text.clear_style();
+                        self.help_text = RADIO_HELP
                     }
                 }
                 InputField::Name => {
@@ -138,7 +140,7 @@ impl CasbinNameEditor {
             }
 
             match key {
-                KeyCode::Esc | KeyCode::Enter | KeyCode::Char(_) => {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Up | KeyCode::Down | KeyCode::Char(_) => {
                     return false;
                 }
                 _ => {}
@@ -173,8 +175,7 @@ impl CasbinNameEditor {
                 }
                 InputField::Ptype => {
                     self.editing_mode = true;
-                    text_editing_style(self.colors.input_cursor, &mut self.ptype_text.textarea);
-                    text_input_position(key, &mut self.ptype_text.textarea);
+                    self.help_text = RADIO_EDIT_HELP;
                 }
                 InputField::Name => {
                     self.editing_mode = true;
@@ -182,15 +183,11 @@ impl CasbinNameEditor {
                     text_input_position(key, &mut self.name_text.textarea);
                 }
             },
-            KeyCode::Char('d') if !self.editing_mode => match self.focused_field {
-                InputField::Ptype => {
-                    self.ptype_text.clear_line();
-                }
-                InputField::Name => {
+            KeyCode::Char('d') if !self.editing_mode => {
+                if let InputField::Name = self.focused_field {
                     self.name_text.clear_line();
                 }
-                _ => {}
-            },
+            }
             KeyCode::Char(' ') => {
                 if let InputField::IsActive = self.focused_field {
                     self.casbin_name.is_active = !self.casbin_name.is_active;
@@ -207,7 +204,10 @@ impl CasbinNameEditor {
             InputField::IsActive => {
                 self.help_text = CHECKBOX_HELP;
             }
-            InputField::Ptype | InputField::Name => {
+            InputField::Ptype => {
+                self.help_text = RADIO_HELP;
+            }
+            InputField::Name => {
                 self.help_text = COMMON_HELP;
             }
         }
@@ -219,15 +219,18 @@ impl CasbinNameEditor {
             InputField::IsActive => {
                 self.help_text = CHECKBOX_HELP;
             }
-            InputField::Ptype | InputField::Name => {
+            InputField::Ptype => {
+                self.help_text = RADIO_HELP;
+            }
+            InputField::Name => {
                 self.help_text = COMMON_HELP;
             }
         }
     }
 
     fn save_casbin_name(&mut self) -> Result<(), Error> {
-        let ptype = self.ptype_text.get_input();
-        self.casbin_name.ptype = ptype.trim().into();
+        // Update ptype from radio button selection
+        self.casbin_name.ptype = self.ptype_radio.selected_value().to_string();
 
         let name = self.name_text.get_input();
         self.casbin_name.name = name.trim().into();
@@ -242,7 +245,7 @@ impl CasbinNameEditor {
     }
 
     fn window_height(&self) -> u16 {
-        9
+        11
     }
 
     fn render_ui(&mut self, area: Rect, buf: &mut Buffer) {
@@ -264,18 +267,18 @@ impl CasbinNameEditor {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Ptype
+                Constraint::Length(5), // Ptype radio buttons (3 options + borders)
                 Constraint::Length(3), // Name
                 Constraint::Length(3), // Is Active
             ])
             .split(content_area);
 
-        // Ptype field
-        render_textarea(
+        // Ptype radio buttons
+        render_radio_buttons(
             chunks[0],
             &mut editor_buf,
-            "*Ptype*",
-            &self.ptype_text,
+            "*Type*",
+            &self.ptype_radio,
             self.editing_mode,
             &self.colors,
             self.focused_field == InputField::Ptype,

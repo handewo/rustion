@@ -42,7 +42,6 @@ const USER_HELP_TEXT: [&str; 2] = [
     "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
 ];
 
-const LENGTH_UUID: u16 = 32;
 pub const MAX_POPUP_WINDOW_COL: u16 = 60;
 pub const MAX_POPUP_WINDOW_ROW: u16 = 40;
 const MIN_WINDOW_COL: u16 = 20;
@@ -1396,7 +1395,7 @@ impl TableData {
                 ]
             }
             Self::CasbinNames(ref data) => {
-                let ptype_len = data.iter().map(|v| v.ptype.len()).max().unwrap_or(0).max(5);
+                let ptype_len = data.iter().map(|v| v.ptype.len()).max().unwrap_or(0).max(6);
 
                 let name_len = data
                     .iter()
@@ -1518,7 +1517,7 @@ impl super::table::TableData for TableData {
                 "public_key",
                 "is_active",
             ],
-            Self::CasbinNames(_) => vec!["ptype", "name", "is_active"],
+            Self::CasbinNames(_) => vec!["Type", "name", "is_active"],
             Self::Permissions(_) => {
                 vec!["user/role", "target/group", "action/group", "extend policy"]
             }

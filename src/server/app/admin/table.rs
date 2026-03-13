@@ -401,8 +401,15 @@ impl FieldsToArray for CasbinName {
                 ]
             }
             DisplayMode::Manage => {
+                // Convert ptype to friendly name for display
+                let ptype_display = match self.ptype.as_str() {
+                    "g1" => "Rule",
+                    "g2" => "Target",
+                    "g3" => "Action",
+                    _ => &self.ptype,
+                };
                 vec![
-                    self.ptype.clone(),
+                    ptype_display.to_string(),
                     self.name.clone(),
                     self.is_active.to_string(),
                 ]

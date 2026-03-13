@@ -2,15 +2,171 @@ use super::manage::{MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW};
 use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Constraint, Flex, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Flex, Layout, Rect},
     style::{palette::tailwind, Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 use tui_textarea::{CursorMove, Input, Key, TextArea};
 
+/// Radio button options for selection
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RadioOption {
+    pub label: &'static str,
+    pub value: &'static str,
+}
+
+impl RadioOption {
+    pub const fn new(label: &'static str, value: &'static str) -> Self {
+        Self { label, value }
+    }
+}
+
+#[derive(Debug)]
+pub struct RadioButtons {
+    options: &'static [RadioOption],
+    selected_index: usize,
+}
+
+impl RadioButtons {
+    pub fn new(options: &'static [RadioOption], initial_value: &str) -> Self {
+        let initial_index = options
+            .iter()
+            .position(|opt| opt.value == initial_value)
+            .unwrap_or(0);
+
+        Self {
+            options,
+            selected_index: initial_index,
+        }
+    }
+
+    pub fn selected_value(&self) -> &'static str {
+        self.options[self.selected_index].value
+    }
+
+    pub fn handle_input(&mut self, key: KeyCode) -> bool {
+        match key {
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Tab | KeyCode::BackTab => {
+                // Exit editing mode on navigation keys
+                return true;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.selected_index = if self.selected_index == 0 {
+                    self.options.len() - 1
+                } else {
+                    self.selected_index - 1
+                };
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.selected_index = if self.selected_index == self.options.len() - 1 {
+                    0
+                } else {
+                    self.selected_index + 1
+                };
+            }
+            KeyCode::Char(c) if ('1'..='9').contains(&c) => {
+                let idx = c.to_digit(10).unwrap() as usize;
+                if idx > 0 && idx <= self.options.len() {
+                    self.selected_index = idx - 1;
+                }
+            }
+            KeyCode::Char(' ') => {
+                // Confirm current selection
+            }
+            _ => return false,
+        }
+        false
+    }
+}
+
+impl RadioButtons {
+    pub fn render_vertical(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        editing_mode: bool,
+        colors: &EditorColors,
+        is_focused: bool,
+    ) {
+        let radio_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(
+                std::iter::repeat_n(Constraint::Length(1), self.options.len()).collect::<Vec<_>>(),
+            )
+            .split(area);
+
+        for (i, option) in self.options.iter().enumerate() {
+            let is_selected = i == self.selected_index;
+            let is_option_focused = is_focused && editing_mode && i == self.selected_index;
+
+            let radio_symbol = if is_selected { "(*)" } else { "( )" };
+            let style = if is_option_focused {
+                Style::default()
+                    .fg(colors.editor)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_selected {
+                Style::default().add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+
+            let text = format!("{} {}", radio_symbol, option.label);
+            let span = Span::styled(text, style);
+            let line = Line::from(span);
+
+            let paragraph = Paragraph::new(line).alignment(Alignment::Left);
+            paragraph.render(radio_layout[i], buf);
+        }
+    }
+}
+pub fn render_radio_buttons(
+    area: Rect,
+    buf: &mut Buffer,
+    label: &str,
+    radio_buttons: &RadioButtons,
+    editing_mode: bool,
+    colors: &EditorColors,
+    is_focused: bool,
+) {
+    let title_style = if is_focused {
+        Style::default()
+            .fg(tailwind::SLATE.c200)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+
+    let border_style = if is_focused && editing_mode {
+        Style::default().fg(colors.editor)
+    } else if is_focused {
+        Style::default().fg(colors.focus)
+    } else {
+        Style::default()
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(label)
+        .border_style(border_style)
+        .title_style(title_style);
+
+    let inner = block.inner(area);
+    block.render(area, buf);
+
+    radio_buttons.render_vertical(inner, buf, editing_mode, colors, is_focused);
+}
+
 pub const COMMON_HELP: [&str; 2] = [
     "(Enter) edit | (i) insert | (a) append | (d) clear",
+    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
+];
+pub const RADIO_HELP: [&str; 2] = [
+    "(Enter) edit",
+    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
+];
+pub const RADIO_EDIT_HELP: [&str; 2] = [
+    "(Enter) confirm | (Up/Down) select",
     "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
 ];
 pub const CHECKBOX_HELP: [&str; 2] = [
