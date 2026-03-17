@@ -824,6 +824,33 @@ WHERE c.ptype = 'g3';"#
         Ok(updated_rule)
     }
 
+    async fn delete_casbin_rule_by_v0_v1(
+        &self,
+        ptype: &str,
+        v0: &Uuid,
+        v1: &Uuid,
+    ) -> Result<bool, Error> {
+        debug!(
+            "Deleting casbin_rule where ptype={} v0={} v1={}",
+            ptype, v0, v1
+        );
+        let result = sqlx::query("DELETE FROM casbin_rule WHERE ptype = ? AND v0 = ? AND v1 = ?")
+            .bind(ptype)
+            .bind(v0)
+            .bind(v1)
+            .execute(&self.pool)
+            .await?;
+
+        let deleted = result.rows_affected() > 0;
+        if deleted {
+            debug!(
+                "Casbin_rule deleted successfully: ptype={} v0={} v1={}",
+                ptype, v0, v1
+            );
+        }
+        Ok(deleted)
+    }
+
     async fn delete_casbin_rule(&self, id: &Uuid) -> Result<bool, Error> {
         debug!("Deleting casbin_rule: '({})'", id);
         let result = sqlx::query("DELETE FROM casbin_rule WHERE id = ?")

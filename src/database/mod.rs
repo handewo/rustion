@@ -1,5 +1,5 @@
-pub mod error;
 pub mod common;
+pub mod error;
 pub(crate) mod models;
 pub(crate) mod service;
 pub(crate) mod sqlite;
@@ -118,6 +118,13 @@ pub trait DatabaseRepository: Send + Sync {
     async fn create_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error>;
     async fn update_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error>;
     async fn delete_casbin_rule(&self, id: &Uuid) -> Result<bool, Error>;
+    /// It's unsafe if ptype is not in [g1, g2, g3]
+    async fn delete_casbin_rule_by_v0_v1(
+        &self,
+        ptype: &str,
+        v0: &Uuid,
+        v1: &Uuid,
+    ) -> Result<bool, Error>;
 
     /// CasbinName operations - maps UUIDs to human-readable names
     async fn create_casbin_name(&self, name: &CasbinName) -> Result<CasbinName, Error>;

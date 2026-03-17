@@ -5,13 +5,13 @@ use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::casbin::GroupType;
 use crossterm::event::{KeyCode, KeyModifiers};
-use log::{error, info, warn};
+use log::{error, warn};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Rect},
     style::palette::tailwind,
     style::{Color, Modifier, Style},
-    widgets::{Block, BorderType, Clear},
+    widgets::{Block, BorderType, Clear, Scrollbar, ScrollbarOrientation},
 };
 use std::sync::Arc;
 use tokio::runtime::Handle;
@@ -38,10 +38,17 @@ where
     handler_id: Uuid,
     admin_id: Uuid,
     is_editing: bool,
+    is_deleting: bool,
+    win_size: (u16, u16),
     message: Option<widgets::Message>,
-    save_error: Option<Error>,
     pub help_text: [&'static str; 2],
 }
+
+type BuildTreeResult = (
+    TreeState<tree::Identifier>,
+    Vec<TreeItem<'static, tree::Identifier>>,
+    Vec<ObjectGroup>,
+);
 
 impl<B> RoleEditor<B>
 where
@@ -54,55 +61,15 @@ where
         admin_id: Uuid,
         group_type: GroupType,
     ) -> Self {
-        let graph = t_handle.block_on(backend.get_graph(group_type));
-        let selector_items = match group_type {
-            GroupType::Subject => {
-                match t_handle.block_on(backend.db_repository().list_user_group()) {
-                    Ok(i) => i,
-                    Err(e) => {
-                        // TODO: handle error
-                        error!("[{}] Failed to list 'target group': {}", handler_id, e);
-                        Vec::new()
-                    }
+        let mut message = None;
+        let (state, items, selector_items) =
+            match RoleEditor::build_tree(handler_id, &backend, &t_handle, group_type) {
+                Ok(res) => res,
+                Err(_) => {
+                    message = Some(widgets::Message::Error(vec!["Internal error".into()]));
+                    (TreeState::default(), Vec::new(), Vec::new())
                 }
-            }
-            GroupType::Object => {
-                match t_handle.block_on(backend.db_repository().list_target_group()) {
-                    Ok(i) => i,
-                    Err(e) => {
-                        // TODO: handle error
-                        error!("[{}] Failed to list 'target group': {}", handler_id, e);
-                        Vec::new()
-                    }
-                }
-            }
-            GroupType::Action => {
-                match t_handle.block_on(backend.db_repository().list_action_group()) {
-                    Ok(i) => i,
-                    Err(e) => {
-                        // TODO: handle error
-                        error!("[{}] Failed to list 'target group': {}", handler_id, e);
-                        Vec::new()
-                    }
-                }
-            }
-        };
-        let items = match tree::build_tree(
-            &graph,
-            selector_items.iter().filter(|v| v.is_group).collect(),
-        ) {
-            Ok(i) => i,
-            Err(e) => {
-                // TODO: handle error
-                error!("[{}] Failed to build tree: {}", handler_id, e);
-                Vec::new()
-            }
-        };
-        let mut state = TreeState::default();
-        for i in &items {
-            state.open(vec![i.identifier().clone()]);
-        }
-
+            };
         let longest_item_lens = table_object_group_len_calculator(&selector_items);
         Self {
             state,
@@ -117,10 +84,67 @@ where
             handler_id,
             admin_id,
             is_editing: false,
-            message: None,
-            save_error: None,
+            is_deleting: false,
+            win_size: (0, 0),
+            message,
             help_text: HELP_TEXT,
         }
+    }
+
+    fn build_tree(
+        handler_id: Uuid,
+        backend: &Arc<B>,
+        t_handle: &Handle,
+        group_type: GroupType,
+    ) -> Result<BuildTreeResult, Error>
+    where
+        B: 'static + crate::server::HandlerBackend + Send + Sync,
+    {
+        let graph = t_handle.block_on(backend.get_graph(group_type));
+        let selector_items = match group_type {
+            GroupType::Subject => {
+                match t_handle.block_on(backend.db_repository().list_user_group()) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        error!("[{}] Failed to list 'target group': {}", handler_id, e);
+                        return Err(e);
+                    }
+                }
+            }
+            GroupType::Object => {
+                match t_handle.block_on(backend.db_repository().list_target_group()) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        error!("[{}] Failed to list 'target group': {}", handler_id, e);
+                        return Err(e);
+                    }
+                }
+            }
+            GroupType::Action => {
+                match t_handle.block_on(backend.db_repository().list_action_group()) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        error!("[{}] Failed to list 'target group': {}", handler_id, e);
+                        return Err(e);
+                    }
+                }
+            }
+        };
+        let items = match tree::build_tree(
+            &graph,
+            selector_items.iter().filter(|v| v.is_group).collect(),
+        ) {
+            Ok(i) => i,
+            Err(e) => {
+                error!("[{}] Failed to build tree: {}", handler_id, e);
+                return Err(Error::IO(e));
+            }
+        };
+        let mut state = TreeState::default();
+        for i in &items {
+            state.open(vec![i.identifier().clone()]);
+        }
+        Ok((state, items, selector_items))
     }
 
     pub fn handle_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) -> bool {
@@ -133,15 +157,21 @@ where
             }
             return false;
         }
-        if self.save_error.is_some() {
-            if key == KeyCode::Enter {
-                self.save_error = None;
-            }
-            return false;
-        }
 
         let ctrl_pressed = modifiers.contains(KeyModifiers::CONTROL);
 
+        if self.is_deleting {
+            match key {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.do_delete();
+                    self.is_deleting = false
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') => self.is_deleting = false,
+                _ => {
+                    return false;
+                }
+            }
+        }
         if self.is_editing {
             match key {
                 KeyCode::Esc | KeyCode::Char('q') => self.is_editing = false,
@@ -198,11 +228,17 @@ where
             KeyCode::End => {
                 let _ = self.state.select_last();
             }
+            KeyCode::Char('b') => {
+                self.page_up();
+            }
+            KeyCode::Char('f') => {
+                self.page_down();
+            }
             KeyCode::PageDown => {
-                let _ = self.state.scroll_down(3);
+                self.page_down();
             }
             KeyCode::PageUp => {
-                let _ = self.state.scroll_up(3);
+                self.page_up();
             }
             KeyCode::Char('a') => {
                 let iden = self.state.selected();
@@ -213,20 +249,128 @@ where
                     return false;
                 }
                 self.is_editing = true;
-                info!("{:?}", iden);
             }
             KeyCode::Char('d') => {
                 let iden = self.state.selected();
-                if iden.is_empty() {
-                    self.message = Some(widgets::Message::Error(vec![String::from(
-                        "Please select one group.",
-                    )]));
-                    return false;
+                match iden.len() {
+                    0 => {
+                        self.message = Some(widgets::Message::Error(vec![String::from(
+                            "Please select one group.",
+                        )]));
+                        return false;
+                    }
+                    1 => {
+                        let id = iden.first().unwrap().rid;
+                        let g_name = self
+                            .selector_items
+                            .iter()
+                            .find(|v| v.id == id)
+                            .map(|v| v.name.clone())
+                            .unwrap_or_else(|| {
+                                warn!(
+                                    "[{}] Couldn't find group name by ID: {}",
+                                    self.handler_id, id
+                                );
+                                "Unknown".to_string()
+                            });
+
+                        self.message = Some(widgets::Message::Error(vec![format!(
+                            "Please select one item in group: {}",
+                            g_name
+                        )]));
+                        return false;
+                    }
+                    _ => self.is_deleting = true,
                 }
             }
             _ => {}
         };
         false
+    }
+
+    fn page_down(&mut self) {
+        let height: usize = (self.win_size.1 - 2) as usize;
+        let viewable_len = self.state.flatten(&self.items).len();
+        let next_offset = self.state.get_offset() + height;
+        let scroll_len = if next_offset + height >= viewable_len {
+            viewable_len.saturating_sub(next_offset)
+        } else {
+            height
+        };
+        self.state.select_relative(|current| {
+            // When nothing is selected, fall back to start
+            current.map_or(0, |current| current.saturating_add(scroll_len))
+        });
+        let _ = self.state.scroll_down(scroll_len);
+    }
+
+    fn page_up(&mut self) {
+        let height: usize = (self.win_size.1 - 2) as usize;
+        self.state.select_relative(|current| {
+            // When nothing is selected, fall back to end
+            current.map_or(usize::MAX, |current| current.saturating_sub(height))
+        });
+        let _ = self.state.scroll_up(height);
+    }
+
+    fn refreash_data(&mut self) {
+        if let Err(e) = self.t_handle.block_on(self.backend.load_role_manager()) {
+            error!("[{}] Load role manager error: {}", self.handler_id, e);
+            self.message = Some(widgets::Message::Error(vec!["Internal error".into()]));
+        }
+        let (state, items, selector_items) = match RoleEditor::build_tree(
+            self.handler_id,
+            &self.backend,
+            &self.t_handle,
+            self.group_type,
+        ) {
+            Ok(res) => res,
+            Err(_) => {
+                self.message = Some(widgets::Message::Error(vec!["Internal error".into()]));
+                (TreeState::default(), Vec::new(), Vec::new())
+            }
+        };
+
+        self.state = state;
+        self.items = items;
+        self.selector_items = selector_items;
+    }
+
+    fn do_delete(&mut self) {
+        let iden_list = self.state.selected();
+        if iden_list.len() > 1 {
+            let group_iden = self.state.selected().first().unwrap();
+            let item_iden = self.state.selected().get(1).unwrap();
+            match self
+                .t_handle
+                .block_on(self.backend.db_repository().delete_casbin_rule_by_v0_v1(
+                    &self.group_type.to_string(),
+                    &item_iden.rid,
+                    &group_iden.rid,
+                )) {
+                Ok(res) => {
+                    if res {
+                        self.message = Some(widgets::Message::Success(vec![
+                            "Deleted successfully".into(),
+                        ]));
+                        self.refreash_data();
+                    } else {
+                        warn!(
+                            "[{}] Delete casbin_rule not effect, ptype={}, v0={}, v1={}",
+                            self.handler_id, self.group_type, item_iden.rid, group_iden.rid
+                        );
+                        self.message = Some(widgets::Message::Error(vec!["Internal error".into()]));
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        "[{}] Failed to delete casbin_rule, ptype={}, v0={}, v1={}, error: {}",
+                        self.handler_id, self.group_type, item_iden.rid, group_iden.rid, e
+                    );
+                    self.message = Some(widgets::Message::Error(vec!["Internal error".into()]));
+                }
+            }
+        }
     }
 
     fn insert_group(&mut self) {
@@ -280,6 +424,7 @@ where
                             "{}: {} added in {}",
                             t_type, obj.name, g_name
                         )]));
+                        self.refreash_data();
                     }
                     Err(ref err) => {
                         let msg = match err {
@@ -302,6 +447,7 @@ where
     }
 
     pub fn draw(&mut self, area: Rect, buf: &mut Buffer) {
+        self.win_size = (area.width, area.height);
         let widget = Tree::new(&self.items)
             .expect("all item identifiers must be unique")
             .block(
@@ -309,6 +455,7 @@ where
                     .border_type(BorderType::Double)
                     .border_style(Style::new().fg(self.editor_colors.border_color)),
             )
+            .experimental_scrollbar(Some(Scrollbar::new(ScrollbarOrientation::VerticalRight)))
             .highlight_style(
                 Style::new()
                     .add_modifier(Modifier::REVERSED)
@@ -330,11 +477,36 @@ where
         if self.is_editing {
             self.draw_popup(popup_area, buf);
         }
+        if self.is_deleting {
+            self.draw_delete(popup_area, buf);
+        }
         if let Some(ref msg) = self.message {
             widgets::render_message_popup(popup_area, buf, msg);
         }
     }
 
+    fn draw_delete(&mut self, area: Rect, buf: &mut Buffer) {
+        let iden_list = self.state.selected();
+        if iden_list.len() > 1 {
+            let group_iden = self.state.selected().first().unwrap();
+            let item_iden = self.state.selected().get(1).unwrap();
+            let mut g_name = String::from("Unknown");
+            let mut i_name = g_name.clone();
+            for i in self.selector_items.iter() {
+                if i.id == group_iden.rid {
+                    g_name = i.name.clone();
+                }
+                if i.id == item_iden.rid {
+                    i_name = i.name.clone();
+                }
+            }
+            widgets::render_confirm_dialog(
+                area,
+                buf,
+                &[format!("Delete {} in group: {}?", i_name, g_name)],
+            );
+        }
+    }
     fn draw_popup(&mut self, area: Rect, buf: &mut Buffer) {
         let iden = match self.state.selected().first() {
             Some(i) => i,
@@ -355,7 +527,7 @@ where
                 );
                 "Unknown".to_string()
             });
-        let title = format!("Add in Group: {}", g_name);
+        let title = format!("Add to Group: {}", g_name);
         let popup = Block::bordered()
             .title(title)
             .title_style(Style::new().fg(self.editor_colors.title_color))
