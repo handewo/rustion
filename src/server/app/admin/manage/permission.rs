@@ -239,7 +239,7 @@ impl PermissionEditor {
                                 let idx = self.action_table.state.selected().unwrap();
                                 let t = self.action_items.get(idx).unwrap();
                                 self.perm.action_group = t.name.clone();
-                                self.perm.rule.v2 = Some(t.id);
+                                self.perm.rule.v2 = t.id;
                             }
                             InputField::ExtendPolicy => {
                                 unreachable!()

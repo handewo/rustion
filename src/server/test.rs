@@ -306,7 +306,7 @@ mod tests {
             .find(|v| v.id.to_string() == "749bed7e-67a5-4749-9371-ec7df959438e")
             .unwrap()
             .clone();
-        r.v2 = Some(exec_uuid);
+        r.v2 = exec_uuid;
         r = db.repository().update_casbin_rule(&r).await.unwrap();
         assert!(!server
             .enforce(
@@ -841,7 +841,7 @@ mod tests {
             "p".to_string(),
             admin.id,
             obj_login,
-            Some(all_req_uuid),
+            all_req_uuid,
             String::new(),
             String::new(),
             String::new(),

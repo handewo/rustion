@@ -14,7 +14,7 @@ pub struct CasbinRule {
     pub ptype: String,
     pub v0: Uuid,         // Subject UUID
     pub v1: Uuid,         // Object UUID
-    pub v2: Option<Uuid>, // Action UUID (optional for group rules)
+    pub v2: Uuid,         // Action UUID
     pub v3: String,       // Extended policy data
     pub v4: String,       // Extended policy data
     pub v5: String,       // Extended policy data
@@ -28,7 +28,7 @@ impl CasbinRule {
         ptype: String,
         v0: Uuid,
         v1: Uuid,
-        v2: Option<Uuid>,
+        v2: Uuid,
         v3: String,
         v4: String,
         v5: String,
@@ -148,7 +148,7 @@ impl PermissionPolicy {
                 String::new(),
                 Uuid::default(),
                 Uuid::default(),
-                None,
+                Uuid::default(),
                 String::new(),
                 String::new(),
                 String::new(),

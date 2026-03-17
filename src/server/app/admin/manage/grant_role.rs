@@ -152,7 +152,7 @@ where
                 "g1".to_string(),
                 t.rid,
                 self.selected_user_id,
-                None,
+                Uuid::default(),
                 String::new(),
                 String::new(),
                 String::new(),

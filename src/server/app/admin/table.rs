@@ -446,7 +446,7 @@ impl FieldsToArray for CasbinRule {
                     self.ptype.clone(),
                     self.v0.to_string(),
                     self.v1.to_string(),
-                    self.v2.map(|u| u.to_string()).unwrap_or_default(),
+                    self.v2.to_string(),
                     self.v3.clone(),
                     self.v4.clone(),
                     self.v5.clone(),

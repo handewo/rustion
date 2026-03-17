@@ -10,6 +10,8 @@ import uuid
 
 DB_FILE = "rustion.db"
 
+NIL_UUID = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
 
 # ------------------------------------------------------------------
 # 2.  Helpers
@@ -193,7 +195,7 @@ def generate():
                 "ptype": "g2",
                 "v0": t["id"],
                 "v1": g,
-                "v2": None,
+                "v2": NIL_UUID,
                 "v3": "",
                 "v4": "",
                 "v5": "",
@@ -208,7 +210,7 @@ def generate():
             "ptype": "g1",
             "v0": login_group,
             "v1": u["id"],
-            "v2": None,
+            "v2": NIL_UUID,
             "v3": "",
             "v4": "",
             "v5": "",

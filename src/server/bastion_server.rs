@@ -578,27 +578,25 @@ impl super::HandlerBackend for BastionServer {
                     continue;
                 }
                 // match act
-                if let Some(policy_act) = pol.v2 {
-                    if policy_act == act
-                        || self.role_manager.read().await.match_role(
-                            policy_act,
-                            act,
-                            casbin::GroupType::Action,
-                        )
-                    {
-                        // match ext
-                        if casbin::verify_extend_policy(&ext, &pol.v3)? {
-                            trace!("Accept sub: {}, policy: {:?}", sub, pol);
-                            return Ok(true);
-                        }
-                    } else {
-                        trace!(
-                            "Reject by action, sub: {}, act: {}, policy: {:?}",
-                            sub,
-                            act,
-                            pol
-                        );
+                if pol.v2 == act
+                    || self.role_manager.read().await.match_role(
+                        pol.v2,
+                        act,
+                        casbin::GroupType::Action,
+                    )
+                {
+                    // match ext
+                    if casbin::verify_extend_policy(&ext, &pol.v3)? {
+                        trace!("Accept sub: {}, policy: {:?}", sub, pol);
+                        return Ok(true);
                     }
+                } else {
+                    trace!(
+                        "Reject by action, sub: {}, act: {}, policy: {:?}",
+                        sub,
+                        act,
+                        pol
+                    );
                 }
             } else {
                 trace!(

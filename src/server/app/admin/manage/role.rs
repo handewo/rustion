@@ -258,7 +258,7 @@ where
                     "g2".into(),
                     obj.id,
                     iden.rid,
-                    None,
+                    Uuid::default(),
                     String::new(),
                     String::new(),
                     String::new(),

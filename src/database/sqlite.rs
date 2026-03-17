@@ -119,7 +119,7 @@ impl SqliteRepository {
                 ptype VARCHAR(12) NOT NULL,
                 v0 BLOB NOT NULL,
                 v1 BLOB NOT NULL,
-                v2 BLOB,
+                v2 BLOB NOT NULL,
                 v3 VARCHAR(256) NOT NULL DEFAULT '',
                 v4 VARCHAR(256) NOT NULL DEFAULT '',
                 v5 VARCHAR(256) NOT NULL DEFAULT '',
