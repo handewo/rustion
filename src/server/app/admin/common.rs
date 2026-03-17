@@ -32,3 +32,8 @@ pub const MANAGE_LIST: [&str; 7] = [
     MANAGE_CASBIN_NAMES,
     MANAGE_ROLE,
 ];
+
+pub const MAX_POPUP_WINDOW_COL: u16 = 60;
+pub const MAX_POPUP_WINDOW_ROW: u16 = 40;
+pub const MIN_WINDOW_COL: u16 = 20;
+pub const MIN_WINDOW_ROW: u16 = 15;

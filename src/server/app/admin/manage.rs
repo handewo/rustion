@@ -4,6 +4,7 @@ use super::widgets::{centered_area, render_confirm_dialog, render_message_popup,
 use crate::database::models::*;
 use crate::database::Uuid;
 use crate::error::Error;
+use crate::server::casbin::GroupType;
 use crate::server::HandlerLog;
 use ::log::{error, info, warn};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent};
@@ -41,11 +42,6 @@ const USER_HELP_TEXT: [&str; 2] = [
     "(a) add | (e) edit | (d) delete | (r) grant role | (Esc) quit | (↑↓←→) move around",
     "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
 ];
-
-pub const MAX_POPUP_WINDOW_COL: u16 = 60;
-pub const MAX_POPUP_WINDOW_ROW: u16 = 40;
-const MIN_WINDOW_COL: u16 = 20;
-const MIN_WINDOW_ROW: u16 = 15;
 
 pub(super) fn manage<B, W: Write>(
     tty: NoTtyEvent,
@@ -1054,6 +1050,7 @@ where
                     self.t_handle.clone(),
                     self.handler_id,
                     self.admin_id,
+                    GroupType::Object,
                 )));
             }
             SelectedTab::CasbinNames => {

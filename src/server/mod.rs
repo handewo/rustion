@@ -14,7 +14,7 @@ use crate::database::models::{Target, TargetSecretName, User};
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
 use crate::error::Error;
-use crate::server::casbin::RoleType;
+use crate::server::casbin::GroupType;
 use futures::future::BoxFuture;
 use petgraph::stable_graph::StableDiGraph;
 use russh::client as ru_client;
@@ -126,8 +126,8 @@ pub(super) trait HandlerBackend: Send + Clone {
     fn set_password(&self, user: &mut User, password: &str) -> Result<(), Error>;
     fn load_role_manager(&self) -> impl Future<Output = Result<(), Error>> + Send;
 
-    fn get_role_graph(
+    fn get_graph(
         &self,
-        rt: RoleType,
+        rt: GroupType,
     ) -> impl Future<Output = StableDiGraph<casbin::RuleGroup, ()>> + Send;
 }

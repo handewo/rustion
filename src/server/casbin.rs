@@ -4,6 +4,7 @@ use crate::server::error::{ExtendPolicyParseError, ServerError};
 use ipnetwork::IpNetwork;
 use log::trace;
 use std::fmt;
+use std::fmt::Display;
 use std::net::IpAddr;
 use {
     crate::database::models::{CasbinRule, CasbinRuleGroup},
@@ -25,10 +26,30 @@ pub struct RoleManage {
     g3: StableDiGraph<RuleGroup, ()>,
 }
 
-pub enum RoleType {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GroupType {
     Subject,
     Object,
     Action,
+}
+
+impl From<GroupType> for &str {
+    fn from(value: GroupType) -> Self {
+        match value {
+            GroupType::Subject => "g1",
+            GroupType::Object => "g2",
+            GroupType::Action => "g3",
+        }
+    }
+}
+impl Display for GroupType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Subject => write!(f, "g1"),
+            Self::Object => write!(f, "g2"),
+            Self::Action => write!(f, "g3"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -66,6 +87,19 @@ impl RuleGroup {
             RuleGroup::V1(v) => v.v,
         }
     }
+
+    pub fn get_type(&self) -> Type {
+        match self {
+            RuleGroup::V0(v) => v.label.get_type(),
+            RuleGroup::V1(v) => v.label.get_type(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Type {
+    Object,
+    Group,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -95,6 +129,13 @@ impl Label {
             (Some(v), None) => Ok(Self::Object(v.clone())),
             (None, Some(v)) => Ok(Self::Group(v.clone())),
             _ => Err(Error::Server(ServerError::InvalidRuleGroup)),
+        }
+    }
+
+    pub fn get_type(&self) -> Type {
+        match self {
+            Label::Object(_) => Type::Object,
+            Label::Group(_) => Type::Group,
         }
     }
 }
@@ -130,24 +171,24 @@ impl RoleManage {
         })
     }
 
-    pub fn get_group(&self, rt: RoleType) -> StableDiGraph<RuleGroup, ()> {
+    pub fn get_group(&self, rt: GroupType) -> StableDiGraph<RuleGroup, ()> {
         match rt {
-            RoleType::Subject => self.g1.clone(),
-            RoleType::Object => self.g2.clone(),
-            RoleType::Action => self.g3.clone(),
+            GroupType::Subject => self.g1.clone(),
+            GroupType::Object => self.g2.clone(),
+            GroupType::Action => self.g3.clone(),
         }
     }
 
     pub fn match_sub(&self, policies: Vec<CasbinRule>, sub: Uuid) -> Vec<CasbinRule> {
         policies
             .into_iter()
-            .filter(|p| p.v0 == sub || self.match_role(sub, p.v0, RoleType::Subject))
+            .filter(|p| p.v0 == sub || self.match_role(sub, p.v0, GroupType::Subject))
             .collect()
     }
 
-    pub fn fetch_role_from_start(&self, start: Uuid, rt: RoleType) -> Vec<Uuid> {
+    pub fn fetch_role_from_start(&self, start: Uuid, rt: GroupType) -> Vec<Uuid> {
         match rt {
-            RoleType::Subject => {
+            GroupType::Subject => {
                 let start = if let Some(n) = self.h1.get(&start) {
                     n
                 } else {
@@ -163,7 +204,7 @@ impl RoleManage {
                     })
                     .collect::<Vec<_>>()
             }
-            RoleType::Object => {
+            GroupType::Object => {
                 let start = if let Some(n) = self.h2.get(&start) {
                     n
                 } else {
@@ -179,7 +220,7 @@ impl RoleManage {
                     })
                     .collect::<Vec<_>>()
             }
-            RoleType::Action => {
+            GroupType::Action => {
                 let start = if let Some(n) = self.h3.get(&start) {
                     n
                 } else {
@@ -198,9 +239,9 @@ impl RoleManage {
         }
     }
 
-    pub fn match_role(&self, start: Uuid, req: Uuid, rt: RoleType) -> bool {
+    pub fn match_role(&self, start: Uuid, req: Uuid, rt: GroupType) -> bool {
         match rt {
-            RoleType::Subject => {
+            GroupType::Subject => {
                 let start = if let Some(n) = self.h1.get(&start) {
                     n
                 } else {
@@ -215,7 +256,7 @@ impl RoleManage {
                     .iter(&self.g1)
                     .any(|n| &n == node)
             }
-            RoleType::Object => {
+            GroupType::Object => {
                 let start = if let Some(n) = self.h2.get(&start) {
                     n
                 } else {
@@ -230,7 +271,7 @@ impl RoleManage {
                     .iter(&self.g2)
                     .any(|n| &n == node)
             }
-            RoleType::Action => {
+            GroupType::Action => {
                 let start = if let Some(n) = self.h3.get(&start) {
                     n
                 } else {

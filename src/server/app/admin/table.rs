@@ -8,6 +8,7 @@ use ratatui::widgets::{
     Table, TableState,
 };
 use style::palette::tailwind;
+use unicode_width::UnicodeWidthStr;
 
 pub struct Colors {
     pub buffer_bg: Color,
@@ -474,6 +475,54 @@ impl FieldsToArray for Log {
             }
             DisplayMode::Manage => {
                 todo!()
+            }
+        }
+    }
+}
+
+impl TableData for Vec<ObjectGroup> {
+    fn header(&self) -> Vec<&str> {
+        vec!["Object", "Is Group"]
+    }
+
+    fn as_vec(&self) -> Vec<&dyn FieldsToArray> {
+        self.iter()
+            .map(|v| v as &dyn FieldsToArray)
+            .collect::<Vec<_>>()
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+}
+
+pub fn table_object_group_len_calculator(data: &[ObjectGroup]) -> Vec<Constraint> {
+    let len = data
+        .iter()
+        .map(|v| v.name.as_str())
+        .map(UnicodeWidthStr::width)
+        .max()
+        .unwrap_or(0)
+        .max(6);
+
+    vec![Constraint::Length(len as u16), Constraint::Length(8)]
+}
+
+impl FieldsToArray for ObjectGroup {
+    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+        match mode {
+            DisplayMode::Full => {
+                todo!()
+            }
+            DisplayMode::Manage => {
+                vec![
+                    self.name.clone(),
+                    if self.is_group {
+                        "Y".to_string()
+                    } else {
+                        "N".to_string()
+                    },
+                ]
             }
         }
     }

@@ -1,4 +1,4 @@
-use super::super::table::{AdminTable, DisplayMode, FieldsToArray, TableData};
+use super::super::table::{table_object_group_len_calculator, AdminTable, DisplayMode};
 use crate::database::error::DatabaseError;
 use crate::database::models::{ObjectGroup, PermissionPolicy};
 use crate::error::Error;
@@ -15,7 +15,6 @@ use ratatui::{
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use unicode_width::UnicodeWidthStr;
 
 pub const HELP_TABLE: [&str; 2] = [
     "(Space/Enter) select",
@@ -104,9 +103,9 @@ impl PermissionEditor {
             }
         };
 
-        let longest_user_lens = table_len_calculator(&user_items);
-        let longest_target_lens = table_len_calculator(&target_items);
-        let longest_action_lens = table_len_calculator(&action_items);
+        let longest_user_lens = table_object_group_len_calculator(&user_items);
+        let longest_target_lens = table_object_group_len_calculator(&target_items);
+        let longest_action_lens = table_object_group_len_calculator(&action_items);
 
         let extend_policy_text = SingleLineText::new(Some(perm.rule.v3.clone()));
         Self {
@@ -496,53 +495,5 @@ impl PermissionEditor {
 impl Widget for &mut PermissionEditor {
     fn render(self, area: Rect, buf: &mut Buffer) {
         self.render_ui(area, buf);
-    }
-}
-
-impl TableData for Vec<ObjectGroup> {
-    fn header(&self) -> Vec<&str> {
-        vec!["Object", "Is Group"]
-    }
-
-    fn as_vec(&self) -> Vec<&dyn FieldsToArray> {
-        self.iter()
-            .map(|v| v as &dyn FieldsToArray)
-            .collect::<Vec<_>>()
-    }
-
-    fn len(&self) -> usize {
-        self.len()
-    }
-}
-
-fn table_len_calculator(data: &[ObjectGroup]) -> Vec<Constraint> {
-    let len = data
-        .iter()
-        .map(|v| v.name.as_str())
-        .map(UnicodeWidthStr::width)
-        .max()
-        .unwrap_or(0)
-        .max(6);
-
-    vec![Constraint::Length(len as u16), Constraint::Length(8)]
-}
-
-impl FieldsToArray for ObjectGroup {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
-        match mode {
-            DisplayMode::Full => {
-                todo!()
-            }
-            DisplayMode::Manage => {
-                vec![
-                    self.name.clone(),
-                    if self.is_group {
-                        "Y".to_string()
-                    } else {
-                        "N".to_string()
-                    },
-                ]
-            }
-        }
     }
 }

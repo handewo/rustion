@@ -64,10 +64,11 @@ impl BastionServer {
             .decode(b64_token)
             .map_err(|e| Error::Server(ServerError::SecretTokenDecode { source: e }))?;
 
-        let token = aes_gcm::Aes256Gcm::new_from_slice(&plain_token)
-            .map_err(|e| Error::Server(ServerError::EncryptionKeyError {
+        let token = aes_gcm::Aes256Gcm::new_from_slice(&plain_token).map_err(|e| {
+            Error::Server(ServerError::EncryptionKeyError {
                 reason: e.to_string(),
-            }))?;
+            })
+        })?;
 
         // Initialize database service
         let database = DatabaseService::new(&config.database).await?;
@@ -138,57 +139,71 @@ impl BastionServer {
                 .repository()
                 .get_casbin_name_by_name(OBJ_LOGIN)
                 .await?
-                .ok_or_else(|| Error::Server(ServerError::InternalObjectNotFound {
-                    name: OBJ_LOGIN.to_string(),
-                }))?
+                .ok_or_else(|| {
+                    Error::Server(ServerError::InternalObjectNotFound {
+                        name: OBJ_LOGIN.to_string(),
+                    })
+                })?
                 .id;
             let obj_admin = database
                 .repository()
                 .get_casbin_name_by_name(OBJ_ADMIN)
                 .await?
-                .ok_or_else(|| Error::Server(ServerError::InternalObjectNotFound {
-                    name: OBJ_ADMIN.to_string(),
-                }))?
+                .ok_or_else(|| {
+                    Error::Server(ServerError::InternalObjectNotFound {
+                        name: OBJ_ADMIN.to_string(),
+                    })
+                })?
                 .id;
             let act_shell = database
                 .repository()
                 .get_casbin_name_by_name(ACT_SHELL)
                 .await?
-                .ok_or_else(|| Error::Server(ServerError::ActionNotFound {
-                    name: ACT_SHELL.to_string(),
-                }))?
+                .ok_or_else(|| {
+                    Error::Server(ServerError::ActionNotFound {
+                        name: ACT_SHELL.to_string(),
+                    })
+                })?
                 .id;
             let act_pty = database
                 .repository()
                 .get_casbin_name_by_name(ACT_PTY)
                 .await?
-                .ok_or_else(|| Error::Server(ServerError::ActionNotFound {
-                    name: ACT_PTY.to_string(),
-                }))?
+                .ok_or_else(|| {
+                    Error::Server(ServerError::ActionNotFound {
+                        name: ACT_PTY.to_string(),
+                    })
+                })?
                 .id;
             let act_exec = database
                 .repository()
                 .get_casbin_name_by_name(ACT_EXEC)
                 .await?
-                .ok_or_else(|| Error::Server(ServerError::ActionNotFound {
-                    name: ACT_EXEC.to_string(),
-                }))?
+                .ok_or_else(|| {
+                    Error::Server(ServerError::ActionNotFound {
+                        name: ACT_EXEC.to_string(),
+                    })
+                })?
                 .id;
             let act_login = database
                 .repository()
                 .get_casbin_name_by_name(ACT_LOGIN)
                 .await?
-                .ok_or_else(|| Error::Server(ServerError::ActionNotFound {
-                    name: ACT_LOGIN.to_string(),
-                }))?
+                .ok_or_else(|| {
+                    Error::Server(ServerError::ActionNotFound {
+                        name: ACT_LOGIN.to_string(),
+                    })
+                })?
                 .id;
             let act_direct_tcpip = database
                 .repository()
                 .get_casbin_name_by_name(ACT_DIRECT_TCPIP)
                 .await?
-                .ok_or_else(|| Error::Server(ServerError::ActionNotFound {
-                    name: ACT_DIRECT_TCPIP.to_string(),
-                }))?
+                .ok_or_else(|| {
+                    Error::Server(ServerError::ActionNotFound {
+                        name: ACT_DIRECT_TCPIP.to_string(),
+                    })
+                })?
                 .id;
 
             InternalUuids::init(InternalUuids {
@@ -344,7 +359,7 @@ impl super::HandlerBackend for BastionServer {
         for pol in allowed_policies {
             // Get all role IDs from object group
             let role_manager = self.role_manager.read().await;
-            let role_ids = role_manager.fetch_role_from_start(pol.v1, casbin::RoleType::Object);
+            let role_ids = role_manager.fetch_role_from_start(pol.v1, casbin::GroupType::Object);
             drop(role_manager); // Release the lock before awaiting database
             let role_ids_ref: Vec<&Uuid> = role_ids.iter().collect();
 
@@ -551,7 +566,7 @@ impl super::HandlerBackend for BastionServer {
                     .role_manager
                     .read()
                     .await
-                    .match_role(pol.v1, obj, casbin::RoleType::Object)
+                    .match_role(pol.v1, obj, casbin::GroupType::Object)
             {
                 if !self.database.repository().check_object_active(&obj).await? {
                     trace!(
@@ -568,7 +583,7 @@ impl super::HandlerBackend for BastionServer {
                         || self.role_manager.read().await.match_role(
                             policy_act,
                             act,
-                            casbin::RoleType::Action,
+                            casbin::GroupType::Action,
                         )
                     {
                         // match ext
@@ -622,9 +637,11 @@ impl super::HandlerBackend for BastionServer {
         let ciphertext = self
             .secret_key
             .encrypt(nonce, text.as_bytes())
-            .map_err(|e| Error::Server(ServerError::EncryptionFailed {
-                reason: e.to_string(),
-            }))?;
+            .map_err(|e| {
+                Error::Server(ServerError::EncryptionFailed {
+                    reason: e.to_string(),
+                })
+            })?;
 
         let mut blob = Vec::with_capacity(nonce_bytes.len() + ciphertext.len());
         blob.extend_from_slice(&nonce_bytes);
@@ -633,7 +650,7 @@ impl super::HandlerBackend for BastionServer {
         Ok(general_purpose::STANDARD.encode(blob))
     }
 
-    async fn get_role_graph(&self, rt: casbin::RoleType) -> StableDiGraph<casbin::RuleGroup, ()> {
+    async fn get_graph(&self, rt: casbin::GroupType) -> StableDiGraph<casbin::RuleGroup, ()> {
         self.role_manager.read().await.get_group(rt)
     }
 }

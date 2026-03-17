@@ -1,4 +1,4 @@
-use super::manage::{MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW};
+use super::common::{MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW};
 use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
