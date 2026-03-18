@@ -1947,7 +1947,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96d9e0d6a8bf886abccc1cbcac7d74f9000ae5882aedc4a9042188bbc9cd4487"
 dependencies = [
  "hashbrown 0.15.4",
- "thiserror 2.0.12",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2050,7 +2050,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -2456,7 +2456,7 @@ dependencies = [
 [[package]]
 name = "pageant"
 version = "0.2.0"
-source = "git+https://github.com/handewo/russh.git#4892943946a44336ab707a38dbbf696cc4759a42"
+source = "git+https://github.com/handewo/russh.git#16d66ba966a738ce916a5f367d355bb138ffa849"
 dependencies = [
  "byteorder",
  "bytes",
@@ -2465,7 +2465,7 @@ dependencies = [
  "log",
  "rand 0.9.2",
  "sha2 0.10.9",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "windows 0.62.0",
  "windows-strings 0.5.1",
@@ -2558,7 +2558,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1db05f56d34358a8b1066f67cbb203ee3e7ed2ba674a6263a1d5ec6db2204323"
 dependencies = [
  "memchr",
- "thiserror 2.0.12",
+ "thiserror 2.0.18",
  "ucd-trie",
 ]
 
@@ -2954,7 +2954,7 @@ dependencies = [
  "kasuari",
  "lru",
  "strum 0.27.2",
- "thiserror 2.0.12",
+ "thiserror 2.0.18",
  "unicode-segmentation",
  "unicode-truncate",
  "unicode-width",
@@ -3042,7 +3042,7 @@ dependencies = [
  "strip-ansi-escapes",
  "strum 0.26.3",
  "strum_macros 0.26.4",
- "thiserror 2.0.12",
+ "thiserror 2.0.18",
  "unicase",
  "unicode-segmentation",
  "unicode-width",
@@ -3164,8 +3164,8 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.57.0"
-source = "git+https://github.com/handewo/russh.git#4892943946a44336ab707a38dbbf696cc4759a42"
+version = "0.57.1"
+source = "git+https://github.com/handewo/russh.git#16d66ba966a738ce916a5f367d355bb138ffa849"
 dependencies = [
  "aes",
  "aws-lc-rs",
@@ -3190,7 +3190,6 @@ dependencies = [
  "getrandom 0.2.16",
  "hex-literal",
  "hmac",
- "home",
  "inout",
  "internal-russh-forked-ssh-key",
  "libcrux-ml-kem",
@@ -3217,7 +3216,7 @@ dependencies = [
  "spki 0.7.3",
  "ssh-encoding",
  "subtle",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "typenum",
  "zeroize",
@@ -3226,7 +3225,7 @@ dependencies = [
 [[package]]
 name = "russh-cryptovec"
 version = "0.52.0"
-source = "git+https://github.com/handewo/russh.git#4892943946a44336ab707a38dbbf696cc4759a42"
+source = "git+https://github.com/handewo/russh.git#16d66ba966a738ce916a5f367d355bb138ffa849"
 dependencies = [
  "libc",
  "log",
@@ -3250,7 +3249,7 @@ dependencies = [
 [[package]]
 name = "russh-util"
 version = "0.52.0"
-source = "git+https://github.com/handewo/russh.git#4892943946a44336ab707a38dbbf696cc4759a42"
+source = "git+https://github.com/handewo/russh.git#16d66ba966a738ce916a5f367d355bb138ffa849"
 dependencies = [
  "chrono",
  "tokio",
@@ -3317,7 +3316,7 @@ dependencies = [
  "sha2 0.10.9",
  "sqlx",
  "tempfile",
- "thiserror 2.0.12",
+ "thiserror 2.0.18",
  "tokio",
  "toml",
  "tui-textarea",
@@ -3734,7 +3733,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "smallvec",
- "thiserror 2.0.12",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -3819,7 +3818,7 @@ dependencies = [
  "smallvec",
  "sqlx-core",
  "stringprep",
- "thiserror 2.0.12",
+ "thiserror 2.0.18",
  "tracing",
  "uuid",
  "whoami",
@@ -3858,7 +3857,7 @@ dependencies = [
  "smallvec",
  "sqlx-core",
  "stringprep",
- "thiserror 2.0.12",
+ "thiserror 2.0.18",
  "tracing",
  "uuid",
  "whoami",
@@ -3884,7 +3883,7 @@ dependencies = [
  "serde",
  "serde_urlencoded",
  "sqlx-core",
- "thiserror 2.0.12",
+ "thiserror 2.0.18",
  "tracing",
  "url",
  "uuid",
@@ -4129,11 +4128,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.12"
+version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "567b8a2dae586314f7be2a752ec7474332959c6460e02bde30d702a66d488708"
+checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
 dependencies = [
- "thiserror-impl 2.0.12",
+ "thiserror-impl 2.0.18",
 ]
 
 [[package]]
@@ -4149,9 +4148,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.12"
+version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f7cf42b4507d8ea322120659672cf1b9dbb93f8f2d4ecfd6e51350ff5b17a1d"
+checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
 dependencies = [
  "proc-macro2",
  "quote",

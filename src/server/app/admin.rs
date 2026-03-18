@@ -4,11 +4,11 @@ use crate::error::Error;
 use crate::server::casbin;
 use crate::server::HandlerLog;
 
+use crate::database::Uuid;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use crossterm::event::NoTtyEvent;
 use log::{debug, trace, warn};
 use tokio::sync::mpsc;
-use crate::database::Uuid;
 
 use russh::server as ru_server;
 use russh::{Channel, ChannelId, Pty};
@@ -208,7 +208,7 @@ impl Admin {
                 tokio::select! {
                     data = recv_from_shell.recv() => {
                         if let Some(d) = data {
-                            if handle_session.data(channel, d.into()).await.is_err() {
+                            if handle_session.data(channel, d).await.is_err() {
                                 warn!("[{}] Fail to send data to session from prompt",handler_id);
                                 break;
                             }

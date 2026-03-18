@@ -1,4 +1,5 @@
 use crate::database::models::{TargetSecretName, User};
+use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::app::error::AppError;
 use crate::server::app::{Application, ConnectTarget};
@@ -15,7 +16,6 @@ use russh::server as ru_server;
 use russh::{Channel, ChannelId};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use crate::database::Uuid;
 
 #[derive(Clone)]
 enum TerminalStatus {
@@ -111,10 +111,7 @@ impl TargetSelector {
         trace!(
             "[{}] list targets: {:?}",
             self.handler_id,
-            allowed_targets
-                .iter()
-                .map(|v| v.id)
-                .collect::<Vec<Uuid>>()
+            allowed_targets.iter().map(|v| v.id).collect::<Vec<Uuid>>()
         );
         if allowed_targets.is_empty() {
             return Ok(false);
@@ -198,7 +195,7 @@ impl TargetSelector {
             // Not sure whether, if `recv_from_prompt.recv()` get `None` and
             // we don’t call `handle.close()`, the client will hang.
             while let Some(d) = recv_from_prompt.recv().await {
-                if handle_prompt.data(channel, d.into()).await.is_err() {
+                if handle_prompt.data(channel, d).await.is_err() {
                     warn!("[{}] Fail to send data to session from prompt", handler_id);
                     break;
                 };

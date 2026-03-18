@@ -122,7 +122,7 @@ impl ChangePassword {
                     data = recv_from_prompt.recv() => {
                         match data {
                             Some(d) => {
-                                if handle_prompt.data(channel, d.into()).await.is_err() {
+                                if handle_prompt.data(channel, d).await.is_err() {
                                     warn!("[{}] Fail to send data to session from prompt",handler_id);
                                     break;
                                 };
@@ -148,12 +148,12 @@ impl ChangePassword {
                                             exit_status = 1;
                                             warn!("[{}] Password update failed for user '{}({})'", handler_id, username, user_id);
                                             handle_prompt.data(channel, "\r\npassword updated failed.\r\n"
-                                                .into()).await.is_err().then(|| warn!("[{}] Fail to send password prompt to session from prompt", handler_id));
+                                                ).await.is_err().then(|| warn!("[{}] Fail to send password prompt to session from prompt", handler_id));
 
                                         } else {
                                             debug!("[{}] Password updated successfully for user '{}({})'", handler_id, username, user_id);
                                             handle_prompt.data(channel, "\r\npassword updated successfully.\r\n"
-                                                .into()).await.is_err().then(|| warn!("[{}] Fail to send password prompt to session from prompt", handler_id));
+                                                ).await.is_err().then(|| warn!("[{}] Fail to send password prompt to session from prompt", handler_id));
                                             log(LOG_TYPE.into(),"password updated successfully".into()).await;
                                         }
                                         if handle_prompt.exit_status_request(channel,exit_status).await.is_err() {

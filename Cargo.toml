@@ -16,7 +16,7 @@ rand_core = { version = "0.10.0-rc-3" }
 rand = "0.9"
 russh = { git = "https://github.com/handewo/russh.git" }
 serde = { version = "1.0", features = ["derive"] }
-thiserror = "2.0.12"
+thiserror = "2.0.18"
 tokio = "1.46.0"
 toml = "0.9"
 # Database dependencies
