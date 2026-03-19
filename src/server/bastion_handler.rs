@@ -750,7 +750,7 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
             return true;
         }
 
-        info!(
+        debug!(
             "[{}] Authentication attempt {} for user '{}' from {:?}",
             self.id, self.auth_attempts_per_conn, login_name, self.client_ip
         );
