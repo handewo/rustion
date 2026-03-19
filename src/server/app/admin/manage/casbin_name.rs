@@ -250,10 +250,10 @@ impl CasbinNameEditor {
 
     fn render_ui(&mut self, area: Rect, buf: &mut Buffer) {
         let height = self.window_height();
-        let area = centered_area(area, area.width - 2, area.height - 2);
-        let editor_area = Rect::new(0, 0, area.width, height);
+        let inner_area = centered_area(area, area.width - 2, area.height - 2);
+        let editor_area = Rect::new(0, 0, inner_area.width, height);
         let mut editor_buf = Buffer::empty(editor_area);
-        let scrollbar_needed = height > area.height;
+        let scrollbar_needed = height > inner_area.height;
         let content_area = if scrollbar_needed {
             Rect {
                 width: editor_area.width - 1,
@@ -309,23 +309,23 @@ impl CasbinNameEditor {
             let visible_content = editor_buf
                 .content
                 .into_iter()
-                .skip(area.width as usize * self.scroll_offset * 3)
-                .take(area.area() as usize);
+                .skip(inner_area.width as usize * self.scroll_offset * 3)
+                .take(inner_area.area() as usize);
             for (i, cell) in visible_content.enumerate() {
-                let x = i as u16 % area.width;
-                let y = i as u16 / area.width;
-                buf[(area.x + x, area.y + y)] = cell;
+                let x = i as u16 % inner_area.width;
+                let y = i as u16 / inner_area.width;
+                buf[(inner_area.x + x, inner_area.y + y)] = cell;
             }
         } else {
             for (i, cell) in editor_buf.content.into_iter().enumerate() {
-                let x = i as u16 % area.width;
-                let y = i as u16 / area.width;
-                buf[(area.x + x, area.y + y)] = cell;
+                let x = i as u16 % inner_area.width;
+                let y = i as u16 / inner_area.width;
+                buf[(inner_area.x + x, inner_area.y + y)] = cell;
             }
         };
 
         if scrollbar_needed {
-            let area = area.intersection(buf.area);
+            let area = inner_area.intersection(buf.area);
             let mut state =
                 ScrollbarState::new(self.max_scroll_offset()).position(self.scroll_offset);
             Scrollbar::new(ScrollbarOrientation::VerticalRight).render(area, buf, &mut state);
