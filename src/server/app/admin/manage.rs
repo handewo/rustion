@@ -66,6 +66,9 @@ where
 struct EditorColors {
     border_color: Color,
     title_color: Color,
+    tab_font: Color,
+    tab_fg: Color,
+    tab_bg: Color,
 }
 
 impl EditorColors {
@@ -73,10 +76,14 @@ impl EditorColors {
         Self {
             border_color: color.c400,
             title_color: tailwind::SLATE.c200,
+            tab_font: tailwind::SLATE.c400,
+            tab_fg: tailwind::SLATE.c200,
+            tab_bg: color.c900,
         }
     }
 }
 
+#[derive(PartialEq)]
 enum Popup {
     None,
     Add,
@@ -328,7 +335,6 @@ where
 
     fn do_delete(&mut self, idx: usize) {
         self.popup = Popup::None;
-        self.clear_form();
         match self.selected_tab {
             SelectedTab::Users => {
                 if let Some(u) = self.items.get_user(idx) {
@@ -507,6 +513,9 @@ where
     fn clear_form(&mut self) {
         self.popup = Popup::None;
         self.editor = Editor::None;
+    }
+
+    fn restore_color(&mut self) {
         self.table.colors = Colors::new(&tailwind::BLUE);
     }
 
@@ -524,6 +533,9 @@ where
                     match key.code {
                         KeyCode::Enter => {
                             self.message = None;
+                            if self.popup == Popup::None {
+                                self.restore_color();
+                            }
                             continue;
                         }
                         _ => continue,
@@ -602,7 +614,8 @@ where
                         }
                         KeyCode::Char('n') | KeyCode::Char('N') => {
                             self.popup = Popup::None;
-                            self.clear_form()
+                            self.clear_form();
+                            self.restore_color();
                         }
                         _ => {}
                     },
@@ -693,6 +706,7 @@ where
 
                     self.clear_form();
                     self.refresh_data();
+                    self.restore_color();
                 }
             }
             Editor::Target(ref mut e) => {
@@ -745,6 +759,7 @@ where
 
                     self.clear_form();
                     self.refresh_data();
+                    self.restore_color();
                 }
             }
             Editor::Secret(ref mut e) => {
@@ -806,6 +821,7 @@ where
                     }
                     self.clear_form();
                     self.refresh_data();
+                    self.restore_color();
                 }
             }
             Editor::Permission(ref mut e) => {
@@ -857,12 +873,14 @@ where
                     }
                     self.clear_form();
                     self.refresh_data();
+                    self.restore_color();
                 }
             }
             Editor::GrantRole(ref mut e) => {
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
                     self.clear_form();
                     self.refresh_data();
+                    self.restore_color();
                 }
             }
             Editor::CasbinName(ref mut e) => {
@@ -927,6 +945,7 @@ where
                     }
                     self.clear_form();
                     self.refresh_data();
+                    self.restore_color();
                 }
             }
             Editor::Bind(_) => unreachable!(),
@@ -1079,16 +1098,16 @@ where
         let tabs = Tabs::new(
             MANAGE_LIST
                 .iter()
-                .map(|v| format!("{v:^17}").fg(self.table.colors.tab_font)),
+                .map(|v| format!("{v:^17}").fg(self.editor_colors.tab_font)),
         )
-        .style(self.table.colors.header_bg)
+        .style(self.editor_colors.tab_bg)
         .highlight_style(
             Style::default()
                 .magenta()
                 .on_black()
                 .bold()
-                .fg(self.table.colors.header_fg)
-                .bg(self.table.colors.header_bg),
+                .fg(self.editor_colors.tab_fg)
+                .bg(self.editor_colors.tab_bg),
         )
         .select(self.selected_tab as usize)
         .divider(" ")

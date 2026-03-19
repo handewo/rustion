@@ -37,8 +37,8 @@ where
     t_handle: Handle,
     handler_id: Uuid,
     admin_id: Uuid,
-    is_editing: bool,
-    is_deleting: bool,
+    pub is_editing: bool,
+    pub is_deleting: bool,
     win_size: (u16, u16),
     message: Option<widgets::Message>,
     pub help_text: [&'static str; 2],
@@ -447,22 +447,37 @@ where
     }
 
     pub fn draw(&mut self, area: Rect, buf: &mut Buffer) {
-        self.win_size = (area.width, area.height);
-        let widget = Tree::new(&self.items)
+        {
+            let mut block = Block::bordered()
+                .border_type(BorderType::Double)
+                .border_style(Style::new().fg(self.editor_colors.border_color));
+            if self.is_editing || self.is_deleting || self.message.is_some() {
+                block = block.border_style(Style::default());
+            }
+
+            use ratatui::widgets::Widget;
+            block.render(area, buf);
+        }
+        let inner_area = widgets::centered_area(area, area.width - 2, area.height - 2);
+        self.win_size = (inner_area.width, inner_area.height);
+        let mut widget = Tree::new(&self.items)
             .expect("all item identifiers must be unique")
-            .block(
-                Block::bordered()
-                    .border_type(BorderType::Double)
-                    .border_style(Style::new().fg(self.editor_colors.border_color)),
-            )
             .experimental_scrollbar(Some(Scrollbar::new(ScrollbarOrientation::VerticalRight)))
             .highlight_style(
                 Style::new()
                     .add_modifier(Modifier::REVERSED)
                     .fg(self.editor_colors.border_color),
             );
+
+        if self.is_editing || self.is_deleting || self.message.is_some() {
+            widget = widget.highlight_style(
+                Style::new()
+                    .add_modifier(Modifier::REVERSED)
+                    .fg(tailwind::GRAY.c400),
+            );
+        }
         use ratatui::widgets::StatefulWidget;
-        widget.render(area, buf, &mut self.state);
+        widget.render(inner_area, buf, &mut self.state);
 
         let popup_area = if area.width <= MAX_POPUP_WINDOW_COL {
             area
