@@ -18,11 +18,11 @@ use tokio::runtime::Handle;
 
 pub const HELP_TABLE: [&str; 2] = [
     "(Space/Enter) select",
-    "(+/-) zoom in/out | (PgUp/PgDn) page up/down",
+    "(↑↓) move around | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
 ];
 pub const HELP_EDITOR: [&str; 2] = [
     "(Enter/e) edit",
-    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
+    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
 ];
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum InputField {

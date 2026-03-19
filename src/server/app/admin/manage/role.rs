@@ -18,8 +18,13 @@ use tokio::runtime::Handle;
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 
 pub const HELP_TEXT: [&str; 2] = [
-    "(Space) toggle | (←→) switch window | (↑↓) select item",
-    "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
+    "(←→) collapse/expand | (a) add | (d) delete",
+    "(Tab) next tab | (Shift Tab) previous tab | (↑↓) move around | (PgUp/PgDn) page up/down",
+];
+
+pub const HELP_TABLE: [&str; 2] = [
+    "(Space/Enter) select and save",
+    "(↑↓) move around | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
 ];
 
 pub(super) struct RoleEditor<B>
@@ -174,7 +179,10 @@ where
         }
         if self.is_editing {
             match key {
-                KeyCode::Esc | KeyCode::Char('q') => self.is_editing = false,
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.is_editing = false;
+                    self.help_text = HELP_TEXT
+                }
                 KeyCode::Char('+') => {
                     self.selector_table.zoom_in();
                 }
@@ -201,6 +209,7 @@ where
                 }
                 KeyCode::Char(' ') | KeyCode::Enter => {
                     self.is_editing = false;
+                    self.help_text = HELP_TEXT;
 
                     self.insert_group()
                 }
@@ -248,6 +257,7 @@ where
                     )]));
                     return false;
                 }
+                self.help_text = HELP_TABLE;
                 self.is_editing = true;
             }
             KeyCode::Char('d') => {
@@ -567,14 +577,12 @@ where
 struct EditorColors {
     title_color: Color,
     border_color: Color,
-    focus: Color,
 }
 
 impl EditorColors {
     const fn new(color: &tailwind::Palette) -> Self {
         Self {
             border_color: color.c400,
-            focus: tailwind::SLATE.c200,
             title_color: tailwind::SLATE.c200,
         }
     }

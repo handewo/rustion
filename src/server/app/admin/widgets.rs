@@ -159,23 +159,23 @@ pub fn render_radio_buttons(
 
 pub const COMMON_HELP: [&str; 2] = [
     "(Enter) edit | (i) insert | (a) append | (d) clear",
-    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
+    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
 ];
 pub const RADIO_HELP: [&str; 2] = [
     "(Enter) edit",
-    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
+    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
 ];
 pub const RADIO_EDIT_HELP: [&str; 2] = [
     "(Enter) confirm | (Up/Down) select",
-    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
+    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
 ];
 pub const CHECKBOX_HELP: [&str; 2] = [
     "(Space) toggle",
-    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
+    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
 ];
 pub const MULTILINES_HELP: [&str; 2] = [
     "(Enter) activate | (d) clear all",
-    "(Ctrl+S) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
+    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
 ];
 pub const MULTILINES_EDIT_HELP: [&str; 2] = [
     "(Enter) edit | (i) insert | (a) append | (d) delete line | (o) newline",
