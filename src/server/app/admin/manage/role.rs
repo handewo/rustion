@@ -5,7 +5,7 @@ use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::casbin::GroupType;
 use crossterm::event::{KeyCode, KeyModifiers};
-use log::{error, warn};
+use log::{error, info, warn};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Rect},
@@ -360,6 +360,10 @@ where
                 )) {
                 Ok(res) => {
                     if res {
+                        info!(
+                            "[{}] Deleted casbin_rule successfully: ptype={}, v0={}, v1={}",
+                            self.handler_id, self.group_type, item_iden.rid, group_iden.rid
+                        );
                         self.message = Some(widgets::Message::Success(vec![
                             "Deleted successfully".into(),
                         ]));
@@ -430,6 +434,10 @@ where
                     .block_on(self.backend.db_repository().create_casbin_rule(&cr))
                 {
                     Ok(_) => {
+                        info!(
+                            "[{}] {} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
+                            self.handler_id, t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1
+                        );
                         self.message = Some(widgets::Message::Success(vec![format!(
                             "{}: {} added in {}",
                             t_type, obj.name, g_name
@@ -441,12 +449,22 @@ where
                             Error::Sqlx(sqlx::Error::Database(ref db_err))
                                 if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
                             {
+                                warn!(
+                                    "[{}] Duplicate entry: {} '{}' already exists in group '{}'",
+                                    self.handler_id, t_type, obj.name, g_name
+                                );
                                 format!(
                                     "{}: {} has already existed in {}",
                                     t_type, obj.name, g_name
                                 )
                             }
-                            _ => "Internal error".to_string(),
+                            _ => {
+                                error!(
+                                    "[{}] Failed to add {} '{}' to group '{}': {}",
+                                    self.handler_id, t_type, obj.name, g_name, err
+                                );
+                                "Internal error".to_string()
+                            }
                         };
                         self.message = Some(widgets::Message::Error(vec![msg]));
                     }

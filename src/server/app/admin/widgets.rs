@@ -407,7 +407,9 @@ impl Widget for &SingleLineText {
 }
 
 pub enum Message {
+    #[allow(dead_code)]
     Info(Vec<String>),
+    #[allow(dead_code)]
     Warning(Vec<String>),
     Error(Vec<String>),
     Success(Vec<String>),
