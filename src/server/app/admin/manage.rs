@@ -24,10 +24,10 @@ use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
 
 mod bind;
+mod casbin_group;
 mod casbin_name;
 mod grant_role;
 mod permission;
-mod role;
 mod secret;
 mod target;
 mod user;
@@ -1064,7 +1064,7 @@ where
                 );
             }
             SelectedTab::Role => {
-                self.editor = Editor::Role(Box::new(role::RoleEditor::new(
+                self.editor = Editor::Role(Box::new(casbin_group::RoleEditor::new(
                     self.backend.clone(),
                     self.t_handle.clone(),
                     self.handler_id,
@@ -1551,7 +1551,7 @@ where
     Secret(Box<secret::SecretEditor>),
     Bind(Box<bind::BindEditor<B>>),
     Permission(Box<permission::PermissionEditor>),
-    Role(Box<role::RoleEditor<B>>),
+    Role(Box<casbin_group::RoleEditor<B>>),
     GrantRole(Box<grant_role::GrantRoleEditor<B>>),
     CasbinName(Box<casbin_name::CasbinNameEditor>),
     None,
