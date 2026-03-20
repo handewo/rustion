@@ -75,11 +75,17 @@ fn default_max_user_attempts() -> u32 {
     100
 }
 
+fn default_server_id() -> String {
+    format!("SSH-2.0-rustion_{}", env!("CARGO_PKG_VERSION"))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub listen: ListenConfig,
     pub server_key: String,
     secret_key: Option<String>,
+    #[serde(default = "default_server_id")]
+    pub server_id: String,
     #[serde(default = "default_max_auth_attempts_per_conn")]
     pub max_auth_attempts_per_conn: u32,
     // Global ip attempts count
@@ -144,6 +150,7 @@ impl Config {
             listen: ListenConfig::String("0.0.0.0:2222".to_string()),
             server_key: "server_key.pem".to_string(),
             secret_key: None,
+            server_id: default_server_id(),
             max_auth_attempts_per_conn: default_max_auth_attempts_per_conn(),
             max_ip_attempts: default_max_ip_attempts(),
             max_user_attempts: default_max_user_attempts(),
@@ -267,6 +274,7 @@ impl std::fmt::Display for Config {
             f,
             "listen: {}\r
             server_key: {}\r
+            server_id: {}\r
             secret_key: {}...\r
             max_auth_attempts_per_conn: {}\r
             max_ip_attempts: {}\r
@@ -282,6 +290,7 @@ impl std::fmt::Display for Config {
             record_path: {}\r",
             self.listen,
             self.server_key,
+            self.server_id,
             self.secret_key
                 .as_ref()
                 .map_or("None", |v| v.as_str().split_at(10).0),
@@ -313,6 +322,7 @@ mod tests {
             listen: ListenConfig::String("localhost:2222".to_string()),
             server_key: "test.pem".to_string(),
             secret_key: None,
+            server_id: default_server_id(),
             max_auth_attempts_per_conn: 3,
             max_ip_attempts: 100,
             max_user_attempts: 100,
@@ -332,6 +342,7 @@ mod tests {
             listen: ListenConfig::String("*:2222".to_string()),
             server_key: "test.pem".to_string(),
             secret_key: None,
+            server_id: default_server_id(),
             max_auth_attempts_per_conn: 3,
             max_ip_attempts: 100,
             max_user_attempts: 100,
@@ -352,6 +363,7 @@ mod tests {
             listen: ListenConfig::String("2222".to_string()),
             server_key: "test.pem".to_string(),
             secret_key: None,
+            server_id: default_server_id(),
             max_auth_attempts_per_conn: 3,
             max_ip_attempts: 100,
             max_user_attempts: 100,
@@ -378,6 +390,7 @@ mod tests {
             listen: ListenConfig::String("invalid".to_string()),
             server_key: "test.pem".to_string(),
             secret_key: None,
+            server_id: default_server_id(),
             max_auth_attempts_per_conn: 3,
             max_ip_attempts: 100,
             max_user_attempts: 100,

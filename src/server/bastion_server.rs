@@ -265,6 +265,7 @@ impl BastionServer {
 
         let russh_config = RusshConfig {
             keys,
+            server_id: russh::SshId::Standard(self.config.server_id.clone().into()),
             inactivity_timeout: self.config.inactivity_timeout,
             ..Default::default()
         };
