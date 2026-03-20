@@ -4,6 +4,8 @@ use crate::database::models::{CasbinRule, ObjectGroup};
 use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::casbin::GroupType;
+use crate::server::HandlerLog;
+use super::LOG_TYPE;
 use crossterm::event::{KeyCode, KeyModifiers};
 use log::{error, info, warn};
 use ratatui::{
@@ -42,6 +44,7 @@ where
     t_handle: Handle,
     handler_id: Uuid,
     admin_id: Uuid,
+    log: HandlerLog,
     pub is_editing: bool,
     pub is_deleting: bool,
     win_size: (u16, u16),
@@ -65,6 +68,7 @@ where
         handler_id: Uuid,
         admin_id: Uuid,
         group_type: GroupType,
+        log: HandlerLog,
     ) -> Self {
         let mut message = None;
         let (state, items, selector_items) =
@@ -88,6 +92,7 @@ where
             t_handle,
             handler_id,
             admin_id,
+            log,
             is_editing: false,
             is_deleting: false,
             win_size: (0, 0),
@@ -360,6 +365,13 @@ where
                 )) {
                 Ok(res) => {
                     if res {
+                        self.t_handle.block_on((self.log)(
+                            LOG_TYPE.into(),
+                            format!(
+                                "Deleted {} '{}' from group '{}' (ptype={}, v0={}, v1={})",
+                                self.group_type, item_iden.rid, group_iden.rid, self.group_type, item_iden.rid, group_iden.rid
+                            ),
+                        ));
                         info!(
                             "[{}] Deleted casbin_rule successfully: ptype={}, v0={}, v1={}",
                             self.handler_id, self.group_type, item_iden.rid, group_iden.rid
@@ -434,6 +446,13 @@ where
                     .block_on(self.backend.db_repository().create_casbin_rule(&cr))
                 {
                     Ok(_) => {
+                        self.t_handle.block_on((self.log)(
+                            LOG_TYPE.into(),
+                            format!(
+                                "{} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
+                                t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1
+                            ),
+                        ));
                         info!(
                             "[{}] {} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
                             self.handler_id, t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1

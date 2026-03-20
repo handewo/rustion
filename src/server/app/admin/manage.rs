@@ -1070,6 +1070,7 @@ where
                     self.handler_id,
                     self.admin_id,
                     GroupType::Object,
+                    self.log.clone(),
                 )));
             }
             SelectedTab::CasbinNames => {
