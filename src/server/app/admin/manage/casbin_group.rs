@@ -1,11 +1,11 @@
 use super::super::table::{table_object_group_len_calculator, AdminTable, DisplayMode};
 use super::super::{common::*, tree, widgets};
+use super::LOG_TYPE;
 use crate::database::models::{CasbinRule, ObjectGroup};
 use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::casbin::GroupType;
 use crate::server::HandlerLog;
-use super::LOG_TYPE;
 use crossterm::event::{KeyCode, KeyModifiers};
 use log::{error, info, warn};
 use ratatui::{
@@ -29,7 +29,7 @@ pub const HELP_TABLE: [&str; 2] = [
     "(↑↓) move around | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
 ];
 
-pub(super) struct RoleEditor<B>
+pub(super) struct CasbinGroupEditor<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
@@ -58,7 +58,7 @@ type BuildTreeResult = (
     Vec<ObjectGroup>,
 );
 
-impl<B> RoleEditor<B>
+impl<B> CasbinGroupEditor<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
@@ -72,7 +72,7 @@ where
     ) -> Self {
         let mut message = None;
         let (state, items, selector_items) =
-            match RoleEditor::build_tree(handler_id, &backend, &t_handle, group_type) {
+            match CasbinGroupEditor::build_tree(handler_id, &backend, &t_handle, group_type) {
                 Ok(res) => res,
                 Err(_) => {
                     message = Some(widgets::Message::Error(vec!["Internal error".into()]));
@@ -116,7 +116,7 @@ where
                 match t_handle.block_on(backend.db_repository().list_user_group()) {
                     Ok(i) => i,
                     Err(e) => {
-                        error!("[{}] Failed to list 'target group': {}", handler_id, e);
+                        error!("[{}] Failed to list 'user role': {}", handler_id, e);
                         return Err(e);
                     }
                 }
@@ -134,7 +134,7 @@ where
                 match t_handle.block_on(backend.db_repository().list_action_group()) {
                     Ok(i) => i,
                     Err(e) => {
-                        error!("[{}] Failed to list 'target group': {}", handler_id, e);
+                        error!("[{}] Failed to list 'action group': {}", handler_id, e);
                         return Err(e);
                     }
                 }
@@ -333,7 +333,7 @@ where
             error!("[{}] Load role manager error: {}", self.handler_id, e);
             self.message = Some(widgets::Message::Error(vec!["Internal error".into()]));
         }
-        let (state, items, selector_items) = match RoleEditor::build_tree(
+        let (state, items, selector_items) = match CasbinGroupEditor::build_tree(
             self.handler_id,
             &self.backend,
             &self.t_handle,
@@ -369,7 +369,12 @@ where
                             LOG_TYPE.into(),
                             format!(
                                 "Deleted {} '{}' from group '{}' (ptype={}, v0={}, v1={})",
-                                self.group_type, item_iden.rid, group_iden.rid, self.group_type, item_iden.rid, group_iden.rid
+                                self.group_type,
+                                item_iden.rid,
+                                group_iden.rid,
+                                self.group_type,
+                                item_iden.rid,
+                                group_iden.rid
                             ),
                         ));
                         info!(

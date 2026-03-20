@@ -100,19 +100,23 @@ enum SelectedTab {
     Bind = 3,
     Permissions = 4,
     CasbinNames = 5,
-    Role = 6,
+    RoleHierarchy = 6,
+    TargetGroup = 7,
+    ActionGroup = 8,
 }
 
 impl fmt::Display for SelectedTab {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SelectedTab::Users => write!(f, "Users"),
-            SelectedTab::Targets => write!(f, "Targets"),
-            SelectedTab::Secrets => write!(f, "Secrets"),
-            SelectedTab::Bind => write!(f, "Bind"),
-            SelectedTab::Permissions => write!(f, "Permissions"),
-            SelectedTab::Role => write!(f, "Role"),
-            SelectedTab::CasbinNames => write!(f, "Groups"),
+            SelectedTab::Users => write!(f, "{}", MANAGE_USERS),
+            SelectedTab::Targets => write!(f, "{}", MANAGE_TARGETS),
+            SelectedTab::Secrets => write!(f, "{}", MANAGE_SECRETS),
+            SelectedTab::Bind => write!(f, "{}", MANAGE_BIND),
+            SelectedTab::Permissions => write!(f, "{}", MANAGE_PERMISSIONS),
+            SelectedTab::CasbinNames => write!(f, "{}", MANAGE_CASBIN_NAMES),
+            SelectedTab::RoleHierarchy => write!(f, "{}", MANAGE_ROLE_HIERARCHY),
+            SelectedTab::TargetGroup => write!(f, "{}", MANAGE_TARGET_GROUP),
+            SelectedTab::ActionGroup => write!(f, "{}", MANAGE_ACTION_GROUP),
         }
     }
 }
@@ -125,20 +129,24 @@ impl SelectedTab {
             SelectedTab::Secrets => SelectedTab::Bind,
             SelectedTab::Bind => SelectedTab::Permissions,
             SelectedTab::Permissions => SelectedTab::CasbinNames,
-            SelectedTab::CasbinNames => SelectedTab::Role,
-            SelectedTab::Role => SelectedTab::Users,
+            SelectedTab::CasbinNames => SelectedTab::RoleHierarchy,
+            SelectedTab::RoleHierarchy => SelectedTab::TargetGroup,
+            SelectedTab::TargetGroup => SelectedTab::ActionGroup,
+            SelectedTab::ActionGroup => SelectedTab::Users,
         }
     }
 
     fn previous(&self) -> Self {
         match self {
-            SelectedTab::Users => SelectedTab::Role,
+            SelectedTab::Users => SelectedTab::ActionGroup,
             SelectedTab::Targets => SelectedTab::Users,
             SelectedTab::Secrets => SelectedTab::Targets,
             SelectedTab::Bind => SelectedTab::Secrets,
             SelectedTab::Permissions => SelectedTab::Bind,
             SelectedTab::CasbinNames => SelectedTab::Permissions,
-            SelectedTab::Role => SelectedTab::CasbinNames,
+            SelectedTab::RoleHierarchy => SelectedTab::CasbinNames,
+            SelectedTab::TargetGroup => SelectedTab::RoleHierarchy,
+            SelectedTab::ActionGroup => SelectedTab::TargetGroup,
         }
     }
 }
@@ -243,7 +251,9 @@ where
                 )))
             }
             SelectedTab::Bind => unreachable!(),
-            SelectedTab::Role => unreachable!(),
+            SelectedTab::RoleHierarchy => unreachable!(),
+            SelectedTab::TargetGroup => unreachable!(),
+            SelectedTab::ActionGroup => unreachable!(),
         }
     }
 
@@ -327,7 +337,9 @@ where
                     Editor::CasbinName(Box::new(casbin_name::CasbinNameEditor::new(casbin_name)));
             }
             SelectedTab::Bind => unreachable!(),
-            SelectedTab::Role => unreachable!(),
+            SelectedTab::RoleHierarchy => unreachable!(),
+            SelectedTab::TargetGroup => unreachable!(),
+            SelectedTab::ActionGroup => unreachable!(),
         }
 
         true
@@ -472,7 +484,9 @@ where
                 }
             }
             SelectedTab::Bind => unreachable!(),
-            SelectedTab::Role => unreachable!(),
+            SelectedTab::RoleHierarchy => unreachable!(),
+            SelectedTab::TargetGroup => unreachable!(),
+            SelectedTab::ActionGroup => unreachable!(),
         }
     }
 
@@ -504,7 +518,9 @@ where
                 }
             }
             SelectedTab::Bind => unreachable!(),
-            SelectedTab::Role => unreachable!(),
+            SelectedTab::RoleHierarchy => unreachable!(),
+            SelectedTab::TargetGroup => unreachable!(),
+            SelectedTab::ActionGroup => unreachable!(),
         }
 
         false
@@ -550,7 +566,7 @@ where
                             continue;
                         }
                     }
-                    Editor::Role(ref mut e) => {
+                    Editor::CasbinGroup(ref mut e) => {
                         if e.handle_key_event(key.code, key.modifiers) {
                             self.editor = Editor::None;
                         } else {
@@ -638,7 +654,7 @@ where
                     Editor::GrantRole(_) => {}
                     Editor::Permission(_) => {}
                     Editor::Bind(_) => unreachable!(),
-                    Editor::Role(_) => unreachable!(),
+                    Editor::CasbinGroup(_) => unreachable!(),
                     Editor::None => {}
                 }
             }
@@ -949,7 +965,7 @@ where
                 }
             }
             Editor::Bind(_) => unreachable!(),
-            Editor::Role(_) => unreachable!(),
+            Editor::CasbinGroup(_) => unreachable!(),
             Editor::None => unreachable!(),
         }
         Ok(())
@@ -981,14 +997,32 @@ where
                     unreachable!()
                 }
             }
-            SelectedTab::Role => {
-                if let Editor::Role(ref mut e) = self.editor {
+            SelectedTab::RoleHierarchy => {
+                if let Editor::CasbinGroup(ref mut e) = self.editor {
                     e.draw(table_area, frame.buffer_mut());
                 } else {
                     unreachable!()
                 }
             }
-            _ => {
+            SelectedTab::TargetGroup => {
+                if let Editor::CasbinGroup(ref mut e) = self.editor {
+                    e.draw(table_area, frame.buffer_mut());
+                } else {
+                    unreachable!()
+                }
+            }
+            SelectedTab::ActionGroup => {
+                if let Editor::CasbinGroup(ref mut e) = self.editor {
+                    e.draw(table_area, frame.buffer_mut());
+                } else {
+                    unreachable!()
+                }
+            }
+            SelectedTab::Users
+            | SelectedTab::Targets
+            | SelectedTab::Secrets
+            | SelectedTab::Permissions
+            | SelectedTab::CasbinNames => {
                 self.table.render(
                     frame.buffer_mut(),
                     table_area,
@@ -1063,16 +1097,6 @@ where
                         .unwrap_or_default(),
                 );
             }
-            SelectedTab::Role => {
-                self.editor = Editor::Role(Box::new(casbin_group::RoleEditor::new(
-                    self.backend.clone(),
-                    self.t_handle.clone(),
-                    self.handler_id,
-                    self.admin_id,
-                    GroupType::Object,
-                    self.log.clone(),
-                )));
-            }
             SelectedTab::CasbinNames => {
                 self.items = TableData::CasbinNames(
                     self.t_handle
@@ -1083,6 +1107,36 @@ where
                         )
                         .unwrap_or_default(),
                 );
+            }
+            SelectedTab::RoleHierarchy => {
+                self.editor = Editor::CasbinGroup(Box::new(casbin_group::CasbinGroupEditor::new(
+                    self.backend.clone(),
+                    self.t_handle.clone(),
+                    self.handler_id,
+                    self.admin_id,
+                    GroupType::Subject,
+                    self.log.clone(),
+                )));
+            }
+            SelectedTab::TargetGroup => {
+                self.editor = Editor::CasbinGroup(Box::new(casbin_group::CasbinGroupEditor::new(
+                    self.backend.clone(),
+                    self.t_handle.clone(),
+                    self.handler_id,
+                    self.admin_id,
+                    GroupType::Object,
+                    self.log.clone(),
+                )));
+            }
+            SelectedTab::ActionGroup => {
+                self.editor = Editor::CasbinGroup(Box::new(casbin_group::CasbinGroupEditor::new(
+                    self.backend.clone(),
+                    self.t_handle.clone(),
+                    self.handler_id,
+                    self.admin_id,
+                    GroupType::Action,
+                    self.log.clone(),
+                )));
             }
         };
 
@@ -1145,11 +1199,11 @@ where
                 Editor::Permission(_) => {
                     Line::styled("Add New Permission", Style::default().bold())
                 }
+                Editor::CasbinName(_) => Line::styled("Add New Group", Style::default().bold()),
                 Editor::GrantRole(_) => unreachable!(),
                 Editor::Bind(_) => unreachable!(),
-                Editor::Role(_) => unreachable!(),
+                Editor::CasbinGroup(_) => unreachable!(),
                 Editor::None => unreachable!(),
-                Editor::CasbinName(_) => Line::styled("Add New Group", Style::default().bold()),
             },
             Popup::Edit => match self.editor {
                 Editor::User(_) => Line::styled("Edit User", Style::default().bold()),
@@ -1157,10 +1211,10 @@ where
                 Editor::Secret(_) => Line::styled("Edit Secret", Style::default().bold()),
                 Editor::Permission(_) => Line::styled("Edit Permission", Style::default().bold()),
                 Editor::GrantRole(_) => Line::styled("Grant Role", Style::default().bold()),
-                Editor::Bind(_) => unreachable!(),
-                Editor::Role(_) => unreachable!(),
-                Editor::None => unreachable!(),
                 Editor::CasbinName(_) => Line::styled("Edit Group", Style::default().bold()),
+                Editor::Bind(_) => unreachable!(),
+                Editor::CasbinGroup(_) => unreachable!(),
+                Editor::None => unreachable!(),
             },
             Popup::Delete(_) => {
                 match self.selected_tab {
@@ -1192,8 +1246,6 @@ where
                             &["Delete selected permission?".to_string()],
                         );
                     }
-                    SelectedTab::Bind => unreachable!(),
-                    SelectedTab::Role => unreachable!(),
                     SelectedTab::CasbinNames => {
                         render_confirm_dialog(
                             popup_area,
@@ -1201,6 +1253,10 @@ where
                             &["Delete selected group?".to_string()],
                         );
                     }
+                    SelectedTab::Bind => unreachable!(),
+                    SelectedTab::RoleHierarchy => unreachable!(),
+                    SelectedTab::TargetGroup => unreachable!(),
+                    SelectedTab::ActionGroup => unreachable!(),
                 }
                 return;
             }
@@ -1222,7 +1278,7 @@ where
             Editor::Target(ref e) => e.as_ref().help_text,
             Editor::Secret(ref e) => e.as_ref().help_text,
             Editor::Bind(ref e) => e.as_ref().help_text,
-            Editor::Role(ref e) => e.as_ref().help_text,
+            Editor::CasbinGroup(ref e) => e.as_ref().help_text,
             Editor::Permission(ref e) => e.as_ref().help_text,
             Editor::GrantRole(ref e) => e.as_ref().help_text,
             Editor::CasbinName(ref e) => e.as_ref().help_text,
@@ -1551,7 +1607,7 @@ where
     Secret(Box<secret::SecretEditor>),
     Bind(Box<bind::BindEditor<B>>),
     Permission(Box<permission::PermissionEditor>),
-    Role(Box<casbin_group::RoleEditor<B>>),
+    CasbinGroup(Box<casbin_group::CasbinGroupEditor<B>>),
     GrantRole(Box<grant_role::GrantRoleEditor<B>>),
     CasbinName(Box<casbin_name::CasbinNameEditor>),
     None,
@@ -1587,7 +1643,7 @@ where
             Editor::CasbinName(ref mut e) => {
                 e.render(area, buf);
             }
-            Editor::Role(_) => {
+            Editor::CasbinGroup(_) => {
                 unreachable!();
             }
             Editor::None => {}
