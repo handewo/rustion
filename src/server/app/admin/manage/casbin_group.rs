@@ -111,7 +111,7 @@ where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
         let graph = t_handle.block_on(backend.get_graph(group_type));
-        let selector_items = match group_type {
+        let mut selector_items = match group_type {
             GroupType::Subject => {
                 match t_handle.block_on(backend.db_repository().list_user_group()) {
                     Ok(i) => i,
@@ -140,7 +140,7 @@ where
                 }
             }
         };
-        let items = match tree::build_tree(
+        let mut items = match tree::build_tree(
             &graph,
             selector_items.iter().filter(|v| v.is_group).collect(),
         ) {
@@ -150,6 +150,11 @@ where
                 return Err(Error::IO(e));
             }
         };
+        if group_type == GroupType::Subject {
+            selector_items.retain(|i| i.is_group);
+            let group_items = selector_items.iter().map(|v| v.id).collect::<Vec<_>>();
+            items.retain(|item| group_items.contains(&item.identifier().rid));
+        }
         let mut state = TreeState::default();
         for i in &items {
             state.open(vec![i.identifier().clone()]);
@@ -426,76 +431,71 @@ where
                 );
                 "Unknown".to_string()
             });
-        match self.group_type {
-            GroupType::Subject => {}
-            GroupType::Object => {
-                let cr = CasbinRule::new(
-                    "g2".into(),
-                    obj.id,
-                    iden.rid,
-                    Uuid::default(),
-                    String::new(),
-                    String::new(),
-                    String::new(),
-                    self.admin_id,
-                );
-                let t_type = if obj.is_group {
-                    String::from("Group")
-                } else {
-                    String::from("Target")
-                };
-
-                //TODO: Prevent cycle when add group
-                match self
-                    .t_handle
-                    .block_on(self.backend.db_repository().create_casbin_rule(&cr))
-                {
-                    Ok(_) => {
-                        self.t_handle.block_on((self.log)(
-                            LOG_TYPE.into(),
-                            format!(
-                                "{} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
-                                t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1
-                            ),
-                        ));
-                        info!(
-                            "[{}] {} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
-                            self.handler_id, t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1
-                        );
-                        self.message = Some(widgets::Message::Success(vec![format!(
-                            "{}: {} added in {}",
-                            t_type, obj.name, g_name
-                        )]));
-                        self.refreash_data();
-                    }
-                    Err(ref err) => {
-                        let msg = match err {
-                            Error::Sqlx(sqlx::Error::Database(ref db_err))
-                                if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
-                            {
-                                warn!(
-                                    "[{}] Duplicate entry: {} '{}' already exists in group '{}'",
-                                    self.handler_id, t_type, obj.name, g_name
-                                );
-                                format!(
-                                    "{}: {} has already existed in {}",
-                                    t_type, obj.name, g_name
-                                )
-                            }
-                            _ => {
-                                error!(
-                                    "[{}] Failed to add {} '{}' to group '{}': {}",
-                                    self.handler_id, t_type, obj.name, g_name, err
-                                );
-                                "Internal error".to_string()
-                            }
-                        };
-                        self.message = Some(widgets::Message::Error(vec![msg]));
-                    }
-                };
+        let cr = CasbinRule::new(
+            self.group_type.to_string(),
+            obj.id,
+            iden.rid,
+            Uuid::default(),
+            String::new(),
+            String::new(),
+            String::new(),
+            self.admin_id,
+        );
+        let t_type = if obj.is_group {
+            String::from("Group")
+        } else {
+            match self.group_type {
+                GroupType::Subject => String::from("User"),
+                GroupType::Object => String::from("Target"),
+                GroupType::Action => String::from("Action"),
             }
-            GroupType::Action => {}
-        }
+        };
+
+        //TODO: Prevent cycle when add group
+        match self
+            .t_handle
+            .block_on(self.backend.db_repository().create_casbin_rule(&cr))
+        {
+            Ok(_) => {
+                self.t_handle.block_on((self.log)(
+                    LOG_TYPE.into(),
+                    format!(
+                        "{} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
+                        t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1
+                    ),
+                ));
+                info!(
+                    "[{}] {} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
+                    self.handler_id, t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1
+                );
+                self.message = Some(widgets::Message::Success(vec![format!(
+                    "{}: {} added in {}",
+                    t_type, obj.name, g_name
+                )]));
+                self.refreash_data();
+            }
+            Err(ref err) => {
+                let msg = match err {
+                    Error::Sqlx(sqlx::Error::Database(ref db_err))
+                        if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
+                    {
+                        warn!(
+                            "[{}] Duplicate entry: {} '{}' already exists in group '{}'",
+                            self.handler_id, t_type, obj.name, g_name
+                        );
+                        format!("{}: {} has already existed in {}", t_type, obj.name, g_name)
+                    }
+                    _ => {
+                        error!(
+                            "[{}] Failed to add {} '{}' to group '{}': {}",
+                            self.handler_id, t_type, obj.name, g_name, err
+                        );
+                        "Internal error".to_string()
+                    }
+                };
+                self.message = Some(widgets::Message::Error(vec![msg]));
+            }
+        };
     }
 
     pub fn draw(&mut self, area: Rect, buf: &mut Buffer) {

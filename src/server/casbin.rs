@@ -42,6 +42,7 @@ impl From<GroupType> for &str {
         }
     }
 }
+
 impl Display for GroupType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
