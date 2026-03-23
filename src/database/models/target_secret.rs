@@ -120,6 +120,60 @@ impl Secret {
         self.public_key.take()
     }
 
+    pub fn encrypt_password(
+        &mut self,
+        f: crate::common::EncryptPlainText,
+    ) -> Result<(), crate::error::Error> {
+        if let Some(p) = self.password.take() {
+            self.password = match f(&p) {
+                Ok(enc) => Some(enc),
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn encrypt_private_key(
+        &mut self,
+        f: crate::common::EncryptPlainText,
+    ) -> Result<(), crate::error::Error> {
+        self.public_key = match self.gen_public_key_from_text() {
+            Ok(pub_key) => {
+                if pub_key.is_some() {
+                    match f(self.private_key.as_ref().unwrap()) {
+                        Ok(key) => self.private_key = Some(key),
+                        Err(e) => return Err(e),
+                    }
+                }
+                pub_key
+            }
+            Err(e) => return Err(crate::error::Error::RusshKey(e)),
+        };
+
+        Ok(())
+    }
+
+    // Generate public key before `private_key` and `password` encrypted.
+    pub fn gen_public_key_from_text(&self) -> Result<Option<String>, russh::keys::Error> {
+        if let Some(private_key) = self.private_key.as_ref() {
+            match russh::keys::decode_secret_key(private_key, None) {
+                Ok(key) => return Ok(Some(key.public_key().to_openssh()?)),
+                Err(e) => {
+                    if matches!(e, russh::keys::Error::KeyIsEncrypted) {
+                        match russh::keys::decode_secret_key(private_key, self.password.as_deref())
+                        {
+                            Ok(key) => return Ok(Some(key.public_key().to_openssh()?)),
+                            Err(e) => return Err(e),
+                        }
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
     pub fn validate(&self, verify_key: bool) -> Result<(), ValidateError> {
         let name = self.name.trim();
         if name.is_empty() {
@@ -131,12 +185,8 @@ impl Secret {
             return Err(ValidateError::UserEmpty);
         }
 
-        if verify_key {
-            if let Some(private_key) = self.private_key.as_ref() {
-                if russh::keys::decode_secret_key(private_key, None).is_err() {
-                    return Err(ValidateError::PrivateKeyInvalid);
-                }
-            }
+        if verify_key && self.gen_public_key_from_text().is_err() {
+            return Err(ValidateError::PrivateKeyInvalid);
         }
 
         Ok(())

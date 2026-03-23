@@ -290,7 +290,7 @@ impl BastionServer {
         Ok(hash.to_string())
     }
 
-    fn decrypt_with_secret_key(&self, text: String) -> Result<String, Error> {
+    fn decrypt_with_secret_key(&self, text: &str) -> Result<String, Error> {
         let encrypt_key = general_purpose::STANDARD
             .decode(text)
             .map_err(|e| Error::Server(ServerError::Base64Decode { source: e }))?;
@@ -419,8 +419,29 @@ impl super::HandlerBackend for BastionServer {
         let mut handle = target.build_connect().await?;
 
         if let Some(k) = secret.take_private_key() {
-            let key =
-                russh::keys::decode_secret_key(self.decrypt_with_secret_key(k)?.as_str(), None)?;
+            let key = match russh::keys::decode_secret_key(
+                self.decrypt_with_secret_key(&k)?.as_str(),
+                None,
+            ) {
+                Ok(k) => k,
+                Err(e) => {
+                    if matches!(e, russh::keys::Error::KeyIsEncrypted) {
+                        let pass = match secret.take_password() {
+                            Some(pub_key) => Some(self.decrypt_with_secret_key(&pub_key)?),
+                            None => None,
+                        };
+                        match russh::keys::decode_secret_key(
+                            self.decrypt_with_secret_key(&k)?.as_str(),
+                            pass.as_deref(),
+                        ) {
+                            Ok(key) => key,
+                            Err(e) => return Err(e.into()),
+                        }
+                    } else {
+                        return Err(e.into());
+                    }
+                }
+            };
             let auth_res = handle
                 .authenticate_publickey(
                     secret.user.clone(),
@@ -440,7 +461,7 @@ impl super::HandlerBackend for BastionServer {
         };
 
         if let Some(p) = secret.take_password() {
-            let pass = self.decrypt_with_secret_key(p)?;
+            let pass = self.decrypt_with_secret_key(&p)?;
             let auth_res = handle.authenticate_password(secret.user, pass).await?;
             if auth_res.success() {
                 let handle = Arc::new(handle);
@@ -628,25 +649,25 @@ impl super::HandlerBackend for BastionServer {
         self.do_load_role_manager().await
     }
 
-    fn encrypt_plain_text(&self, text: &str) -> Result<String, Error> {
-        let mut nonce_bytes = [0u8; 12]; // 96-bit nonce
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+    fn encrypt_plain_text(&self) -> crate::common::EncryptPlainText {
+        let secret_key = self.secret_key.clone();
+        Box::new(move |text: &str| -> Result<String, Error> {
+            let mut nonce_bytes = [0u8; 12];
+            OsRng.fill_bytes(&mut nonce_bytes);
+            let nonce = Nonce::from_slice(&nonce_bytes);
 
-        let ciphertext = self
-            .secret_key
-            .encrypt(nonce, text.as_bytes())
-            .map_err(|e| {
+            let ciphertext = secret_key.encrypt(nonce, text.as_bytes()).map_err(|e| {
                 Error::Server(ServerError::EncryptionFailed {
                     reason: e.to_string(),
                 })
             })?;
 
-        let mut blob = Vec::with_capacity(nonce_bytes.len() + ciphertext.len());
-        blob.extend_from_slice(&nonce_bytes);
-        blob.extend_from_slice(&ciphertext); // already includes 16-byte tag
+            let mut blob = Vec::with_capacity(nonce_bytes.len() + ciphertext.len());
+            blob.extend_from_slice(&nonce_bytes);
+            blob.extend_from_slice(&ciphertext);
 
-        Ok(general_purpose::STANDARD.encode(blob))
+            Ok(general_purpose::STANDARD.encode(blob))
+        })
     }
 
     async fn get_graph(&self, rt: casbin::GroupType) -> StableDiGraph<casbin::RuleGroup, ()> {

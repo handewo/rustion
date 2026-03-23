@@ -118,7 +118,7 @@ pub(super) trait HandlerBackend: Send + Clone {
         ext: casbin::ExtendPolicyReq,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
-    fn encrypt_plain_text(&self, text: &str) -> Result<String, Error>;
+    fn encrypt_plain_text(&self) -> crate::common::EncryptPlainText;
     fn enable_record(&self) -> bool;
     fn record_input(&self) -> bool;
     fn record_path(&self) -> &str;

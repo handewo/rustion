@@ -785,21 +785,12 @@ where
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
                     if !e.show_cancel_confirmation {
                         let mut secret = e.secret.to_owned();
-                        if e.password_updated {
-                            if let Some(p) = secret.take_password() {
-                                secret.set_password(Some(self.backend.encrypt_plain_text(&p)?));
-                            };
-                        };
                         if e.private_key_updated {
-                            if let Some(p) = secret.take_private_key() {
-                                secret.set_private_key(Some(self.backend.encrypt_plain_text(&p)?));
-                                secret.set_public_key(Some(
-                                    russh::keys::decode_secret_key(&p, None)?
-                                        .public_key()
-                                        .to_openssh()?,
-                                ));
-                            }
+                            secret.encrypt_private_key(self.backend.encrypt_plain_text())?;
                         }
+                        if e.password_updated {
+                            secret.encrypt_password(self.backend.encrypt_plain_text())?;
+                        };
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
