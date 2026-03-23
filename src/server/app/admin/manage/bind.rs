@@ -2,7 +2,7 @@ use super::super::table::{AdminTable, DisplayMode, FieldsToArray, TableData};
 use crate::database::models::{SecretInfo, TargetInfo};
 use crate::database::Uuid;
 use crate::error::Error;
-use crate::server::app::admin::widgets::*;
+use crate::server::app::admin::{error::AdminError, widgets::*};
 use crate::server::HandlerLog;
 use ::log::info;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -175,14 +175,33 @@ where
     }
 
     fn save_bindings(&mut self) -> Result<(), Error> {
-        // TODO: Verify target and secret if same target bind same
-        // system user more than once.
         let t_idx = self.target_table.state.selected().unwrap();
         let s_idx = self.secret_table.state.selected().unwrap();
         let t = self.targets.get(t_idx).unwrap();
         let s = self.secrets.get(s_idx).unwrap();
 
-        let action = if s.is_bound { "unbound from" } else { "bound to" };
+        // Verify that binding won't create duplicate system user on the same target.
+        if !s.is_bound {
+            let duplicate = self
+                .secrets
+                .iter()
+                .any(|other| other.id != s.id && other.is_bound && other.user == s.user);
+            if duplicate {
+                return Err(crate::server::app::error::AppError::from(
+                    AdminError::DuplicateTargetUser {
+                        target: t.name.clone(),
+                        user: s.user.clone(),
+                    },
+                )
+                .into());
+            }
+        }
+
+        let action = if s.is_bound {
+            "unbound from"
+        } else {
+            "bound to"
+        };
         self.t_handle
             .block_on(self.backend.db_repository().upsert_target_secret(
                 &t.id,
@@ -196,7 +215,10 @@ where
         );
         self.t_handle.block_on((self.log)(
             LOG_TYPE.into(),
-            format!("Secret '{}({})' {} target '{}({})'", s.name, s.id, action, t.name, t.id),
+            format!(
+                "Secret '{}({})' {} target '{}({})'",
+                s.name, s.id, action, t.name, t.id
+            ),
         ));
         Ok(())
     }
@@ -271,8 +293,17 @@ where
             DisplayMode::Manage,
         );
 
-        if self.save_error.is_some() {
-            render_message_popup(area, buf, &Message::Error(vec!["Internal error".into()]));
+        if let Some(err) = self.save_error.as_ref() {
+            if matches!(
+                err,
+                Error::App(crate::server::app::error::AppError::Admin(
+                    AdminError::DuplicateTargetUser { .. }
+                ))
+            ) {
+                render_message_popup(area, buf, &Message::Error(vec![err.to_string()]));
+            } else {
+                render_message_popup(area, buf, &Message::Error(vec!["Internal error".into()]));
+            }
         }
     }
 }

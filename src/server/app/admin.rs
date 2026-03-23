@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 mod common;
 mod database;
+pub mod error;
 mod manage;
 mod shell;
 mod table;

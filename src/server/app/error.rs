@@ -10,4 +10,9 @@ pub enum AppError {
 
     #[error("Channel notify already exists")]
     ChannelNotifyExists,
+
+    // Admin errors
+    #[error(transparent)]
+    Admin(#[from] super::admin::error::AdminError),
 }
+
