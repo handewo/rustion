@@ -451,7 +451,46 @@ where
             }
         };
 
-        //TODO: Prevent cycle when add group
+        // Prevent cycle when adding group-to-group relationship
+        if obj.is_group {
+            if obj.id == iden.rid {
+                self.message = Some(widgets::Message::Error(vec![
+                    "Cannot add a group to itself".to_string(),
+                ]));
+                return;
+            }
+            let graph = self
+                .t_handle
+                .block_on(self.backend.get_graph(self.group_type));
+            // Find NodeIndex for both UUIDs
+            let obj_node = graph
+                .node_indices()
+                .find(|&n| graph[n].fetch_role() == obj.id);
+            let group_node = graph
+                .node_indices()
+                .find(|&n| graph[n].fetch_role() == iden.rid);
+            // If both nodes exist in the graph, check if adding this edge creates a cycle.
+            // A cycle occurs if iden.rid is already reachable from obj.id (since the new
+            // edge goes iden.rid → obj.id).
+            if let (Some(obj_idx), Some(group_idx)) = (obj_node, group_node) {
+                use petgraph::visit::{Bfs, Walker};
+                let has_cycle = Bfs::new(&graph, obj_idx)
+                    .iter(&graph)
+                    .any(|n| n == group_idx);
+                if has_cycle {
+                    warn!(
+                        "[{}] Cycle detected: adding group '{}' to group '{}' would create a cycle",
+                        self.handler_id, obj.name, g_name
+                    );
+                    self.message = Some(widgets::Message::Error(vec![format!(
+                        "Cannot add {}: would create a cycle in group hierarchy",
+                        obj.name
+                    )]));
+                    return;
+                }
+            }
+        }
+
         match self
             .t_handle
             .block_on(self.backend.db_repository().create_casbin_rule(&cr))
