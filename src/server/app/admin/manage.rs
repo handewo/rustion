@@ -14,10 +14,8 @@ use ratatui::style::{self, Color, Style, Stylize};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Tabs, Widget};
 use ratatui::{Frame, Terminal};
-use russh::keys::ssh_key::PrivateKey;
 use std::fmt;
 use std::io::Write;
-use std::str::FromStr;
 use std::sync::Arc;
 use style::palette::tailwind;
 use tokio::runtime::Handle;
@@ -623,7 +621,12 @@ where
                             _ => {}
                         }
                     }
-                    Popup::Add | Popup::Edit => self.do_edit(key)?,
+                    Popup::Add | Popup::Edit => {
+                        if let Err(e) = self.do_edit(key) {
+                            self.message = Some(Message::Error(vec!["Internal error".into()]));
+                            warn!("[{}] Failed to edit: {}", self.handler_id, e);
+                        }
+                    }
                     Popup::Delete(i) => match key.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') => {
                             self.do_delete(i);
@@ -791,7 +794,9 @@ where
                             if let Some(p) = secret.take_private_key() {
                                 secret.set_private_key(Some(self.backend.encrypt_plain_text(&p)?));
                                 secret.set_public_key(Some(
-                                    PrivateKey::from_str(&p)?.public_key().to_openssh()?,
+                                    russh::keys::decode_secret_key(&p, None)?
+                                        .public_key()
+                                        .to_openssh()?,
                                 ));
                             }
                         }

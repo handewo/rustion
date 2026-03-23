@@ -79,7 +79,7 @@ pub(super) fn shell<B>(
                     CMD_MANAGE => {
                         let mut w = SenderWriter::new(send_to_session.clone());
                         let _ = crossterm::execute!(w, EnableBracketedPaste);
-                        let _ = manage::manage(
+                        if let Err(e) = manage::manage(
                             tty.clone(),
                             SenderWriter::new(send_to_session.clone()),
                             user_id,
@@ -87,7 +87,9 @@ pub(super) fn shell<B>(
                             backend.clone(),
                             t_handle.clone(),
                             log.clone(),
-                        );
+                        ) {
+                            warn!("[{}] Manage error: {}", handler_id, e);
+                        };
                         let _ = crossterm::execute!(w, DisableBracketedPaste);
                     }
                     CMD_FLUSH_PRIVILEGES => {

@@ -1,7 +1,5 @@
 use chrono::Utc;
-use russh::keys::ssh_key::PrivateKey;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -135,7 +133,7 @@ impl Secret {
 
         if verify_key {
             if let Some(private_key) = self.private_key.as_ref() {
-                if PrivateKey::from_str(private_key).is_err() {
+                if russh::keys::decode_secret_key(private_key, None).is_err() {
                     return Err(ValidateError::PrivateKeyInvalid);
                 }
             }
