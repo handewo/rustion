@@ -2,6 +2,7 @@ mod v3;
 
 use super::Result;
 use std::collections::HashMap;
+use std::time::Duration;
 pub use v3::V3Encoder;
 
 pub struct Header {
@@ -17,7 +18,7 @@ pub struct Header {
 }
 
 pub struct Event {
-    pub time: u64,
+    pub time: Duration,
     pub data: EventData,
 }
 
@@ -46,35 +47,35 @@ impl Default for Header {
 }
 
 impl Event {
-    pub fn output(time: u64, text: String) -> Self {
+    pub fn output(time: Duration, text: String) -> Self {
         Event {
             time,
             data: EventData::Output(text),
         }
     }
 
-    pub fn input(time: u64, text: String) -> Self {
+    pub fn input(time: Duration, text: String) -> Self {
         Event {
             time,
             data: EventData::Input(text),
         }
     }
 
-    pub fn resize(time: u64, size: (u16, u16)) -> Self {
+    pub fn resize(time: Duration, size: (u16, u16)) -> Self {
         Event {
             time,
             data: EventData::Resize(size.0, size.1),
         }
     }
 
-    pub fn marker(time: u64, label: String) -> Self {
+    pub fn marker(time: Duration, label: String) -> Self {
         Event {
             time,
             data: EventData::Marker(label),
         }
     }
 
-    pub fn exit(time: u64, status: i32) -> Self {
+    pub fn exit(time: Duration, status: i32) -> Self {
         Event {
             time,
             data: EventData::Exit(status),

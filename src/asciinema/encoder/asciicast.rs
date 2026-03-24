@@ -1,4 +1,5 @@
 use crate::asciinema::asciicast::{Event, Header, V3Encoder};
+use std::time::Duration;
 
 pub struct AsciicastV3Encoder {
     inner: V3Encoder,
@@ -17,7 +18,8 @@ impl super::Encoder for AsciicastV3Encoder {
     fn header(&mut self, header: &Header) -> Vec<u8> {
         if self.append {
             let size = (header.term_cols, header.term_rows);
-            self.inner.event(&Event::resize(0, size))
+            self.inner
+                .event(&Event::resize(Duration::from_micros(0), size))
         } else {
             self.inner.header(header)
         }

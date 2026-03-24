@@ -20,7 +20,7 @@ pub struct FixedSizeTty<T> {
 }
 
 #[async_trait(?Send)]
-pub trait Tty {
+pub trait RawTty {
     fn get_size(&self) -> (u16, u16);
 }
 
@@ -48,21 +48,21 @@ impl From<TtySize> for (u16, u16) {
     }
 }
 
-impl<T: Tty> FixedSizeTty<T> {
+impl<T: RawTty> FixedSizeTty<T> {
     pub fn new(inner: T, cols: Option<u16>, rows: Option<u16>) -> Self {
         Self { inner, cols, rows }
     }
 }
 
 #[async_trait(?Send)]
-impl Tty for NullTty {
+impl RawTty for NullTty {
     fn get_size(&self) -> (u16, u16) {
         (80, 24)
     }
 }
 
 #[async_trait(?Send)]
-impl<T: Tty> Tty for FixedSizeTty<T> {
+impl<T: RawTty> RawTty for FixedSizeTty<T> {
     fn get_size(&self) -> (u16, u16) {
         let mut winsize = self.inner.get_size();
 

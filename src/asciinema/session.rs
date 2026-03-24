@@ -2,21 +2,22 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use futures_util::future;
+use std::time::Duration;
 use tokio::io;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use crate::asciinema::tty::{Tty, TtySize};
+use crate::asciinema::tty::{RawTty, TtySize};
 use crate::asciinema::util::Utf8Decoder;
 use crate::asciinema::Result;
 
 #[derive(Clone)]
 pub enum Event {
-    Output(u64, String),
-    Input(u64, String),
-    Resize(u64, TtySize),
-    Marker(u64, String),
-    Exit(u64, i32),
+    Output(Duration, String),
+    Input(Duration, String),
+    Resize(Duration, TtySize),
+    Marker(Duration, String),
+    Exit(Duration, i32),
 }
 
 #[derive(Clone)]
@@ -42,10 +43,10 @@ pub struct Session {
     events_tx: mpsc::Sender<Event>,
     input_decoder: Utf8Decoder,
     output_decoder: Utf8Decoder,
-    pause_time: Option<u64>,
+    pause_time: Option<Duration>,
     prefix_mode: bool,
     record_input: bool,
-    time_offset: u64,
+    time_offset: Duration,
     tty_size: TtySize,
 }
 
@@ -55,7 +56,7 @@ pub trait Output: Send {
     async fn flush(&mut self) -> io::Result<()>;
 }
 
-pub async fn new<T: Tty + ?Sized>(
+pub async fn new<T: RawTty + ?Sized>(
     tty: &mut T,
     record_input: bool,
     outputs: Vec<Box<dyn Output>>,
@@ -73,7 +74,7 @@ pub async fn new<T: Tty + ?Sized>(
         pause_time: None,
         prefix_mode: false,
         record_input,
-        time_offset: 0,
+        time_offset: Duration::from_micros(0),
         tty_size: winsize.into(),
     };
     Ok(session)
@@ -180,11 +181,11 @@ impl Session {
         self.send_session_event(event).await;
     }
 
-    fn elapsed_time(&self) -> u64 {
+    fn elapsed_time(&self) -> Duration {
         if let Some(pause_time) = self.pause_time {
             pause_time
         } else {
-            self.epoch.elapsed().as_micros() as u64 - self.time_offset
+            self.epoch.elapsed() - self.time_offset
         }
     }
 

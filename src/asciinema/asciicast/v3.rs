@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use super::super::util::Quantizer;
 use super::{Event, EventData, Header};
 use crate::asciinema::tty::TtyTheme;
 
@@ -44,14 +46,17 @@ struct RGB8(rgb::RGB8);
 #[derive(Clone)]
 struct V3Palette(Vec<RGB8>);
 
-#[derive(PartialEq, Debug)]
 pub struct V3Encoder {
-    prev_time: u64,
+    prev_time: Duration,
+    time_quantizer: Quantizer,
 }
 
 impl V3Encoder {
     pub fn new() -> Self {
-        Self { prev_time: 0 }
+        Self {
+            prev_time: Duration::from_micros(0),
+            time_quantizer: Quantizer::new(1_000_000),
+        }
     }
 
     pub fn header(&mut self, header: &Header) -> Vec<u8> {
@@ -80,12 +85,13 @@ impl V3Encoder {
             Exit(data) => ('x', self.to_json_string(&data.to_string())),
         };
 
-        let time = event.time - self.prev_time;
+        let dt = event.time - self.prev_time;
         self.prev_time = event.time;
+        let dt = Duration::from_nanos(self.time_quantizer.next(dt.as_nanos()) as u64);
 
         format!(
             "[{}, {}, {}]",
-            format_time(time),
+            format_duration(dt),
             self.to_json_string(&code.to_string()),
             data,
         )
@@ -96,19 +102,12 @@ impl V3Encoder {
     }
 }
 
-fn format_time(time: u64) -> String {
-    let mut formatted_time = format!("{}.{:0>6}", time / 1_000_000, time % 1_000_000);
-    let dot_idx = formatted_time.find('.').unwrap();
+fn format_duration(duration: Duration) -> String {
+    let time_ms = duration.as_millis();
+    let secs = time_ms / 1_000;
+    let millis = time_ms % 1_000;
 
-    for idx in (dot_idx + 2..=formatted_time.len() - 1).rev() {
-        if formatted_time.as_bytes()[idx] != b'0' {
-            break;
-        }
-
-        formatted_time.truncate(idx);
-    }
-
-    formatted_time
+    format!("{secs}.{millis:03}")
 }
 
 impl serde::Serialize for V3Header {
