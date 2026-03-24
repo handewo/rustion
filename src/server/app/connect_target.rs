@@ -237,7 +237,7 @@ impl ConnectTarget {
         channel: ChannelId,
         session: &mut ru_server::Session,
         request: &Request<'a>,
-    ) -> Result<(), Error>
+    ) -> Result<bool, Error>
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
@@ -247,10 +247,10 @@ impl ConnectTarget {
             .await?
         {
             session.close(channel)?;
-            return Ok(());
+            return Ok(false);
         }
 
-        Ok(())
+        Ok(true)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -273,11 +273,15 @@ impl ConnectTarget {
             originator_address,
             originator_port,
         ));
-        self.connect_to_target_without_pty(backend, channel.id(), session, &request)
-            .await?;
-
-        self.bridge(session.handle(), channel.id(), request).await?;
-        Ok(true)
+        if self
+            .connect_to_target_without_pty(backend, channel.id(), session, &request)
+            .await?
+        {
+            self.bridge(session.handle(), channel.id(), request).await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -290,7 +294,7 @@ impl ConnectTarget {
         channel: ChannelId,
         session: &mut ru_server::Session,
         request: &Request<'a>,
-    ) -> Result<(), Error>
+    ) -> Result<bool, Error>
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
@@ -300,7 +304,7 @@ impl ConnectTarget {
             .await?
         {
             session.close(channel)?;
-            return Ok(());
+            return Ok(false);
         }
 
         let target_channel = self
@@ -358,7 +362,7 @@ impl ConnectTarget {
             }
         }
 
-        Ok(())
+        Ok(true)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -376,18 +380,20 @@ impl ConnectTarget {
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
         let request = Request::Exec(data);
-        match (term, window_size, modes) {
+        let res = match (term, window_size, modes) {
             (Some(t), Some(w), Some(m)) => {
                 self.connect_to_target_with_pty(backend, t, w, m, channel, session, &request)
-                    .await?;
+                    .await?
             }
             _ => {
                 self.connect_to_target_without_pty(backend, channel, session, &request)
-                    .await?;
+                    .await?
             }
-        }
+        };
 
-        self.bridge(session.handle(), channel, request).await?;
+        if res {
+            self.bridge(session.handle(), channel, request).await?;
+        }
         Ok(())
     }
 
@@ -403,19 +409,22 @@ impl ConnectTarget {
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
-        self.connect_to_target_with_pty(
-            backend,
-            term,
-            window_size,
-            modes,
-            channel,
-            session,
-            &Request::Shell,
-        )
-        .await?;
+        if self
+            .connect_to_target_with_pty(
+                backend,
+                term,
+                window_size,
+                modes,
+                channel,
+                session,
+                &Request::Shell,
+            )
+            .await?
+        {
+            self.bridge(session.handle(), channel, Request::Shell)
+                .await?;
+        }
 
-        self.bridge(session.handle(), channel, Request::Shell)
-            .await?;
         Ok(())
     }
 
