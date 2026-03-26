@@ -8,7 +8,8 @@ use crate::database::error::DatabaseError;
 use crate::database::models::casbin_rule::ValidateError;
 use crate::database::models::{
     CasbinName, CasbinRule, CasbinRuleGroup, Log, ObjectGroup, PermissionPolicy, Role, Secret,
-    SecretInfo, Target, TargetInfo, TargetSecret, TargetSecretName, User, UserWithRole,
+    SecretInfo, SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName, User,
+    UserWithRole,
 };
 use crate::database::DatabaseRepository;
 use crate::error::Error;
@@ -166,6 +167,25 @@ impl SqliteRepository {
         .execute(&self.pool)
         .await?;
 
+        // Create session_recordings table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS session_recordings (
+                id BLOB PRIMARY KEY,
+                user_id BLOB NOT NULL,
+                target_id BLOB NOT NULL,
+                target_secret_id BLOB NOT NULL,
+                file_path TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER,
+                connection_id BLOB NOT NULL,
+                status TEXT NOT NULL
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         // Create indexes for better performance
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_users_username ON users (username)")
             .execute(&self.pool)
@@ -178,6 +198,25 @@ impl SqliteRepository {
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs (created_at)")
             .execute(&self.pool)
             .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_session_rec_user ON session_recordings (user_id)",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_session_rec_target ON session_recordings (target_id)",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_session_rec_connection ON session_recordings (connection_id)")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_session_rec_started ON session_recordings (started_at)",
+        )
+        .execute(&self.pool)
+        .await?;
 
         info!("Database tables and indexes created successfully");
         Ok(())
@@ -1736,6 +1775,125 @@ WHERE ptype = 'g3'
         .await?;
 
         Ok(logs)
+    }
+
+    async fn create_session_recording(
+        &self,
+        recording: &SessionRecording,
+    ) -> Result<SessionRecording, Error> {
+        debug!(
+            "Creating session_recording: user_id={}, target_id={}",
+            recording.user_id, recording.target_id
+        );
+
+        sqlx::query(
+            r#"
+            INSERT INTO session_recordings
+            (id, user_id, target_id, target_secret_id, file_path, started_at, ended_at, connection_id, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(recording.id)
+        .bind(recording.user_id)
+        .bind(recording.target_id)
+        .bind(recording.target_secret_id)
+        .bind(&recording.file_path)
+        .bind(recording.started_at)
+        .bind(recording.ended_at)
+        .bind(recording.connection_id)
+        .bind(&recording.status)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(recording.clone())
+    }
+
+    async fn update_session_recording(
+        &self,
+        recording: &SessionRecording,
+    ) -> Result<SessionRecording, Error> {
+        debug!("Updating session_recording: id={}", recording.id);
+
+        sqlx::query(
+            r#"
+            UPDATE session_recordings
+            SET file_path = ?, started_at = ?, ended_at = ?, status = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&recording.file_path)
+        .bind(recording.started_at)
+        .bind(recording.ended_at)
+        .bind(&recording.status)
+        .bind(recording.id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(recording.clone())
+    }
+
+    async fn get_session_recording_by_id(
+        &self,
+        id: &Uuid,
+    ) -> Result<Option<SessionRecording>, Error> {
+        let row = sqlx::query_as::<_, SessionRecording>(
+            "SELECT id, user_id, target_id, target_secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
+
+    async fn list_session_recordings(
+        &self,
+        limit: Option<i64>,
+    ) -> Result<Vec<SessionRecording>, Error> {
+        let mut query = String::from(
+            "SELECT id, user_id, target_id, target_secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings ORDER BY started_at DESC"
+        );
+
+        if let Some(l) = limit {
+            query.push_str(&format!(" LIMIT {}", l));
+        }
+
+        let rows = sqlx::query_as::<_, SessionRecording>(&query)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(Error::Sqlx)?;
+
+        Ok(rows)
+    }
+
+    async fn list_session_recordings_for_user(
+        &self,
+        user_id: &Uuid,
+    ) -> Result<Vec<SessionRecording>, Error> {
+        let rows = sqlx::query_as::<_, SessionRecording>(
+            "SELECT id, user_id, target_id, target_secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings WHERE user_id = ? ORDER BY started_at DESC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(Error::Sqlx)?;
+
+        Ok(rows)
+    }
+
+    async fn list_session_recordings_for_target(
+        &self,
+        target_id: &Uuid,
+    ) -> Result<Vec<SessionRecording>, Error> {
+        let rows = sqlx::query_as::<_, SessionRecording>(
+            "SELECT id, user_id, target_id, target_secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings WHERE target_id = ? ORDER BY started_at DESC",
+        )
+        .bind(target_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(Error::Sqlx)?;
+
+        Ok(rows)
     }
 
     async fn list_permission_polices(&self) -> Result<Vec<PermissionPolicy>, Error> {

@@ -8,6 +8,9 @@ pub enum AppError {
     #[error("Channel record already exists")]
     ChannelRecordExists,
 
+    #[error("Init record error")]
+    InitRecordError,
+
     #[error("Channel notify already exists")]
     ChannelNotifyExists,
 
@@ -15,4 +18,3 @@ pub enum AppError {
     #[error(transparent)]
     Admin(#[from] super::admin::error::AdminError),
 }
-

@@ -8,7 +8,7 @@ use crate::{database::models::UserWithRole, error::Error};
 use async_trait::async_trait;
 use models::{
     CasbinName, CasbinRule, CasbinRuleGroup, Log, ObjectGroup, PermissionPolicy, Role, Secret,
-    SecretInfo, Target, TargetInfo, TargetSecret, TargetSecretName, User,
+    SecretInfo, SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName, User,
 };
 pub use uuid::Uuid;
 
@@ -150,6 +150,37 @@ pub trait DatabaseRepository: Send + Sync {
     /// Log operations
     async fn insert_log(&self, log: &Log) -> Result<(), Error>;
     async fn list_logs(&self) -> Result<Vec<Log>, Error>;
+
+    /// Session recording operations
+    async fn create_session_recording(
+        &self,
+        recording: &SessionRecording,
+    ) -> Result<SessionRecording, Error>;
+
+    async fn update_session_recording(
+        &self,
+        recording: &SessionRecording,
+    ) -> Result<SessionRecording, Error>;
+
+    async fn get_session_recording_by_id(
+        &self,
+        id: &Uuid,
+    ) -> Result<Option<SessionRecording>, Error>;
+
+    async fn list_session_recordings(
+        &self,
+        limit: Option<i64>,
+    ) -> Result<Vec<SessionRecording>, Error>;
+
+    async fn list_session_recordings_for_user(
+        &self,
+        user_id: &Uuid,
+    ) -> Result<Vec<SessionRecording>, Error>;
+
+    async fn list_session_recordings_for_target(
+        &self,
+        target_id: &Uuid,
+    ) -> Result<Vec<SessionRecording>, Error>;
 
     /// casbin operations
     async fn get_policies_for_user(&self, user_id: &Uuid) -> Result<Vec<CasbinRule>, Error>;

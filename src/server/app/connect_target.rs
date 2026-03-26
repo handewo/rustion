@@ -1,5 +1,5 @@
 use crate::asciinema;
-use crate::database::models::{Target, TargetSecretName, User};
+use crate::database::models::{SessionRecording, Target, TargetSecretName, User};
 use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::app::error::AppError;
@@ -14,6 +14,13 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 static LOG_TYPE: &str = "target";
+
+/// Wrapper for session recording that includes the database metadata ID
+#[derive(Clone)]
+struct RecordingSession {
+    session: asciinema::Session,
+    recording_id: Uuid,
+}
 
 #[derive(Clone, Copy)]
 pub enum Request<'a> {
@@ -34,7 +41,7 @@ pub(crate) struct ConnectTarget {
     target_sec_name: Option<TargetSecretName>,
     notify: HashMap<ChannelId, mpsc::Sender<()>>,
 
-    record_session: HashMap<ChannelId, asciinema::Session>,
+    record_session: HashMap<ChannelId, RecordingSession>,
     log: HandlerLog,
 }
 
@@ -73,7 +80,7 @@ impl ConnectTarget {
             w.data(data).await?
         }
         if let Some(r) = self.record_session.get_mut(&channel) {
-            r.handle_input(data).await;
+            r.session.handle_input(data).await;
         }
 
         Ok(())
@@ -274,10 +281,11 @@ impl ConnectTarget {
             originator_port,
         ));
         if self
-            .connect_to_target_without_pty(backend, channel.id(), session, &request)
+            .connect_to_target_without_pty(backend.clone(), channel.id(), session, &request)
             .await?
         {
-            self.bridge(session.handle(), channel.id(), request).await?;
+            self.bridge(session.handle(), channel.id(), request, backend)
+                .await?;
             Ok(true)
         } else {
             Ok(false)
@@ -325,37 +333,55 @@ impl ConnectTarget {
             .await?;
 
         if backend.enable_record() {
-            let user = self
-                .user
-                .as_ref()
-                .unwrap_or_else(|| panic!("[{}] user should not be none", self.handler_id))
-                .username
-                .as_str();
             let target_sec_name = self.target_sec_name.as_ref().unwrap_or_else(|| {
                 panic!("[{}] target_sec_name should not be none", self.handler_id)
             });
-            let path = format!(
-                "{}/{}_{}@{}_{}_{}.cast",
-                backend.record_path(),
-                user,
-                target_sec_name.secret_user,
-                target_sec_name.target_name,
+            // Create session recording metadata
+            let target = self
+                .target
+                .as_ref()
+                .unwrap_or_else(|| panic!("[{}] target should not be none", self.handler_id));
+            let recording = SessionRecording::new(
+                self.user.as_ref().unwrap().id,
+                target.id,
+                target_sec_name.id,
+                backend.record_path().into(),
                 self.handler_id,
-                channel
             );
+
+            // Create the asciinema recorder
+            let session = asciinema::new_recorder(
+                Some(term.to_string()),
+                &recording.file_path,
+                (window_size.0 as u16, window_size.1 as u16),
+                None,
+                backend.record_input(),
+            )
+            .await?;
+
+            // Wrap session with recording metadata
+            let recording_session = RecordingSession {
+                session,
+                recording_id: recording.id,
+            };
+
+            // Save to database
+            if let Err(e) = backend
+                .db_repository()
+                .create_session_recording(&recording)
+                .await
+            {
+                log::error!(
+                    "[{}] Failed to create session recording: {}",
+                    self.handler_id,
+                    e
+                );
+                return Err(Error::App(AppError::InitRecordError));
+            }
+
             if self
                 .record_session
-                .insert(
-                    channel,
-                    asciinema::new_recorder(
-                        Some(term.to_string()),
-                        &path,
-                        (window_size.0 as u16, window_size.1 as u16),
-                        None,
-                        backend.record_input(),
-                    )
-                    .await?,
-                )
+                .insert(channel, recording_session)
                 .is_some()
             {
                 return Err(Error::App(AppError::ChannelRecordExists));
@@ -382,17 +408,26 @@ impl ConnectTarget {
         let request = Request::Exec(data);
         let res = match (term, window_size, modes) {
             (Some(t), Some(w), Some(m)) => {
-                self.connect_to_target_with_pty(backend, t, w, m, channel, session, &request)
-                    .await?
+                self.connect_to_target_with_pty(
+                    backend.clone(),
+                    t,
+                    w,
+                    m,
+                    channel,
+                    session,
+                    &request,
+                )
+                .await?
             }
             _ => {
-                self.connect_to_target_without_pty(backend, channel, session, &request)
+                self.connect_to_target_without_pty(backend.clone(), channel, session, &request)
                     .await?
             }
         };
 
         if res {
-            self.bridge(session.handle(), channel, request).await?;
+            self.bridge(session.handle(), channel, request, backend)
+                .await?;
         }
         Ok(())
     }
@@ -411,7 +446,7 @@ impl ConnectTarget {
     {
         if self
             .connect_to_target_with_pty(
-                backend,
+                backend.clone(),
                 term,
                 window_size,
                 modes,
@@ -421,7 +456,7 @@ impl ConnectTarget {
             )
             .await?
         {
-            self.bridge(session.handle(), channel, Request::Shell)
+            self.bridge(session.handle(), channel, Request::Shell, backend)
                 .await?;
         }
 
@@ -444,8 +479,9 @@ impl ConnectTarget {
         }
 
         if let Some(r) = self.record_session.get_mut(&channel) {
-            r.handle_marker("window change".to_string()).await;
-            r.handle_resize(asciinema::TtySize(col_width as u16, row_height as u16))
+            r.session.handle_marker("window change".to_string()).await;
+            r.session
+                .handle_resize(asciinema::TtySize(col_width as u16, row_height as u16))
                 .await;
         }
 
@@ -453,12 +489,16 @@ impl ConnectTarget {
         Ok(())
     }
 
-    async fn bridge<'a>(
+    async fn bridge<'a, B>(
         &mut self,
         handle: ru_server::Handle,
         channel: ChannelId,
         request: Request<'a>,
-    ) -> Result<(), Error> {
+        backend: Arc<B>,
+    ) -> Result<(), Error>
+    where
+        B: 'static + crate::server::HandlerBackend + Send + Sync,
+    {
         let target_channel = self
             .target_channel
             .remove(&channel)
@@ -489,7 +529,12 @@ impl ConnectTarget {
             return Err(Error::App(AppError::ChannelNotifyExists));
         };
 
-        let mut record = self.record_session.get(&channel).cloned();
+        let mut record = self
+            .record_session
+            .remove(&channel)
+            .unwrap_or_else(|| panic!("[{}] record session should not be none", self.handler_id));
+        let backend_for_task = backend.clone();
+        let handler_id = self.handler_id;
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -497,25 +542,19 @@ impl ConnectTarget {
                         if let Some(msg) = msg {
                             match msg {
                                 ChannelMsg::Data { data } => {
-                                    if let Some(r) = record.as_mut() {
-                                        r.handle_output(data.as_ref()).await;
-                                    }
+                                        record.session.handle_output(data.as_ref()).await;
                                     let _ = handle.data(channel, data).await;
                                 }
                                 ChannelMsg::Eof => {
                                     let _ = handle.eof(channel).await;
                                 }
                                 ChannelMsg::ExtendedData { data, ext: 1 }  => {
-                                    if let Some(r) = record.as_mut() {
-                                        r.handle_output(data.as_ref()).await;
-                                    }
+                                        record.session.handle_output(data.as_ref()).await;
                                     let _ = handle.extended_data(channel, 1, data).await;
 
                                 }
                                 ChannelMsg::ExitStatus { exit_status } => {
-                                    if let Some(r) = record.as_mut() {
-                                        r.handle_exit(exit_status as i32 ).await;
-                                    }
+                                        record.session.handle_exit(exit_status as i32 ).await;
                                     let _ = handle.exit_status_request(channel, exit_status).await;
                                 }
                                 _ => {}
@@ -527,6 +566,23 @@ impl ConnectTarget {
                     _ = recv.recv() => {
                         break;
                     }
+                }
+            }
+            // Update session recording as completed
+            if let Ok(Some(rec)) = backend_for_task
+                .db_repository()
+                .get_session_recording_by_id(&record.recording_id)
+                .await
+            {
+                let mut updated = rec;
+                updated.ended_at = Some(chrono::Utc::now().timestamp_millis());
+                updated.status = "completed".to_string();
+                if let Err(e) = backend_for_task
+                    .db_repository()
+                    .update_session_recording(&updated)
+                    .await
+                {
+                    log::error!("[{}] Failed to update session recording: {}", handler_id, e);
                 }
             }
             let _ = handle.close(channel).await;
