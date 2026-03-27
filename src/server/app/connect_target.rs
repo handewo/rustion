@@ -340,14 +340,13 @@ impl ConnectTarget {
                 self.user.as_ref().unwrap().id,
                 target_sec_name.target_id,
                 target_sec_name.secret_id,
-                backend.record_path().into(),
                 self.handler_id,
             );
 
             // Create the asciinema recorder
             let session = asciinema::new_recorder(
                 Some(term.to_string()),
-                &recording.file_path,
+                std::path::PathBuf::from(backend.record_path()).join(&recording.file_path),
                 (window_size.0 as u16, window_size.1 as u16),
                 None,
                 backend.record_input(),

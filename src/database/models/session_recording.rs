@@ -16,24 +16,22 @@ pub struct SessionRecording {
 }
 
 impl SessionRecording {
-    pub fn new(
-        user_id: Uuid,
-        target_id: Uuid,
-        secret_id: Uuid,
-        file_save_path: String,
-        connection_id: Uuid,
-    ) -> Self {
+    pub fn new(user_id: Uuid, target_id: Uuid, secret_id: Uuid, connection_id: Uuid) -> Self {
         let id = Uuid::new_v4();
         Self {
             id,
             user_id,
             target_id,
             secret_id,
-            file_path: format!("{}/{}.cast", file_save_path, id),
+            file_path: generate_path(id),
             started_at: chrono::Utc::now().timestamp_millis(),
             ended_at: None,
             connection_id,
             status: "active".to_string(),
         }
     }
+}
+
+pub fn generate_path(id: Uuid) -> String {
+    format!("{}.cast", id)
 }

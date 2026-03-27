@@ -18,7 +18,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 pub async fn new_recorder(
     term_type: Option<String>,
-    file_path: &str,
+    file_path: impl AsRef<Path>,
     size: (u16, u16),
     title: Option<String>,
     record_input: bool,
@@ -61,11 +61,12 @@ async fn get_term_info(term_type: Option<String>, size: (u16, u16)) -> Result<Te
     })
 }
 
-async fn get_file_writer(file_path: &str, metadata: &Metadata) -> Result<Option<FileWriter>> {
-    let path = Path::new(file_path);
-
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
+async fn get_file_writer(
+    path: impl AsRef<Path>,
+    metadata: &Metadata,
+) -> Result<Option<FileWriter>> {
+    if let Some(dir) = path.as_ref().parent() {
+        std::fs::create_dir_all(dir)?;
     }
 
     let file = tokio::fs::File::options()
