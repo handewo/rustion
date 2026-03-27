@@ -336,15 +336,10 @@ impl ConnectTarget {
             let target_sec_name = self.target_sec_name.as_ref().unwrap_or_else(|| {
                 panic!("[{}] target_sec_name should not be none", self.handler_id)
             });
-            // Create session recording metadata
-            let target = self
-                .target
-                .as_ref()
-                .unwrap_or_else(|| panic!("[{}] target should not be none", self.handler_id));
             let recording = SessionRecording::new(
                 self.user.as_ref().unwrap().id,
-                target.id,
-                target_sec_name.id,
+                target_sec_name.target_id,
+                target_sec_name.secret_id,
                 backend.record_path().into(),
                 self.handler_id,
             );

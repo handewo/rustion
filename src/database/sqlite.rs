@@ -174,7 +174,7 @@ impl SqliteRepository {
                 id BLOB PRIMARY KEY,
                 user_id BLOB NOT NULL,
                 target_id BLOB NOT NULL,
-                target_secret_id BLOB NOT NULL,
+                secret_id BLOB NOT NULL,
                 file_path TEXT NOT NULL,
                 started_at INTEGER NOT NULL,
                 ended_at INTEGER,
@@ -1789,14 +1789,14 @@ WHERE ptype = 'g3'
         sqlx::query(
             r#"
             INSERT INTO session_recordings
-            (id, user_id, target_id, target_secret_id, file_path, started_at, ended_at, connection_id, status)
+            (id, user_id, target_id, secret_id, file_path, started_at, ended_at, connection_id, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(recording.id)
         .bind(recording.user_id)
         .bind(recording.target_id)
-        .bind(recording.target_secret_id)
+        .bind(recording.secret_id)
         .bind(&recording.file_path)
         .bind(recording.started_at)
         .bind(recording.ended_at)
@@ -1837,7 +1837,7 @@ WHERE ptype = 'g3'
         id: &Uuid,
     ) -> Result<Option<SessionRecording>, Error> {
         let row = sqlx::query_as::<_, SessionRecording>(
-            "SELECT id, user_id, target_id, target_secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings WHERE id = ?",
+            "SELECT id, user_id, target_id, secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings WHERE id = ?",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -1851,7 +1851,7 @@ WHERE ptype = 'g3'
         limit: Option<i64>,
     ) -> Result<Vec<SessionRecording>, Error> {
         let mut query = String::from(
-            "SELECT id, user_id, target_id, target_secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings ORDER BY started_at DESC"
+            "SELECT id, user_id, target_id, secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings ORDER BY started_at DESC"
         );
 
         if let Some(l) = limit {
@@ -1871,7 +1871,7 @@ WHERE ptype = 'g3'
         user_id: &Uuid,
     ) -> Result<Vec<SessionRecording>, Error> {
         let rows = sqlx::query_as::<_, SessionRecording>(
-            "SELECT id, user_id, target_id, target_secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings WHERE user_id = ? ORDER BY started_at DESC",
+            "SELECT id, user_id, target_id, secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings WHERE user_id = ? ORDER BY started_at DESC",
         )
         .bind(user_id)
         .fetch_all(&self.pool)
@@ -1886,7 +1886,7 @@ WHERE ptype = 'g3'
         target_id: &Uuid,
     ) -> Result<Vec<SessionRecording>, Error> {
         let rows = sqlx::query_as::<_, SessionRecording>(
-            "SELECT id, user_id, target_id, target_secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings WHERE target_id = ? ORDER BY started_at DESC",
+            "SELECT id, user_id, target_id, secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings WHERE target_id = ? ORDER BY started_at DESC",
         )
         .bind(target_id)
         .fetch_all(&self.pool)

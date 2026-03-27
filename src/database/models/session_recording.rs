@@ -7,7 +7,7 @@ pub struct SessionRecording {
     pub id: Uuid,
     pub user_id: Uuid,
     pub target_id: Uuid,
-    pub target_secret_id: Uuid,
+    pub secret_id: Uuid,
     pub file_path: String,
     pub started_at: i64,
     pub ended_at: Option<i64>,
@@ -19,7 +19,7 @@ impl SessionRecording {
     pub fn new(
         user_id: Uuid,
         target_id: Uuid,
-        target_secret_id: Uuid,
+        secret_id: Uuid,
         file_save_path: String,
         connection_id: Uuid,
     ) -> Self {
@@ -28,7 +28,7 @@ impl SessionRecording {
             id,
             user_id,
             target_id,
-            target_secret_id,
+            secret_id,
             file_path: format!("{}/{}.cast", file_save_path, id),
             started_at: chrono::Utc::now().timestamp_millis(),
             ended_at: None,
