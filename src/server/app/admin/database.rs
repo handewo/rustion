@@ -1,7 +1,7 @@
 use super::table::{AdminTable, DisplayMode, FieldsToArray, TableData as TD};
 use crate::database::common::{
-    TABLE_CASBIN_NAMES, TABLE_CASBIN_RULE, TABLE_LIST, TABLE_LOGS, TABLE_SECRETS, TABLE_TARGETS,
-    TABLE_TARGET_SECRETS, TABLE_USERS,
+    TABLE_CASBIN_NAMES, TABLE_CASBIN_RULE, TABLE_LIST, TABLE_LOGS, TABLE_SECRETS, TABLE_SESSION_RECORDINGS,
+    TABLE_TARGETS, TABLE_TARGET_SECRETS, TABLE_USERS,
 };
 use crate::database::models::*;
 use crate::error::Error;
@@ -192,6 +192,13 @@ where
                         .unwrap_or_default(),
                 );
             }
+            TABLE_SESSION_RECORDINGS => {
+                self.items = TableData::SessionRecordings(
+                    self.t_handle
+                        .block_on(self.backend.db_repository().list_session_recordings(None))
+                        .unwrap_or_default(),
+                );
+            }
             _ => {
                 unreachable!()
             }
@@ -251,6 +258,7 @@ enum TableData {
     CasbinNames(Vec<CasbinName>),
     CasbinRule(Vec<CasbinRule>),
     Logs(Vec<Log>),
+    SessionRecordings(Vec<SessionRecording>),
 }
 
 impl TableData {
@@ -451,6 +459,33 @@ impl TableData {
                     Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
+            Self::SessionRecordings(ref data) => {
+                let file_path_len = data
+                    .iter()
+                    .map(|v| v.file_path.as_str())
+                    .map(UnicodeWidthStr::width)
+                    .max()
+                    .unwrap_or(0)
+                    .max(9);
+                let status_len = data
+                    .iter()
+                    .map(|v| v.status.as_str())
+                    .map(UnicodeWidthStr::width)
+                    .max()
+                    .unwrap_or(0)
+                    .max(6);
+                vec![
+                    Constraint::Length(LENGTH_UUID), // id
+                    Constraint::Length(LENGTH_UUID), // user_id
+                    Constraint::Length(LENGTH_UUID), // target_id
+                    Constraint::Length(LENGTH_UUID), // secret_id
+                    Constraint::Length(file_path_len as u16),
+                    Constraint::Length(LENGTH_TIMSTAMP), // started_at
+                    Constraint::Length(LENGTH_TIMSTAMP), // ended_at
+                    Constraint::Length(LENGTH_UUID),     // connection_id
+                    Constraint::Length(status_len as u16),
+                ]
+            }
         }
     }
 }
@@ -465,6 +500,7 @@ impl super::table::TableData for TableData {
             Self::CasbinNames(ref data) => data.len(),
             Self::CasbinRule(ref data) => data.len(),
             Self::Logs(ref data) => data.len(),
+            Self::SessionRecordings(ref data) => data.len(),
         }
     }
 
@@ -495,6 +531,10 @@ impl super::table::TableData for TableData {
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
             Self::Logs(ref data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
+            Self::SessionRecordings(ref data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
@@ -583,6 +623,19 @@ impl super::table::TableData for TableData {
                     "user_id",
                     "detail",
                     "created_at",
+                ]
+            }
+            Self::SessionRecordings(_) => {
+                vec![
+                    "id",
+                    "user_id",
+                    "target_id",
+                    "secret_id",
+                    "file_path",
+                    "started_at",
+                    "ended_at",
+                    "connection_id",
+                    "status",
                 ]
             }
         }

@@ -478,6 +478,29 @@ impl FieldsToArray for Log {
     }
 }
 
+impl FieldsToArray for SessionRecording {
+    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+        match mode {
+            DisplayMode::Full => {
+                vec![
+                    self.id.to_string(),
+                    self.user_id.to_string(),
+                    self.target_id.to_string(),
+                    self.secret_id.to_string(),
+                    self.file_path.clone(),
+                    self.started_at.to_string(),
+                    self.ended_at.map(|t| t.to_string()).unwrap_or_default(),
+                    self.connection_id.to_string(),
+                    self.status.clone(),
+                ]
+            }
+            DisplayMode::Manage => {
+                todo!()
+            }
+        }
+    }
+}
+
 impl TableData for Vec<ObjectGroup> {
     fn header(&self) -> Vec<&str> {
         vec!["Object", "Is Group"]
