@@ -1133,6 +1133,14 @@
       "updated_at": 1756074453806
     },
     {
+      "id": "8e186183-d33e-4407-9cb1-17c53a573c36",
+      "ptype": "__internal_object_type",
+      "name": "__internal_object_record_play",
+      "is_active": true,
+      "updated_by": "ef3f2c71-14ca-49b2-93af-917618f1b09f",
+      "updated_at": 1756074453806
+    },
+    {
       "id": "748032c1-90c6-4db6-97e1-4f4602273bef",
       "ptype": "__internal_action_type",
       "name": "__internal_action_login",
