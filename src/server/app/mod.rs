@@ -1,7 +1,8 @@
-pub mod error;
 pub(super) mod admin;
 pub(super) mod change_password;
 pub(super) mod connect_target;
+pub mod error;
+pub(super) mod record_play;
 pub(super) mod target_selector;
 
 pub(super) use admin::Admin;

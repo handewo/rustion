@@ -132,6 +132,7 @@ impl BastionServer {
         };
 
         // Initialize global internal UUIDs (only once)
+        // TODO: Query once to get all internal uuids.
         if !crate::database::common::InternalUuids::is_initialized() {
             use crate::database::common::*;
 
@@ -152,6 +153,16 @@ impl BastionServer {
                 .ok_or_else(|| {
                     Error::Server(ServerError::InternalObjectNotFound {
                         name: OBJ_ADMIN.to_string(),
+                    })
+                })?
+                .id;
+            let obj_record_play = database
+                .repository()
+                .get_casbin_name_by_name(OBJ_RECORD_PLAY)
+                .await?
+                .ok_or_else(|| {
+                    Error::Server(ServerError::InternalObjectNotFound {
+                        name: OBJ_RECORD_PLAY.to_string(),
                     })
                 })?
                 .id;
@@ -209,6 +220,7 @@ impl BastionServer {
             InternalUuids::init(InternalUuids {
                 obj_login,
                 obj_admin,
+                obj_record_play,
                 act_shell,
                 act_pty,
                 act_exec,

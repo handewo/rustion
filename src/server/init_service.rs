@@ -143,6 +143,12 @@ pub async fn init_service(config: Config) {
         true,
         u.id,
     );
+    let obj_record_play = CasbinName::new(
+        INTERNAL_OBJECT_TYPE.to_string(),
+        OBJ_RECORD_PLAY.to_string(),
+        true,
+        u.id,
+    );
 
     let casbin_names_rows = match db
         .repository()
@@ -154,6 +160,7 @@ pub async fn init_service(config: Config) {
             action_login,
             obj_login,
             obj_admin,
+            obj_record_play,
         ])
         .await
     {
@@ -195,7 +202,8 @@ pub async fn init_service(config: Config) {
 
     info!("Creating default permission policies");
 
-    let ipv4_localhost = "127.0.0.1/32".parse()
+    let ipv4_localhost = "127.0.0.1/32"
+        .parse()
         .unwrap_or_else(|e| panic!("Failed to parse IPv4 localhost: {}", e));
     let ext = casbin::ExtendPolicy {
         ip_policy: Some(casbin::IpPolicy::Allow(ipv4_localhost)),
@@ -243,7 +251,8 @@ pub async fn init_service(config: Config) {
     }
 
     // for ipv6
-    let ipv6_localhost = "::1/128".parse()
+    let ipv6_localhost = "::1/128"
+        .parse()
         .unwrap_or_else(|e| panic!("Failed to parse IPv6 localhost: {}", e));
     let ext = casbin::ExtendPolicy {
         ip_policy: Some(casbin::IpPolicy::Allow(ipv6_localhost)),
