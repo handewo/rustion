@@ -7,8 +7,9 @@ pub(crate) mod sqlite;
 use crate::{database::models::UserWithRole, error::Error};
 use async_trait::async_trait;
 use models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, Log, ObjectGroup, PermissionPolicy, Role, Secret,
-    SecretInfo, SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName, User,
+    CasbinName, CasbinRule, CasbinRuleGroup, Log, ObjectGroup, PermissionPolicy, RecordingView,
+    Role, Secret, SecretInfo, SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName,
+    User,
 };
 pub use uuid::Uuid;
 
@@ -171,6 +172,11 @@ pub trait DatabaseRepository: Send + Sync {
         &self,
         limit: Option<i64>,
     ) -> Result<Vec<SessionRecording>, Error>;
+
+    async fn list_recording_view_for_user(
+        &self,
+        user_id: &Uuid,
+    ) -> Result<Vec<RecordingView>, Error>;
 
     async fn list_session_recordings_for_user(
         &self,

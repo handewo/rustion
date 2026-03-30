@@ -7,9 +7,9 @@ use uuid::Uuid;
 use crate::database::error::DatabaseError;
 use crate::database::models::casbin_rule::ValidateError;
 use crate::database::models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, Log, ObjectGroup, PermissionPolicy, Role, Secret,
-    SecretInfo, SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName, User,
-    UserWithRole,
+    CasbinName, CasbinRule, CasbinRuleGroup, Log, ObjectGroup, PermissionPolicy, RecordingView,
+    Role, Secret, SecretInfo, SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName,
+    User, UserWithRole,
 };
 use crate::database::DatabaseRepository;
 use crate::error::Error;
@@ -1862,6 +1862,25 @@ WHERE ptype = 'g3'
             .fetch_all(&self.pool)
             .await
             .map_err(Error::Sqlx)?;
+
+        Ok(rows)
+    }
+
+    async fn list_recording_view_for_user(
+        &self,
+        user_id: &Uuid,
+    ) -> Result<Vec<RecordingView>, Error> {
+        let rows = sqlx::query_as::<_, RecordingView>(
+            r#"SELECT r.id, s.user || '@' || t.name || ':' || t.port AS target_secret,
+            r.started_at, r.ended_at, r.status FROM session_recordings r
+            LEFT JOIN secrets s ON r.secret_id = s.id
+            LEFT JOIN targets t ON r.target_id = t.id
+            WHERE r.user_id = ? ORDER BY r.started_at DESC"#,
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(Error::Sqlx)?;
 
         Ok(rows)
     }

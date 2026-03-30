@@ -35,3 +35,13 @@ impl SessionRecording {
 pub fn generate_path(id: Uuid) -> String {
     format!("{}.cast", id)
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct RecordingView {
+    pub id: Uuid,
+    pub user: String,
+    pub target_secret: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub status: String,
+}
