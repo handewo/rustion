@@ -1,8 +1,7 @@
-use super::super::table::{table_object_group_len_calculator, AdminTable, DisplayMode};
+use crate::server::widgets::{table_object_group_len_calculator, AdminTable, DisplayMode, EditorColors, SingleLineText, centered_area, render_cancel_dialog, render_message_popup, render_textarea, Message, COMMON_HELP, text_editing_style, text_input_position};
 use crate::database::error::DatabaseError;
 use crate::database::models::{ObjectGroup, PermissionPolicy};
 use crate::error::Error;
-use crate::server::app::admin::widgets::*;
 use crate::server::casbin::ExtendPolicy;
 use crate::server::error::ServerError;
 use crossterm::event::{KeyCode, KeyModifiers};

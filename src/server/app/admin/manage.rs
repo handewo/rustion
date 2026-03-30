@@ -1,10 +1,12 @@
 use super::common::*;
-use super::table::{AdminTable, Colors, DisplayMode, FieldsToArray, TableData as TD};
-use super::widgets::{centered_area, render_confirm_dialog, render_message_popup, Message};
 use crate::database::models::*;
 use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::casbin::GroupType;
+use crate::server::widgets::{
+    centered_area, common::*, render_confirm_dialog, render_message_popup, AdminTable, Colors,
+    DisplayMode, FieldsToArray, Message, TableData as TD,
+};
 use crate::server::HandlerLog;
 use ::log::{error, info, warn};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent};
@@ -1523,7 +1525,7 @@ impl TableData {
     }
 }
 
-impl super::table::TableData for TableData {
+impl crate::server::widgets::TableData for TableData {
     fn as_vec(&self) -> Vec<&dyn FieldsToArray> {
         match self {
             Self::Users(ref data) => data

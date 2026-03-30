@@ -1,4 +1,4 @@
-use super::table::{AdminTable, DisplayMode, FieldsToArray, TableData as TD};
+use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData as TD};
 use crate::database::common::{
     TABLE_CASBIN_NAMES, TABLE_CASBIN_RULE, TABLE_LIST, TABLE_LOGS, TABLE_SECRETS, TABLE_SESSION_RECORDINGS,
     TABLE_TARGETS, TABLE_TARGET_SECRETS, TABLE_USERS,
@@ -490,7 +490,7 @@ impl TableData {
     }
 }
 
-impl super::table::TableData for TableData {
+impl crate::server::widgets::TableData for TableData {
     fn len(&self) -> usize {
         match self {
             Self::Users(ref data) => data.len(),

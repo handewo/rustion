@@ -1,8 +1,7 @@
-use super::super::table::{AdminTable, DisplayMode, FieldsToArray, TableData};
+use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData, centered_area, render_message_popup, Message};
 use crate::database::models::{CasbinRule, Role};
 use crate::database::Uuid;
 use crate::error::Error;
-use crate::server::app::admin::widgets::*;
 use crate::server::error::ServerError;
 use crate::server::HandlerLog;
 use ::log::info;

@@ -6,6 +6,7 @@ mod connection_pool;
 pub mod error;
 pub mod init_service;
 mod test;
+mod widgets;
 
 pub use bastion_server::BastionServer;
 pub use casbin::{Label, RuleGroup};

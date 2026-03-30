@@ -20,9 +20,6 @@ mod database;
 pub mod error;
 mod manage;
 mod shell;
-mod table;
-mod tree;
-mod widgets;
 
 const LOG_TYPE: &str = "admin";
 

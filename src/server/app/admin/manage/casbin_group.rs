@@ -1,10 +1,13 @@
-use super::super::table::{table_object_group_len_calculator, AdminTable, DisplayMode};
-use super::super::{common::*, tree, widgets};
 use super::LOG_TYPE;
 use crate::database::models::{CasbinRule, ObjectGroup};
 use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::casbin::GroupType;
+use crate::server::widgets::tree;
+use crate::server::widgets::{
+    centered_area, common::*, render_confirm_dialog, render_message_popup,
+    table_object_group_len_calculator, AdminTable, DisplayMode, Message,
+};
 use crate::server::HandlerLog;
 use crossterm::event::{KeyCode, KeyModifiers};
 use log::{error, info, warn};
@@ -48,7 +51,7 @@ where
     pub is_editing: bool,
     pub is_deleting: bool,
     win_size: (u16, u16),
-    message: Option<widgets::Message>,
+    message: Option<Message>,
     pub help_text: [&'static str; 2],
 }
 
@@ -75,7 +78,7 @@ where
             match CasbinGroupEditor::build_tree(handler_id, &backend, &t_handle, group_type) {
                 Ok(res) => res,
                 Err(_) => {
-                    message = Some(widgets::Message::Error(vec!["Internal error".into()]));
+                    message = Some(Message::Error(vec!["Internal error".into()]));
                     (TreeState::default(), Vec::new(), Vec::new())
                 }
             };
@@ -262,7 +265,7 @@ where
             KeyCode::Char('a') => {
                 let iden = self.state.selected();
                 if iden.is_empty() {
-                    self.message = Some(widgets::Message::Error(vec![String::from(
+                    self.message = Some(Message::Error(vec![String::from(
                         "Please select one group.",
                     )]));
                     return false;
@@ -274,7 +277,7 @@ where
                 let iden = self.state.selected();
                 match iden.len() {
                     0 => {
-                        self.message = Some(widgets::Message::Error(vec![String::from(
+                        self.message = Some(Message::Error(vec![String::from(
                             "Please select one group.",
                         )]));
                         return false;
@@ -294,7 +297,7 @@ where
                                 "Unknown".to_string()
                             });
 
-                        self.message = Some(widgets::Message::Error(vec![format!(
+                        self.message = Some(Message::Error(vec![format!(
                             "Please select one item in group: {}",
                             g_name
                         )]));
@@ -336,7 +339,7 @@ where
     fn refreash_data(&mut self) {
         if let Err(e) = self.t_handle.block_on(self.backend.load_role_manager()) {
             error!("[{}] Load role manager error: {}", self.handler_id, e);
-            self.message = Some(widgets::Message::Error(vec!["Internal error".into()]));
+            self.message = Some(Message::Error(vec!["Internal error".into()]));
         }
         let (state, items, selector_items) = match CasbinGroupEditor::build_tree(
             self.handler_id,
@@ -346,7 +349,7 @@ where
         ) {
             Ok(res) => res,
             Err(_) => {
-                self.message = Some(widgets::Message::Error(vec!["Internal error".into()]));
+                self.message = Some(Message::Error(vec!["Internal error".into()]));
                 (TreeState::default(), Vec::new(), Vec::new())
             }
         };
@@ -386,16 +389,14 @@ where
                             "[{}] Deleted casbin_rule successfully: ptype={}, v0={}, v1={}",
                             self.handler_id, self.group_type, item_iden.rid, group_iden.rid
                         );
-                        self.message = Some(widgets::Message::Success(vec![
-                            "Deleted successfully".into(),
-                        ]));
+                        self.message = Some(Message::Success(vec!["Deleted successfully".into()]));
                         self.refreash_data();
                     } else {
                         warn!(
                             "[{}] Delete casbin_rule not effect, ptype={}, v0={}, v1={}",
                             self.handler_id, self.group_type, item_iden.rid, group_iden.rid
                         );
-                        self.message = Some(widgets::Message::Error(vec!["Internal error".into()]));
+                        self.message = Some(Message::Error(vec!["Internal error".into()]));
                     }
                 }
                 Err(e) => {
@@ -403,7 +404,7 @@ where
                         "[{}] Failed to delete casbin_rule, ptype={}, v0={}, v1={}, error: {}",
                         self.handler_id, self.group_type, item_iden.rid, group_iden.rid, e
                     );
-                    self.message = Some(widgets::Message::Error(vec!["Internal error".into()]));
+                    self.message = Some(Message::Error(vec!["Internal error".into()]));
                 }
             }
         }
@@ -415,7 +416,7 @@ where
         let iden = match self.state.selected().first() {
             Some(i) => i,
             None => {
-                self.message = Some(widgets::Message::Error(vec!["Internal error".into()]));
+                self.message = Some(Message::Error(vec!["Internal error".into()]));
                 return;
             }
         };
@@ -454,8 +455,8 @@ where
         // Prevent cycle when adding group-to-group relationship
         if obj.is_group {
             if obj.id == iden.rid {
-                self.message = Some(widgets::Message::Error(vec![
-                    "Cannot add a group to itself".to_string(),
+                self.message = Some(Message::Error(vec![
+                    "Cannot add a group to itself".to_string()
                 ]));
                 return;
             }
@@ -482,7 +483,7 @@ where
                         "[{}] Cycle detected: adding group '{}' to group '{}' would create a cycle",
                         self.handler_id, obj.name, g_name
                     );
-                    self.message = Some(widgets::Message::Error(vec![format!(
+                    self.message = Some(Message::Error(vec![format!(
                         "Cannot add {}: would create a cycle in group hierarchy",
                         obj.name
                     )]));
@@ -507,7 +508,7 @@ where
                     "[{}] {} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
                     self.handler_id, t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1
                 );
-                self.message = Some(widgets::Message::Success(vec![format!(
+                self.message = Some(Message::Success(vec![format!(
                     "{}: {} added in {}",
                     t_type, obj.name, g_name
                 )]));
@@ -532,7 +533,7 @@ where
                         "Internal error".to_string()
                     }
                 };
-                self.message = Some(widgets::Message::Error(vec![msg]));
+                self.message = Some(Message::Error(vec![msg]));
             }
         };
     }
@@ -549,7 +550,7 @@ where
             use ratatui::widgets::Widget;
             block.render(area, buf);
         }
-        let inner_area = widgets::centered_area(area, area.width - 2, area.height - 2);
+        let inner_area = centered_area(area, area.width - 2, area.height - 2);
         self.win_size = (inner_area.width, inner_area.height);
         let mut widget = Tree::new(&self.items)
             .expect("all item identifiers must be unique")
@@ -573,7 +574,7 @@ where
         let popup_area = if area.width <= MAX_POPUP_WINDOW_COL {
             area
         } else {
-            widgets::centered_area(
+            centered_area(
                 area,
                 MAX_POPUP_WINDOW_COL,
                 area.height.min(MAX_POPUP_WINDOW_ROW),
@@ -587,7 +588,7 @@ where
             self.draw_delete(popup_area, buf);
         }
         if let Some(ref msg) = self.message {
-            widgets::render_message_popup(popup_area, buf, msg);
+            render_message_popup(popup_area, buf, msg);
         }
     }
 
@@ -606,7 +607,7 @@ where
                     i_name = i.name.clone();
                 }
             }
-            widgets::render_confirm_dialog(
+            render_confirm_dialog(
                 area,
                 buf,
                 &[format!("Delete {} in group: {}?", i_name, g_name)],
@@ -617,7 +618,7 @@ where
         let iden = match self.state.selected().first() {
             Some(i) => i,
             None => {
-                self.message = Some(widgets::Message::Error(vec!["Internal error".into()]));
+                self.message = Some(Message::Error(vec!["Internal error".into()]));
                 return;
             }
         };
@@ -643,7 +644,7 @@ where
         Clear.render(area, buf);
         popup.render(area, buf);
 
-        let table_area = widgets::centered_area(area, area.width - 2, area.height - 2);
+        let table_area = centered_area(area, area.width - 2, area.height - 2);
         self.selector_table.size = (table_area.width, table_area.height);
         self.selector_table.render(
             buf,

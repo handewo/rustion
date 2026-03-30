@@ -1,8 +1,9 @@
-use super::super::table::{AdminTable, DisplayMode, FieldsToArray, TableData};
+use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData};
 use crate::database::models::{SecretInfo, TargetInfo};
 use crate::database::Uuid;
 use crate::error::Error;
-use crate::server::app::admin::{error::AdminError, widgets::*};
+use crate::server::app::admin::error::AdminError;
+use crate::server::widgets::{centered_area, render_message_popup, Message};
 use crate::server::HandlerLog;
 use ::log::info;
 use crossterm::event::{KeyCode, KeyModifiers};

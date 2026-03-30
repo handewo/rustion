@@ -1,7 +1,7 @@
 use crate::database::error::DatabaseError;
 use crate::database::models::CasbinName;
 use crate::error::Error;
-use crate::server::app::admin::widgets::*;
+use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,

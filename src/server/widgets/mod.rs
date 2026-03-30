@@ -1,4 +1,9 @@
-use super::common::{MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW};
+pub mod common;
+pub mod table;
+pub mod tree;
+
+pub use table::*;
+
 use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
@@ -120,6 +125,7 @@ impl RadioButtons {
         }
     }
 }
+
 pub fn render_radio_buttons(
     area: Rect,
     buf: &mut Buffer,
@@ -642,15 +648,16 @@ pub fn render_checkbox(
 }
 
 pub fn render_message_popup(area: Rect, buf: &mut Buffer, message: &Message) {
-    let popup_area = if area.width <= MAX_POPUP_WINDOW_COL {
+    let popup_area = if area.width <= common::MAX_POPUP_WINDOW_COL {
         area
     } else {
         centered_area(
             area,
-            MAX_POPUP_WINDOW_COL,
-            area.height.min(MAX_POPUP_WINDOW_ROW),
+            common::MAX_POPUP_WINDOW_COL,
+            area.height.min(common::MAX_POPUP_WINDOW_ROW),
         )
     };
 
     render_message_dialog(popup_area, buf, message);
 }
+
