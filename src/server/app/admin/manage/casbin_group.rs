@@ -232,6 +232,7 @@ where
         }
         match key {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Tab | KeyCode::BackTab => return true,
+            KeyCode::Char('c') if ctrl_pressed => return true,
             KeyCode::Left | KeyCode::Char('h') => {
                 let _ = self.state.key_left();
             }
@@ -273,7 +274,7 @@ where
                 self.help_text = HELP_TABLE;
                 self.is_editing = true;
             }
-            KeyCode::Char('d') => {
+            KeyCode::Char('d') if !ctrl_pressed => {
                 let iden = self.state.selected();
                 match iden.len() {
                     0 => {

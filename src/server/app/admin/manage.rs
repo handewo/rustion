@@ -590,11 +590,12 @@ where
                             KeyCode::Tab => self.next_tab(),
                             KeyCode::BackTab => self.previous_tab(),
                             KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                            KeyCode::Char('c') if ctrl_pressed => return Ok(()),
                             KeyCode::Char('j') | KeyCode::Down => self.table.next_row(items_len),
                             KeyCode::Char('k') | KeyCode::Up => self.table.previous_row(items_len),
                             KeyCode::Char('l') | KeyCode::Right => self.table.next_column(),
                             KeyCode::Char('h') | KeyCode::Left => self.table.previous_column(),
-                            KeyCode::Char('d') => {
+                            KeyCode::Char('d') if !ctrl_pressed => {
                                 self.table.colors.gray();
                                 let idx = self.table.state.selected().unwrap();
 

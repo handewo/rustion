@@ -1,9 +1,9 @@
-use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData};
 use crate::database::models::{SecretInfo, TargetInfo};
 use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::app::admin::error::AdminError;
 use crate::server::widgets::{centered_area, render_message_popup, Message};
+use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData};
 use crate::server::HandlerLog;
 use ::log::info;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -113,6 +113,7 @@ where
 
         match key {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Tab | KeyCode::BackTab => return true,
+            KeyCode::Char('c') if ctrl_pressed => return true,
             KeyCode::Char('+') => {
                 self.target_table.zoom_in();
                 self.secret_table.zoom_in();
