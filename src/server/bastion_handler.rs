@@ -104,6 +104,24 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                         self.app = Application::ChangePassword(app);
                         Ok(true)
                     }
+                    LoginMode::Tape => {
+                        debug!(
+                            "[{}] Starting tape session for user '{}({})'",
+                            self.id, user.username, user.id
+                        );
+                        let mut app =
+                            Box::new(app::Tape::new(self.id, self.user.take(), self.log.clone()));
+                        let res = app
+                            .channel_open_session(
+                                self.backend.clone(),
+                                channel,
+                                session,
+                                self.client_ip.map(|v| v.ip()),
+                            )
+                            .await?;
+                        self.app = Application::Tape(app);
+                        Ok(res)
+                    }
                     LoginMode::Admin => {
                         debug!(
                             "[{}] Starting admin session for user '{}({})'",
@@ -271,6 +289,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             Application::ChangePassword(ref mut app) => app.data(channel, data, session).await,
             Application::TargetSelector(ref mut app) => app.data(channel, data, session).await,
             Application::Admin(ref mut app) => app.data(channel, data, session).await,
+            Application::Tape(ref mut app) => app.data(channel, data, session).await,
             Application::None => Ok(()),
         }
     }
@@ -306,6 +325,12 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 .await
             }
             Application::Admin(ref mut app) => {
+                app.window_change_request(
+                    channel, col_width, row_height, pix_width, pix_height, session,
+                )
+                .await
+            }
+            Application::Tape(ref mut app) => {
                 app.window_change_request(
                     channel, col_width, row_height, pix_width, pix_height, session,
                 )
@@ -496,6 +521,12 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 )
                 .await?;
             }
+            Application::Tape(ref mut app) => {
+                app.pty_request(
+                    channel, term, col_width, row_height, pix_width, pix_height, modes, session,
+                )
+                .await?;
+            }
             _ => {}
         }
         self.pty_modes = Some(Vec::from(modes));
@@ -567,6 +598,10 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     .await
             }
             Application::Admin(ref mut app) => {
+                app.shell_request(self.backend.clone(), channel, session)
+                    .await
+            }
+            Application::Tape(ref mut app) => {
                 app.shell_request(self.backend.clone(), channel, session)
                     .await
             }
@@ -783,6 +818,7 @@ pub(super) struct LoginParse(String, String, String);
 pub enum LoginMode {
     TargetSelector,
     Password,
+    Tape,
     Admin,
     Target(String),
     TargetWithUser(String, String),
@@ -819,6 +855,7 @@ impl LoginParse {
         if !self.1.is_empty() && self.2.is_empty() {
             match self.1.as_str() {
                 "password" => return LoginMode::Password,
+                "tape" => return LoginMode::Tape,
                 "admin" => return LoginMode::Admin,
                 _ => return LoginMode::Target(self.1.clone()),
             }

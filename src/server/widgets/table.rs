@@ -553,8 +553,10 @@ impl FieldsToArray for RecordingView {
     fn to_array(&self, _mode: DisplayMode) -> Vec<String> {
         vec![
             self.target_secret.clone(),
-            self.started_at.to_string(),
-            self.ended_at.map(|t| t.to_string()).unwrap_or_default(),
+            super::common::format_timestamp(self.started_at),
+            self.ended_at
+                .map(super::common::format_timestamp)
+                .unwrap_or_default(),
             self.status.clone(),
         ]
     }
