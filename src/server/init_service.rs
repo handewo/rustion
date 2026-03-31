@@ -143,9 +143,9 @@ pub async fn init_service(config: Config) {
         true,
         u.id,
     );
-    let obj_record_play = CasbinName::new(
+    let obj_player = CasbinName::new(
         INTERNAL_OBJECT_TYPE.to_string(),
-        OBJ_RECORD_PLAY.to_string(),
+        OBJ_PLAYER.to_string(),
         true,
         u.id,
     );
@@ -160,7 +160,7 @@ pub async fn init_service(config: Config) {
             action_login,
             obj_login,
             obj_admin,
-            obj_record_play,
+            obj_player,
         ])
         .await
     {

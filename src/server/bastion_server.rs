@@ -156,13 +156,13 @@ impl BastionServer {
                     })
                 })?
                 .id;
-            let obj_record_play = database
+            let obj_player = database
                 .repository()
-                .get_casbin_name_by_name(OBJ_RECORD_PLAY)
+                .get_casbin_name_by_name(OBJ_PLAYER)
                 .await?
                 .ok_or_else(|| {
                     Error::Server(ServerError::InternalObjectNotFound {
-                        name: OBJ_RECORD_PLAY.to_string(),
+                        name: OBJ_PLAYER.to_string(),
                     })
                 })?
                 .id;
@@ -220,7 +220,7 @@ impl BastionServer {
             InternalUuids::init(InternalUuids {
                 obj_login,
                 obj_admin,
-                obj_record_play,
+                obj_player,
                 act_shell,
                 act_pty,
                 act_exec,

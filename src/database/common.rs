@@ -5,7 +5,7 @@ use uuid::Uuid;
 /// reserved for internal use. Do not create policies that use such names.
 pub const OBJ_LOGIN: &str = "__internal_object_login";
 pub const OBJ_ADMIN: &str = "__internal_object_admin";
-pub const OBJ_RECORD_PLAY: &str = "__internal_object_record_play";
+pub const OBJ_PLAYER: &str = "__internal_object_player";
 
 pub const ACT_SHELL: &str = "__internal_action_shell";
 pub const ACT_PTY: &str = "__internal_action_pty";
@@ -16,7 +16,7 @@ pub const ACT_DIRECT_TCPIP: &str = "__internal_action_open_direct_tcpip";
 pub const INTERNAL_OBJECT_TYPE: &str = "__internal_object_type";
 pub const INTERNAL_ACTION_TYPE: &str = "__internal_action_type";
 
-pub const INTERNAL_OBJECTS: [&str; 3] = [OBJ_LOGIN, OBJ_ADMIN, OBJ_RECORD_PLAY];
+pub const INTERNAL_OBJECTS: [&str; 3] = [OBJ_LOGIN, OBJ_ADMIN, OBJ_PLAYER];
 
 pub const INTERNAL_ACTIONS: [&str; 5] = [ACT_SHELL, ACT_DIRECT_TCPIP, ACT_EXEC, ACT_LOGIN, ACT_PTY];
 
@@ -26,7 +26,7 @@ pub const INTERNAL_ACTIONS: [&str; 5] = [ACT_SHELL, ACT_DIRECT_TCPIP, ACT_EXEC, 
 pub struct InternalUuids {
     pub obj_login: Uuid,
     pub obj_admin: Uuid,
-    pub obj_record_play: Uuid,
+    pub obj_player: Uuid,
     pub act_shell: Uuid,
     pub act_pty: Uuid,
     pub act_exec: Uuid,

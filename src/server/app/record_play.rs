@@ -27,13 +27,13 @@ use russh::{Channel, ChannelId, Pty};
 
 use std::sync::Arc;
 
-const LOG_TYPE: &str = "tape";
+const LOG_TYPE: &str = "player";
 const HELP_TEXT: [&str; 2] = [
     "(Enter) play | (Esc) quit | (↑↓) select",
     "(+/-) zoom in/out | (PgUp/PgDn) page up/down",
 ];
 
-pub(crate) struct Tape {
+pub(crate) struct Player {
     handler_id: Uuid,
     user: Option<User>,
 
@@ -45,7 +45,7 @@ pub(crate) struct Tape {
     log: HandlerLog,
 }
 
-impl Tape {
+impl Player {
     pub(crate) fn new(handler_id: Uuid, user: Option<User>, log: HandlerLog) -> Self {
         Self {
             handler_id,
@@ -105,11 +105,11 @@ impl Tape {
     ) -> Result<bool, Error> {
         let uuids = db_common::InternalUuids::get();
         if !self
-            .check_permission(backend, uuids.obj_record_play, uuids.act_login, ip)
+            .check_permission(backend, uuids.obj_player, uuids.act_login, ip)
             .await?
         {
             debug!(
-                "[{}] User: {} doesn't have permission to access tape",
+                "[{}] User: {} doesn't have permission to access player",
                 self.handler_id,
                 self.user
                     .as_ref()
@@ -248,16 +248,16 @@ impl Tape {
         session.channel_success(channel)?;
         (self.log)(
             LOG_TYPE.into(),
-            format!("User: {} login to record_play", username),
+            format!("User: {} login to player", username),
         )
         .await;
         Ok(())
     }
 }
 
-impl Drop for Tape {
+impl Drop for Player {
     fn drop(&mut self) {
-        trace!("[{}] drop Tape", self.handler_id);
+        trace!("[{}] drop Player", self.handler_id);
     }
 }
 
@@ -419,8 +419,8 @@ where
                 }
             }
         }
-        let _ = send_status.blocking_send(Status::Terminate(0));
         let _ = terminal.show_cursor();
+        let _ = send_status.blocking_send(Status::Terminate(0));
         Ok(())
     }
 
@@ -451,7 +451,7 @@ where
     }
 
     fn render_header(&self, frame: &mut Frame, area: Rect) {
-        let header = Paragraph::new("Tape")
+        let header = Paragraph::new("Player")
             .style(
                 Style::new()
                     .bold()
