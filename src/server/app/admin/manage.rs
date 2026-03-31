@@ -186,7 +186,7 @@ where
             match t_handle.block_on(backend.db_repository().list_users_with_role(false)) {
                 Ok(d) => d,
                 Err(e) => {
-                    error!("Failed to list users: {}", e);
+                    error!("[{}] Failed to list users: {}", handler_id, e);
                     Vec::new()
                 }
             },
