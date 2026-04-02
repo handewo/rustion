@@ -1,11 +1,11 @@
 use crate::database::common as db_common;
 use crate::database::models::User;
 use crate::error::Error;
-use crate::server::casbin;
 use crate::server::HandlerLog;
+use crate::server::casbin;
 
 use crate::database::Uuid;
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 use crossterm::event::NoTtyEvent;
 use log::{debug, trace, warn};
 use tokio::sync::mpsc;
@@ -205,11 +205,9 @@ impl Admin {
             loop {
                 tokio::select! {
                     data = recv_from_shell.recv() => {
-                        if let Some(d) = data {
-                            if handle_session.data(channel, d).await.is_err() {
+                        if let Some(d) = data && handle_session.data(channel, d).await.is_err() {
                                 warn!("[{}] Fail to send data to session from prompt",handler_id);
                                 break;
-                            }
                         };
                     }
                     status = recv_status.recv() => {

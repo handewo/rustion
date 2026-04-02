@@ -2,18 +2,18 @@ use super::casbin;
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
 use crate::server::error::ServerError;
-use aes_gcm::aead::{rand_core::RngCore, Aead};
+use aes_gcm::aead::{Aead, rand_core::RngCore};
 use argon2::{
-    password_hash::{PasswordHasher, SaltString},
     Argon2,
+    password_hash::{PasswordHasher, SaltString},
 };
 use log::{error, info, trace, warn};
 use moka::future::Cache;
 use moka::ops::compute::{CompResult, Op};
 use petgraph::stable_graph::StableDiGraph;
 use russh::client as ru_client;
-use russh::keys::ssh_key::rand_core::OsRng;
 use russh::keys::Algorithm;
+use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::{Config as RusshConfig, Server};
 
 use super::bastion_handler::BastionHandler;
@@ -22,7 +22,7 @@ use crate::database::models;
 use crate::database::service::DatabaseService;
 use crate::error::Error;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -554,20 +554,20 @@ impl super::HandlerBackend for BastionServer {
         if let Some(sa) = socket_addr {
             let ip = sa.ip();
             let result = increment_counter(&self.client_ip_pool, &ip).await;
-            if let CompResult::ReplacedWith(entry) = result {
-                if entry.value() > &self.config.max_ip_attempts {
-                    warn!("Brute-force login detected from {}", ip);
-                    res = true;
-                }
+            if let CompResult::ReplacedWith(entry) = result
+                && entry.value() > &self.config.max_ip_attempts
+            {
+                warn!("Brute-force login detected from {}", ip);
+                res = true;
             }
         }
 
         let result = increment_counter(&self.client_user_pool, &username).await;
-        if let CompResult::ReplacedWith(entry) = result {
-            if entry.value() > &self.config.max_user_attempts {
-                warn!("Brute-force login detected for user: {}", username);
-                res = true;
-            }
+        if let CompResult::ReplacedWith(entry) = result
+            && entry.value() > &self.config.max_user_attempts
+        {
+            warn!("Brute-force login detected for user: {}", username);
+            res = true;
         }
 
         res
@@ -605,9 +605,7 @@ impl super::HandlerBackend for BastionServer {
                 if !self.database.repository().check_object_active(&obj).await? {
                     trace!(
                         "Reject due to object not active, sub: {}, act: {}, policy: {:?}",
-                        sub,
-                        obj,
-                        pol
+                        sub, obj, pol
                     );
                     continue;
                 }
@@ -627,17 +625,13 @@ impl super::HandlerBackend for BastionServer {
                 } else {
                     trace!(
                         "Reject by action, sub: {}, act: {}, policy: {:?}",
-                        sub,
-                        act,
-                        pol
+                        sub, act, pol
                     );
                 }
             } else {
                 trace!(
                     "Reject by object, sub: {}, obj: {}, policy: {:?}",
-                    sub,
-                    obj,
-                    pol
+                    sub, obj, pol
                 );
             }
         }

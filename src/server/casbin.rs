@@ -14,7 +14,7 @@ use {
 };
 
 use chrono::{DateTime, FixedOffset, NaiveTime, Utc};
-use serde::{ser, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, ser};
 use std::str::FromStr;
 
 pub struct RoleManage {
@@ -339,10 +339,10 @@ pub fn verify_extend_policy(ext_req: &ExtendPolicyReq, ext_str: &str) -> Result<
     if !is_in_period(ext_req.now, ext.start_time, ext.end_time) {
         return Ok(false);
     }
-    if let Some(ep) = ext.expire_date {
-        if ext_req.now >= ep {
-            return Ok(false);
-        }
+    if let Some(ep) = ext.expire_date
+        && ext_req.now >= ep
+    {
+        return Ok(false);
     }
     Ok(true)
 }
@@ -427,7 +427,7 @@ impl FromStr for ExtendPolicy {
             (Some(_), None) | (None, Some(_)) => {
                 return Err(ExtendPolicyParseError::TimeConsistencyError(
                     "start_time and end_time must both be present or both absent".into(),
-                ))
+                ));
             }
             (Some(s), Some(e)) => {
                 if s.timezone() != e.timezone() {
@@ -475,7 +475,7 @@ impl Serialize for ExtendPolicy {
             (Some(_), None) | (None, Some(_)) => {
                 return Err(ser::Error::custom(
                     "start_time and end_time must both be present or both absent",
-                ))
+                ));
             }
             (Some(s), Some(e)) => {
                 if s.timezone() != e.timezone() {

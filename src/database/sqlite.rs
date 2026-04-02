@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use log::{debug, info};
-use sqlx::{sqlite::SqlitePool, Pool, Row, Sqlite};
+use sqlx::{Pool, Row, Sqlite, sqlite::SqlitePool};
 use uuid::Uuid;
 
+use crate::database::DatabaseRepository;
 use crate::database::error::DatabaseError;
 use crate::database::models::casbin_rule::ValidateError;
 use crate::database::models::{
@@ -11,7 +12,6 @@ use crate::database::models::{
     Role, Secret, SecretInfo, SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName,
     User, UserWithRole,
 };
-use crate::database::DatabaseRepository;
 use crate::error::Error;
 
 pub struct SqliteRepository {
@@ -1083,15 +1083,14 @@ WHERE ptype = 'g3'
 
     async fn update_casbin_name(&self, rule: &CasbinName) -> Result<CasbinName, Error> {
         // Check if this is an existing internal type
-        if let Some(existing) = self.get_casbin_name_by_id(&rule.id).await? {
-            if existing.is_internal()
-                && (existing.ptype != rule.ptype || existing.name != rule.name)
-            {
-                // Prevent changing the ptype of internal types
-                return Err(Error::Database(DatabaseError::CasbinNameValidation(
-                    ValidateError::InternalTypeModification,
-                )));
-            }
+        if let Some(existing) = self.get_casbin_name_by_id(&rule.id).await?
+            && existing.is_internal()
+            && (existing.ptype != rule.ptype || existing.name != rule.name)
+        {
+            // Prevent changing the ptype of internal types
+            return Err(Error::Database(DatabaseError::CasbinNameValidation(
+                ValidateError::InternalTypeModification,
+            )));
         }
 
         let mut updated_rule = rule.clone();
@@ -1120,12 +1119,12 @@ WHERE ptype = 'g3'
         debug!("Deleting casbin_name: id={}", id);
 
         // Check if this is an internal type
-        if let Some(casbin_name) = self.get_casbin_name_by_id(id).await? {
-            if casbin_name.is_internal() {
-                return Err(Error::Database(DatabaseError::CasbinNameValidation(
-                    ValidateError::InternalTypeModification,
-                )));
-            }
+        if let Some(casbin_name) = self.get_casbin_name_by_id(id).await?
+            && casbin_name.is_internal()
+        {
+            return Err(Error::Database(DatabaseError::CasbinNameValidation(
+                ValidateError::InternalTypeModification,
+            )));
         }
 
         let result = sqlx::query("DELETE FROM casbin_names WHERE id = ?")
@@ -1851,7 +1850,7 @@ WHERE ptype = 'g3'
         limit: Option<i64>,
     ) -> Result<Vec<SessionRecording>, Error> {
         let mut query = String::from(
-            "SELECT id, user_id, target_id, secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings ORDER BY started_at DESC"
+            "SELECT id, user_id, target_id, secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings ORDER BY started_at DESC",
         );
 
         if let Some(l) = limit {
