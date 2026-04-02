@@ -1,9 +1,9 @@
 use crate::database::models::ObjectGroup;
 use crate::server::casbin::Type;
 use crate::server::{Label, RuleGroup};
+use petgraph::Direction::Outgoing;
 use petgraph::graph::NodeIndex;
 use petgraph::stable_graph::StableDiGraph;
-use petgraph::Direction::Outgoing;
 use ratatui::style::{Style, Styled};
 use ratatui::text::{Line, Span};
 use std::collections::HashSet;
@@ -40,12 +40,12 @@ fn build_tree_item(
 
 fn set_style(rg: &RuleGroup) -> Span<'static> {
     match rg {
-        RuleGroup::V0(ref v) => {
+        RuleGroup::V0(v) => {
             if let Label::Object(_) = v.label {
                 return rg.label().set_style(Style::default());
             }
         }
-        RuleGroup::V1(ref v) => {
+        RuleGroup::V1(v) => {
             if let Label::Object(_) = v.label {
                 return rg.label().set_style(Style::default());
             }

@@ -1,13 +1,13 @@
 use super::common::*;
-use crate::database::models::*;
 use crate::database::Uuid;
+use crate::database::models::*;
 use crate::error::Error;
+use crate::server::HandlerLog;
 use crate::server::casbin::GroupType;
 use crate::server::widgets::{
-    centered_area, common::*, render_confirm_dialog, render_message_popup, AdminTable, Colors,
-    DisplayMode, FieldsToArray, Message, TableData as TD,
+    AdminTable, Colors, DisplayMode, FieldsToArray, Message, TableData as TD, centered_area,
+    common::*, render_confirm_dialog, render_message_popup,
 };
-use crate::server::HandlerLog;
 use ::log::{error, info, warn};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
@@ -696,7 +696,7 @@ where
 
                         if let Err(ref err) = result {
                             let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(ref db_err))
+                                Error::Sqlx(sqlx::Error::Database(db_err))
                                     if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
                                 {
                                     "Username already exists"
@@ -752,7 +752,7 @@ where
 
                         if let Err(ref err) = result {
                             let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(ref db_err))
+                                Error::Sqlx(sqlx::Error::Database(db_err))
                                     if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
                                 {
                                     "Target already exists"
@@ -809,7 +809,7 @@ where
                         };
                         if let Err(ref err) = result {
                             let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(ref db_err))
+                                Error::Sqlx(sqlx::Error::Database(db_err))
                                     if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
                                 {
                                     "Secret already exists"
@@ -861,7 +861,7 @@ where
                         };
                         if let Err(ref err) = result {
                             let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(ref db_err))
+                                Error::Sqlx(sqlx::Error::Database(db_err))
                                     if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
                                 {
                                     "Permission already exists"
@@ -925,7 +925,7 @@ where
 
                         if let Err(ref err) = result {
                             let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(ref db_err))
+                                Error::Sqlx(sqlx::Error::Database(db_err))
                                     if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
                                 {
                                     "Group already exists"
@@ -1358,7 +1358,7 @@ impl TableData {
 
     fn constraint_len_calculator(&self) -> Vec<Constraint> {
         match self {
-            Self::Users(ref data) => {
+            Self::Users(data) => {
                 let username_len = data
                     .iter()
                     .map(|v| v.user.username.as_str())
@@ -1393,7 +1393,7 @@ impl TableData {
                     Constraint::Length(role_len as u16),
                 ]
             }
-            Self::Targets(ref data) => {
+            Self::Targets(data) => {
                 let name_len = data
                     .iter()
                     .map(|v| v.name.as_str())
@@ -1434,7 +1434,7 @@ impl TableData {
                     Constraint::Length(9), // is_active
                 ]
             }
-            Self::Secrets(ref data) => {
+            Self::Secrets(data) => {
                 let name_len = data
                     .iter()
                     .map(|v| v.name.as_str())
@@ -1466,7 +1466,7 @@ impl TableData {
                     Constraint::Length(9),  // is_active
                 ]
             }
-            Self::CasbinNames(ref data) => {
+            Self::CasbinNames(data) => {
                 let ptype_len = data.iter().map(|v| v.ptype.len()).max().unwrap_or(0).max(6);
 
                 let name_len = data
@@ -1483,7 +1483,7 @@ impl TableData {
                     Constraint::Length(9), // is_active
                 ]
             }
-            Self::Permissions(ref data) => {
+            Self::Permissions(data) => {
                 let user_role_len = data
                     .iter()
                     .map(|v| v.user_role.as_str())
@@ -1529,23 +1529,23 @@ impl TableData {
 impl crate::server::widgets::TableData for TableData {
     fn as_vec(&self) -> Vec<&dyn FieldsToArray> {
         match self {
-            Self::Users(ref data) => data
+            Self::Users(data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::Targets(ref data) => data
+            Self::Targets(data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::Secrets(ref data) => data
+            Self::Secrets(data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::CasbinNames(ref data) => data
+            Self::CasbinNames(data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::Permissions(ref data) => data
+            Self::Permissions(data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
@@ -1554,11 +1554,11 @@ impl crate::server::widgets::TableData for TableData {
 
     fn len(&self) -> usize {
         match self {
-            Self::Users(ref data) => data.len(),
-            Self::Targets(ref data) => data.len(),
-            Self::Secrets(ref data) => data.len(),
-            Self::CasbinNames(ref data) => data.len(),
-            Self::Permissions(ref data) => data.len(),
+            Self::Users(data) => data.len(),
+            Self::Targets(data) => data.len(),
+            Self::Secrets(data) => data.len(),
+            Self::CasbinNames(data) => data.len(),
+            Self::Permissions(data) => data.len(),
         }
     }
 
@@ -1621,25 +1621,25 @@ where
         Self: Sized,
     {
         match self {
-            Editor::User(ref mut e) => {
+            Editor::User(e) => {
                 e.render(area, buf);
             }
-            Editor::Target(ref mut e) => {
+            Editor::Target(e) => {
                 e.render(area, buf);
             }
-            Editor::Secret(ref mut e) => {
+            Editor::Secret(e) => {
                 e.render(area, buf);
             }
-            Editor::GrantRole(ref mut e) => {
+            Editor::GrantRole(e) => {
                 e.render(area, buf);
             }
-            Editor::Bind(ref mut e) => {
+            Editor::Bind(e) => {
                 e.render(area, buf);
             }
-            Editor::Permission(ref mut e) => {
+            Editor::Permission(e) => {
                 e.render(area, buf);
             }
-            Editor::CasbinName(ref mut e) => {
+            Editor::CasbinName(e) => {
                 e.render(area, buf);
             }
             Editor::CasbinGroup(_) => {

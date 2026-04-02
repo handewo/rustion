@@ -1,10 +1,10 @@
-use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData as TD};
 use crate::database::common::{
-    TABLE_CASBIN_NAMES, TABLE_CASBIN_RULE, TABLE_LIST, TABLE_LOGS, TABLE_SECRETS, TABLE_SESSION_RECORDINGS,
-    TABLE_TARGETS, TABLE_TARGET_SECRETS, TABLE_USERS,
+    TABLE_CASBIN_NAMES, TABLE_CASBIN_RULE, TABLE_LIST, TABLE_LOGS, TABLE_SECRETS,
+    TABLE_SESSION_RECORDINGS, TABLE_TARGET_SECRETS, TABLE_TARGETS, TABLE_USERS,
 };
 use crate::database::models::*;
 use crate::error::Error;
+use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData as TD};
 use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -264,7 +264,7 @@ enum TableData {
 impl TableData {
     fn constraint_len_calculator(&self) -> Vec<Constraint> {
         match self {
-            Self::Users(ref data) => {
+            Self::Users(data) => {
                 let username_len = data
                     .iter()
                     .map(|v| v.username.as_str())
@@ -292,7 +292,7 @@ impl TableData {
                     Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
-            Self::Targets(ref data) => {
+            Self::Targets(data) => {
                 let name_len = data
                     .iter()
                     .map(|v| v.name.as_str())
@@ -344,7 +344,7 @@ impl TableData {
                     Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
-            Self::Secrets(ref data) => {
+            Self::Secrets(data) => {
                 let name_len = data
                     .iter()
                     .map(|v| v.name.as_str())
@@ -380,7 +380,7 @@ impl TableData {
                     Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
-            Self::CasbinNames(ref data) => {
+            Self::CasbinNames(data) => {
                 let name_len = data
                     .iter()
                     .map(|v| v.name.as_str())
@@ -400,7 +400,7 @@ impl TableData {
                     Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
-            Self::CasbinRule(ref data) => {
+            Self::CasbinRule(data) => {
                 let v3_len = data
                     .iter()
                     .map(|v| v.v3.as_str())
@@ -436,7 +436,7 @@ impl TableData {
                     Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
-            Self::Logs(ref data) => {
+            Self::Logs(data) => {
                 let log_type_len = data
                     .iter()
                     .map(|v| v.log_type.as_str())
@@ -459,7 +459,7 @@ impl TableData {
                     Constraint::Length(LENGTH_TIMSTAMP),
                 ]
             }
-            Self::SessionRecordings(ref data) => {
+            Self::SessionRecordings(data) => {
                 let file_path_len = data
                     .iter()
                     .map(|v| v.file_path.as_str())
@@ -493,48 +493,48 @@ impl TableData {
 impl crate::server::widgets::TableData for TableData {
     fn len(&self) -> usize {
         match self {
-            Self::Users(ref data) => data.len(),
-            Self::Targets(ref data) => data.len(),
-            Self::Secrets(ref data) => data.len(),
-            Self::TargetSecrets(ref data) => data.len(),
-            Self::CasbinNames(ref data) => data.len(),
-            Self::CasbinRule(ref data) => data.len(),
-            Self::Logs(ref data) => data.len(),
-            Self::SessionRecordings(ref data) => data.len(),
+            Self::Users(data) => data.len(),
+            Self::Targets(data) => data.len(),
+            Self::Secrets(data) => data.len(),
+            Self::TargetSecrets(data) => data.len(),
+            Self::CasbinNames(data) => data.len(),
+            Self::CasbinRule(data) => data.len(),
+            Self::Logs(data) => data.len(),
+            Self::SessionRecordings(data) => data.len(),
         }
     }
 
     fn as_vec(&self) -> Vec<&dyn FieldsToArray> {
         match self {
-            Self::Users(ref data) => data
+            Self::Users(data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::Targets(ref data) => data
+            Self::Targets(data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::Secrets(ref data) => data
+            Self::Secrets(data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::TargetSecrets(ref data) => data
+            Self::TargetSecrets(data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::CasbinNames(ref data) => data
+            Self::CasbinNames(data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::CasbinRule(ref data) => data
+            Self::CasbinRule(data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::Logs(ref data) => data
+            Self::Logs(data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
-            Self::SessionRecordings(ref data) => data
+            Self::SessionRecordings(data) => data
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),

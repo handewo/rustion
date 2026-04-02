@@ -1,14 +1,14 @@
 use super::LOG_TYPE;
-use crate::database::models::{CasbinRule, ObjectGroup};
 use crate::database::Uuid;
+use crate::database::models::{CasbinRule, ObjectGroup};
 use crate::error::Error;
+use crate::server::HandlerLog;
 use crate::server::casbin::GroupType;
 use crate::server::widgets::tree;
 use crate::server::widgets::{
-    centered_area, common::*, render_confirm_dialog, render_message_popup,
-    table_object_group_len_calculator, AdminTable, DisplayMode, Message,
+    AdminTable, DisplayMode, Message, centered_area, common::*, render_confirm_dialog,
+    render_message_popup, table_object_group_len_calculator,
 };
-use crate::server::HandlerLog;
 use crossterm::event::{KeyCode, KeyModifiers};
 use log::{error, info, warn};
 use ratatui::{
@@ -457,7 +457,7 @@ where
         if obj.is_group {
             if obj.id == iden.rid {
                 self.message = Some(Message::Error(vec![
-                    "Cannot add a group to itself".to_string()
+                    "Cannot add a group to itself".to_string(),
                 ]));
                 return;
             }
@@ -517,7 +517,7 @@ where
             }
             Err(ref err) => {
                 let msg = match err {
-                    Error::Sqlx(sqlx::Error::Database(ref db_err))
+                    Error::Sqlx(sqlx::Error::Database(db_err))
                         if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
                     {
                         warn!(
