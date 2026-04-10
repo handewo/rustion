@@ -11,7 +11,7 @@ use russh::{Channel, ChannelId, ChannelMsg, ChannelReadHalf, ChannelWriteHalf, P
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 
 static LOG_TYPE: &str = "target";
 
@@ -41,7 +41,7 @@ pub(crate) struct ConnectTarget {
     target_sec_name: Option<TargetSecretName>,
     notify: HashMap<ChannelId, mpsc::Sender<()>>,
 
-    record_session: HashMap<ChannelId, RecordingSession>,
+    record_session: HashMap<ChannelId, Arc<Mutex<RecordingSession>>>,
     log: HandlerLog,
 }
 
@@ -79,8 +79,8 @@ impl ConnectTarget {
         if let Some(w) = self.target_channel.get(&channel) {
             w.data(data).await?
         }
-        if let Some(r) = self.record_session.get_mut(&channel) {
-            r.session.handle_input(data).await;
+        if let Some(r) = self.record_session.get(&channel) {
+            r.lock().await.session.handle_input(data).await;
         }
 
         Ok(())
@@ -375,7 +375,7 @@ impl ConnectTarget {
 
             if self
                 .record_session
-                .insert(channel, recording_session)
+                .insert(channel, Arc::new(Mutex::new(recording_session)))
                 .is_some()
             {
                 return Err(Error::App(AppError::ChannelRecordExists));
@@ -472,9 +472,10 @@ impl ConnectTarget {
             session.channel_success(channel)?;
         }
 
-        if let Some(r) = self.record_session.get_mut(&channel) {
-            r.session.handle_marker("window change".to_string()).await;
-            r.session
+        if let Some(r) = self.record_session.get(&channel) {
+            let mut rec = r.lock().await;
+            rec.session.handle_marker("window change".to_string()).await;
+            rec.session
                 .handle_resize(asciinema::TtySize(col_width as u16, row_height as u16))
                 .await;
         }
@@ -523,11 +524,8 @@ impl ConnectTarget {
             return Err(Error::App(AppError::ChannelNotifyExists));
         };
 
-        let enable_record = backend.enable_record();
-        let mut record = self
-            .record_session
-            .remove(&channel)
-            .unwrap_or_else(|| panic!("[{}] record session should not be none", self.handler_id));
+        let record = self.record_session.get(&channel).cloned();
+
         let backend_for_task = backend.clone();
         let handler_id = self.handler_id;
         tokio::spawn(async move {
@@ -537,19 +535,25 @@ impl ConnectTarget {
                         if let Some(msg) = msg {
                             match msg {
                                 ChannelMsg::Data { data } => {
-                                    record.session.handle_output(data.as_ref()).await;
+                                    if let Some(r) = &record {
+                                        r.lock().await.session.handle_output(data.as_ref()).await;
+                                    }
                                     let _ = handle.data(channel, data).await;
                                 }
                                 ChannelMsg::Eof => {
                                     let _ = handle.eof(channel).await;
                                 }
                                 ChannelMsg::ExtendedData { data, ext: 1 }  => {
-                                    record.session.handle_output(data.as_ref()).await;
+                                    if let Some(r) = &record {
+                                        r.lock().await.session.handle_output(data.as_ref()).await;
+                                    }
                                     let _ = handle.extended_data(channel, 1, data).await;
 
                                 }
                                 ChannelMsg::ExitStatus { exit_status } => {
-                                    record.session.handle_exit(exit_status as i32 ).await;
+                                    if let Some(r) = &record {
+                                        r.lock().await.session.handle_exit(exit_status as i32).await;
+                                    }
                                     let _ = handle.exit_status_request(channel, exit_status).await;
                                 }
                                 _ => {}
@@ -564,10 +568,11 @@ impl ConnectTarget {
                 }
             }
             // Update session recording as completed
-            if let Ok(Some(rec)) = backend_for_task
-                .db_repository()
-                .get_session_recording_by_id(&record.recording_id)
-                .await
+            if let Some(r) = record
+                && let Ok(Some(rec)) = backend_for_task
+                    .db_repository()
+                    .get_session_recording_by_id(&r.lock().await.recording_id)
+                    .await
             {
                 let mut updated = rec;
                 updated.ended_at = Some(chrono::Utc::now().timestamp_millis());

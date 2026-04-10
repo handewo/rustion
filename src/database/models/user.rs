@@ -4,8 +4,8 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use argon2::{
-    password_hash::{PasswordHash, PasswordVerifier},
     Argon2,
+    password_hash::{PasswordHash, PasswordVerifier},
 };
 use chrono::Utc;
 use russh::keys::ssh_key::PublicKey;
@@ -131,10 +131,10 @@ impl User {
         if username.len() > MAX_USERNAME_LEN {
             return Err(ValidateError::UsernameTooLong);
         }
-        if let Some(e) = self.email.as_ref() {
-            if !crate::common::EMAIL_REGEX.is_match(e) {
-                return Err(ValidateError::EmailInvalid);
-            }
+        if let Some(e) = self.email.as_ref()
+            && !crate::common::EMAIL_REGEX.is_match(e)
+        {
+            return Err(ValidateError::EmailInvalid);
         }
         let mut invalid_keys = Vec::new();
         if let Some(keys) = self.authorized_keys.as_ref() {
