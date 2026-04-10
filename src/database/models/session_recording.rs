@@ -44,3 +44,9 @@ pub struct RecordingView {
     pub ended_at: Option<i64>,
     pub status: String,
 }
+
+impl RecordingView {
+    pub fn generate_path(&self) -> String {
+        generate_path(self.id)
+    }
+}

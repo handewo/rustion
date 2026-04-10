@@ -1,17 +1,19 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::io;
 use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::super::util::Quantizer;
-use super::{Event, EventData, Header};
+use super::{Asciicast, Event, EventData, Header, util};
 use crate::asciinema::tty::TtyTheme;
 
-use super::Result;
+use super::{Error, Result};
 
 #[derive(Deserialize)]
 struct V3Header {
+    version: u8,
     term: V3Term,
     timestamp: Option<u64>,
     idle_time_limit: Option<f64>,
@@ -45,6 +47,130 @@ struct RGB8(rgb::RGB8);
 
 #[derive(Clone)]
 struct V3Palette(Vec<RGB8>);
+
+#[derive(Debug, Deserialize)]
+struct V3Event {
+    #[serde(deserialize_with = "util::deserialize_time")]
+    time: Duration,
+    #[serde(deserialize_with = "deserialize_code")]
+    code: V3EventCode,
+    data: String,
+}
+
+#[derive(PartialEq, Debug)]
+enum V3EventCode {
+    Output,
+    Input,
+    Resize,
+    Marker,
+    Exit,
+    Other(char),
+}
+
+pub struct Parser {
+    header: V3Header,
+    prev_time: Duration,
+}
+
+pub fn open(header_line: &str) -> Result<Parser> {
+    let header = serde_json::from_str::<V3Header>(header_line)?;
+
+    if header.version != 3 {
+        return Err(Error::NotAsciicastV3);
+    }
+
+    Ok(Parser {
+        header,
+        prev_time: Duration::from_micros(0),
+    })
+}
+
+impl Parser {
+    pub fn parse<'a, I: Iterator<Item = io::Result<String>> + Send + 'a>(
+        mut self,
+        lines: I,
+    ) -> Asciicast<'a> {
+        let header = Header {
+            term_cols: self.header.term.cols,
+            term_rows: self.header.term.rows,
+            term_type: self.header.term.type_.clone(),
+            term_version: self.header.term.version.clone(),
+            timestamp: self.header.timestamp,
+            idle_time_limit: self.header.idle_time_limit,
+            command: self.header.command.clone(),
+            title: self.header.title.clone(),
+            env: self.header.env.clone(),
+        };
+
+        let events = Box::new(lines.filter_map(move |line| self.parse_line(line)));
+
+        Asciicast { header, events }
+    }
+
+    fn parse_line(&mut self, line: io::Result<String>) -> Option<Result<Event>> {
+        match line {
+            Ok(line) => {
+                if line.is_empty() || line.starts_with('#') {
+                    None
+                } else {
+                    Some(self.parse_event(line))
+                }
+            }
+
+            Err(e) => Some(Err(e.into())),
+        }
+    }
+
+    fn parse_event(&mut self, line: String) -> Result<Event> {
+        let event = serde_json::from_str::<V3Event>(&line)?;
+
+        let data = match event.code {
+            V3EventCode::Output => EventData::Output(event.data),
+            V3EventCode::Input => EventData::Input(event.data),
+
+            V3EventCode::Resize => match event.data.split_once('x') {
+                Some((cols, rows)) => {
+                    let cols: u16 = cols.parse().map_err(Error::InvalidCols)?;
+
+                    let rows: u16 = rows.parse().map_err(Error::InvalidRows)?;
+
+                    EventData::Resize(cols, rows)
+                }
+
+                None => return Err(Error::InvalidResize),
+            },
+
+            V3EventCode::Marker => EventData::Marker(event.data),
+            V3EventCode::Exit => EventData::Exit(event.data.parse().map_err(Error::InvalidExit)?),
+            V3EventCode::Other(c) => EventData::Other(c, event.data),
+        };
+
+        let time = self.prev_time + event.time;
+        self.prev_time = time;
+
+        Ok(Event { time, data })
+    }
+}
+
+fn deserialize_code<'de, D>(deserializer: D) -> Result<V3EventCode, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use V3EventCode::*;
+    use serde::de::Error;
+
+    let value: &str = Deserialize::deserialize(deserializer)?;
+
+    match value {
+        "o" => Ok(Output),
+        "i" => Ok(Input),
+        "r" => Ok(Resize),
+        "m" => Ok(Marker),
+        "x" => Ok(Exit),
+        "" => Err(Error::custom("missing event code")),
+        s => Ok(Other(s.chars().next().unwrap())),
+    }
+}
 
 pub struct V3Encoder {
     prev_time: Duration,
@@ -83,6 +209,7 @@ impl V3Encoder {
             Resize(cols, rows) => ('r', self.to_json_string(&format!("{cols}x{rows}"))),
             Marker(data) => ('m', self.to_json_string(data)),
             Exit(data) => ('x', self.to_json_string(&data.to_string())),
+            Other(code, data) => (*code, self.to_json_string(data)),
         };
 
         let dt = event.time - self.prev_time;
@@ -159,10 +286,10 @@ impl serde::Serialize for V3Header {
             map.serialize_entry("title", &title)?;
         }
 
-        if let Some(env) = &self.env {
-            if !env.is_empty() {
-                map.serialize_entry("env", &env)?;
-            }
+        if let Some(env) = &self.env
+            && !env.is_empty()
+        {
+            map.serialize_entry("env", &env)?;
         }
         map.end()
     }
@@ -280,6 +407,7 @@ impl serde::Serialize for V3Palette {
 impl From<&Header> for V3Header {
     fn from(header: &Header) -> Self {
         V3Header {
+            version: 3,
             term: V3Term {
                 cols: header.term_cols,
                 rows: header.term_rows,

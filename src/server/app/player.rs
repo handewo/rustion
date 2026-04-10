@@ -1,32 +1,46 @@
 use crate::database::common as db_common;
 use crate::database::models::{RecordingView, User};
 use crate::error::Error;
+use crate::server::HandlerLog;
 use crate::server::casbin;
 use crate::server::widgets::{
-    common::DATETIME_LENGTH, render_message_popup, AdminTable, DisplayMode, Message,
+    AdminTable, DisplayMode, Message, common::DATETIME_LENGTH, render_message_popup,
 };
-use crate::server::HandlerLog;
-use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent, SenderWriter};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEventKind, KeyModifiers, NoTtyEvent, SenderWriter,
+};
 use ratatui::backend::NottyBackend;
-use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{palette::tailwind, Style};
+use ratatui::buffer::Buffer;
+use tui_term::widget::PseudoTerminal;
+
+use ratatui::layout::{Constraint, Layout, Rect, Size};
+use ratatui::style::{Modifier, Style, palette::tailwind};
 use ratatui::text::Text;
-use ratatui::widgets::{Block, BorderType, Paragraph};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget,
+};
 use ratatui::{Frame, Terminal};
 use std::io::Write;
 use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
+use vt100::Screen;
 
+use crate::asciinema::{
+    asciicast::{self, EventData},
+    player,
+};
 use crate::database::Uuid;
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 use log::{debug, trace, warn};
 use tokio::sync::mpsc;
 
 use russh::server as ru_server;
 use russh::{Channel, ChannelId, Pty};
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
+const SCROLLBACK_LEN: usize = 1000;
 const LOG_TYPE: &str = "player";
 const HELP_TEXT: [&str; 2] = [
     "(Enter) play | (Esc) quit | (↑↓) select",
@@ -215,11 +229,9 @@ impl Player {
             loop {
                 tokio::select! {
                     data = recv_from_shell.recv() => {
-                        if let Some(d) = data {
-                            if handle_session.data(channel, d).await.is_err() {
-                                warn!("[{}] Fail to send data to session from prompt",handler_id);
-                                break;
-                            }
+                        if let Some(d) = data && handle_session.data(channel, d).await.is_err() {
+                            warn!("[{}] Fail to send data to session from prompt",handler_id);
+                            break;
                         };
                     }
                     status = recv_status.recv() => {
@@ -277,6 +289,15 @@ where
     handler_id: Uuid,
     user_id: Uuid,
     message: Option<Message>,
+    horizontal_scroll_offset: usize,
+    vertical_scroll_offset: usize,
+    max_vertical_scroll_offset: usize,
+    max_horizontal_scroll_offset: usize,
+    scroll_size: usize,
+    scroll_position: usize,
+
+    is_playing: bool,
+    pause: bool,
     pub help_text: [&'static str; 2],
 }
 
@@ -313,6 +334,15 @@ where
             handler_id,
             user_id,
             message,
+            horizontal_scroll_offset: 0,
+            vertical_scroll_offset: 0,
+            max_vertical_scroll_offset: 0,
+            max_horizontal_scroll_offset: 0,
+            scroll_size: 0,
+            scroll_position: 0,
+
+            is_playing: false,
+            pause: false,
             help_text: HELP_TEXT,
         }
     }
@@ -363,14 +393,293 @@ where
         self.table = AdminTable::new(&self.items, &tailwind::BLUE);
     }
 
-    fn do_play(&mut self, idx: usize) {
-        // TODO: Implement recording playback
-        if let Some(rec) = self.items.get(idx) {
-            self.message = Some(Message::Info(vec![format!(
-                "Playing recording: {}",
-                rec.target_secret
-            )]));
+    fn do_play<W: Write>(
+        &mut self,
+        tty: &NoTtyEvent,
+        terminal: &mut Terminal<NottyBackend<W>>,
+    ) -> Result<(), Error> {
+        let idx = self.table.state.selected().unwrap();
+        let file_path = std::path::PathBuf::from(self.backend.record_path())
+            .join(self.items.get(idx).unwrap().generate_path());
+        let recording = asciicast::open_from_path(std::path::Path::new(&file_path))?;
+
+        let initial_cols = recording.header.term_cols;
+        let initial_rows = recording.header.term_rows;
+        let mut events = player::emit_session_events(recording, 1.5, None)?;
+
+        let mut size = Size {
+            width: initial_cols,
+            height: initial_rows,
+        };
+        self.scroll_size = initial_rows as usize;
+        let parser = Arc::new(RwLock::new(vt100::Parser::new(
+            initial_rows,
+            initial_cols,
+            SCROLLBACK_LEN,
+        )));
+
+        let mut epoch = Instant::now();
+        let mut next_event = self.t_handle.block_on(events.recv()).transpose()?;
+        let mut processed_buf = Vec::new();
+        let pause_on_markers = false;
+        let mut pause_elapsed_time: Option<u64> = None;
+
+        while let Some(asciicast::Event { time, data }) = &next_event {
+            if let Some(pet) = pause_elapsed_time {
+                if let Event::Key(key) = event::read(tty)?
+                    && key.kind == KeyEventKind::Press
+                {
+                    let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
+                    match key.code {
+                        KeyCode::Char('q') => return Ok(()),
+                        KeyCode::Char('c') if ctrl_pressed => return Ok(()),
+                        KeyCode::Char(' ') => {
+                            self.pause = false;
+                            epoch = Instant::now() - Duration::from_micros(pet);
+                            pause_elapsed_time = None;
+                        }
+                        KeyCode::Char('.') => {
+                            pause_elapsed_time = Some(time.as_micros() as u64);
+                            match data {
+                                EventData::Output(data) => {
+                                    let mut parser = parser.write().unwrap();
+                                    parser.process(data.as_bytes());
+                                }
+
+                                EventData::Resize(cols, rows) => {
+                                    size.width = *cols;
+                                    size.height = *rows;
+                                    self.scroll_size = *rows as usize;
+                                    parser.write().unwrap().screen_mut().set_size(*rows, *cols);
+                                }
+
+                                _ => {}
+                            }
+                            terminal.draw(|f| {
+                                self.player_ui(f, parser.read().unwrap().screen(), size)
+                            })?;
+
+                            next_event = self.t_handle.block_on(events.recv()).transpose()?;
+                        }
+                        KeyCode::Char(']') => {
+                            while let Some(asciicast::Event { time, data }) = next_event {
+                                terminal.draw(|f| {
+                                    self.player_ui(f, parser.read().unwrap().screen(), size)
+                                })?;
+                                next_event = self.t_handle.block_on(events.recv()).transpose()?;
+
+                                match data {
+                                    EventData::Output(data) => {
+                                        let mut parser = parser.write().unwrap();
+                                        parser.process(data.as_bytes());
+                                    }
+
+                                    EventData::Marker(_) => {
+                                        pause_elapsed_time = Some(time.as_micros() as u64);
+                                        break;
+                                    }
+
+                                    EventData::Resize(cols, rows) => {
+                                        size.width = cols;
+                                        size.height = rows;
+                                        self.scroll_size = rows as usize;
+                                        parser.write().unwrap().screen_mut().set_size(rows, cols);
+                                    }
+
+                                    _ => {}
+                                }
+                            }
+                        }
+                        KeyCode::Char('l') | KeyCode::Right => {
+                            self.horizontal_scroll_offset = if self.horizontal_scroll_offset
+                                == self.max_horizontal_scroll_offset
+                            {
+                                0
+                            } else {
+                                self.horizontal_scroll_offset.saturating_add(1)
+                            };
+                            terminal.draw(|f| {
+                                self.player_ui(f, parser.read().unwrap().screen(), size)
+                            })?;
+                        }
+                        KeyCode::Char('h') | KeyCode::Left => {
+                            self.horizontal_scroll_offset = if self.horizontal_scroll_offset == 0 {
+                                self.max_horizontal_scroll_offset
+                            } else {
+                                self.horizontal_scroll_offset.saturating_sub(1)
+                            };
+                            terminal.draw(|f| {
+                                self.player_ui(f, parser.read().unwrap().screen(), size)
+                            })?;
+                        }
+                        KeyCode::Char('f') if ctrl_pressed => {
+                            self.decrease_scroll_position();
+                            parser
+                                .write()
+                                .unwrap()
+                                .screen_mut()
+                                .set_scrollback(self.scroll_position);
+                            terminal.draw(|f| {
+                                self.player_ui(f, parser.read().unwrap().screen(), size)
+                            })?;
+                        }
+                        KeyCode::PageDown => {
+                            self.decrease_scroll_position();
+                            parser
+                                .write()
+                                .unwrap()
+                                .screen_mut()
+                                .set_scrollback(self.scroll_position);
+                            terminal.draw(|f| {
+                                self.player_ui(f, parser.read().unwrap().screen(), size)
+                            })?;
+                        }
+                        KeyCode::Char('b') if ctrl_pressed => {
+                            self.increase_scroll_position();
+                            parser
+                                .write()
+                                .unwrap()
+                                .screen_mut()
+                                .set_scrollback(self.scroll_position);
+                            terminal.draw(|f| {
+                                self.player_ui(f, parser.read().unwrap().screen(), size)
+                            })?;
+                        }
+                        KeyCode::PageUp => {
+                            self.increase_scroll_position();
+                            parser
+                                .write()
+                                .unwrap()
+                                .screen_mut()
+                                .set_scrollback(self.scroll_position);
+                            terminal.draw(|f| {
+                                self.player_ui(f, parser.read().unwrap().screen(), size)
+                            })?;
+                        }
+                        KeyCode::Char('j') | KeyCode::Down => {
+                            self.vertical_scroll_offset =
+                                if self.vertical_scroll_offset == self.max_vertical_scroll_offset {
+                                    0
+                                } else {
+                                    self.vertical_scroll_offset.saturating_add(1)
+                                };
+                            terminal.draw(|f| {
+                                self.player_ui(f, parser.read().unwrap().screen(), size)
+                            })?;
+                        }
+                        KeyCode::Char('k') | KeyCode::Up => {
+                            self.vertical_scroll_offset = if self.vertical_scroll_offset == 0 {
+                                self.max_vertical_scroll_offset
+                            } else {
+                                self.vertical_scroll_offset.saturating_sub(1)
+                            };
+                            terminal.draw(|f| {
+                                self.player_ui(f, parser.read().unwrap().screen(), size)
+                            })?;
+                        }
+                        _ => {}
+                    }
+                }
+            } else {
+                parser.write().unwrap().screen_mut().set_scrollback(0);
+                self.scroll_position = 0;
+                while let Some(asciicast::Event { time, data }) = &next_event {
+                    terminal.draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))?;
+                    let delay = time.as_micros() as i64 - epoch.elapsed().as_micros() as i64;
+
+                    if delay > 0 && event::poll(tty, Duration::from_micros(delay as u64))? {
+                        // It's guaranteed that the `read()` won't block when the `poll()`
+                        // function returns `true`
+                        if let Event::Key(key) = event::read(tty)?
+                            && key.kind == KeyEventKind::Press
+                        {
+                            let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
+                            match key.code {
+                                KeyCode::Char('q') => return Ok(()),
+                                KeyCode::Char('c') if ctrl_pressed => return Ok(()),
+                                KeyCode::Char(' ') => {
+                                    self.pause = true;
+                                    terminal.draw(|f| {
+                                        self.player_ui(f, parser.read().unwrap().screen(), size)
+                                    })?;
+                                    pause_elapsed_time = Some(epoch.elapsed().as_micros() as u64);
+                                    break;
+                                }
+                                KeyCode::Char('l') | KeyCode::Right => {
+                                    self.horizontal_scroll_offset = if self.horizontal_scroll_offset
+                                        == self.max_horizontal_scroll_offset
+                                    {
+                                        0
+                                    } else {
+                                        self.horizontal_scroll_offset.saturating_add(1)
+                                    }
+                                }
+                                KeyCode::Char('h') | KeyCode::Left => {
+                                    self.horizontal_scroll_offset =
+                                        if self.horizontal_scroll_offset == 0 {
+                                            self.max_horizontal_scroll_offset
+                                        } else {
+                                            self.horizontal_scroll_offset.saturating_sub(1)
+                                        };
+                                }
+                                KeyCode::Char('j') | KeyCode::Down => {
+                                    self.vertical_scroll_offset = if self.vertical_scroll_offset
+                                        == self.max_vertical_scroll_offset
+                                    {
+                                        0
+                                    } else {
+                                        self.vertical_scroll_offset.saturating_add(1)
+                                    }
+                                }
+                                KeyCode::Char('k') | KeyCode::Up => {
+                                    self.vertical_scroll_offset =
+                                        if self.vertical_scroll_offset == 0 {
+                                            self.max_vertical_scroll_offset
+                                        } else {
+                                            self.vertical_scroll_offset.saturating_sub(1)
+                                        };
+                                }
+
+                                _ => {}
+                            }
+                        }
+                        continue;
+                    }
+
+                    match data {
+                        EventData::Output(data) => {
+                            let size = data.len();
+                            processed_buf.extend_from_slice(&data.as_bytes()[..size]);
+                            let mut parser = parser.write().unwrap();
+                            parser.process(&processed_buf);
+
+                            // Clear the processed portion of the buffer
+                            processed_buf.clear();
+                        }
+
+                        EventData::Resize(cols, rows) => {
+                            size.width = *cols;
+                            size.height = *rows;
+                            self.scroll_size = *rows as usize;
+                            parser.write().unwrap().screen_mut().set_size(*rows, *cols);
+                        }
+
+                        EventData::Marker(_) => {
+                            if pause_on_markers {
+                                pause_elapsed_time = Some(time.as_micros() as u64);
+                                next_event = self.t_handle.block_on(events.recv()).transpose()?;
+                                break;
+                            }
+                        }
+
+                        _ => (),
+                    }
+
+                    next_event = self.t_handle.block_on(events.recv()).transpose()?;
+                }
+            }
         }
+        Ok(())
     }
 
     fn run<W: Write>(
@@ -380,6 +689,13 @@ where
         send_status: mpsc::Sender<Status>,
     ) -> Result<(), Error> {
         loop {
+            if self.is_playing {
+                if let Err(e) = self.do_play(&tty, terminal) {
+                    warn!("[{}] Play record cast error: {}", self.handler_id, e);
+                    self.message = Some(Message::Error(vec!["Internal error".into()]));
+                };
+                self.is_playing = false;
+            }
             terminal.draw(|frame| self.render(frame))?;
             let event = event::read(&tty)?;
 
@@ -412,8 +728,7 @@ where
                     KeyCode::Char('j') | KeyCode::Down => self.table.next_row(items_len),
                     KeyCode::Char('k') | KeyCode::Up => self.table.previous_row(items_len),
                     KeyCode::Enter => {
-                        let idx = self.table.state.selected().unwrap_or(0);
-                        self.do_play(idx);
+                        self.is_playing = true;
                     }
                     _ => {}
                 }
@@ -477,5 +792,200 @@ where
             );
 
         frame.render_widget(info_footer, area);
+    }
+
+    fn player_ui(&mut self, f: &mut Frame, screen: &Screen, size: Size) {
+        let chunks = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints(
+                [
+                    ratatui::layout::Constraint::Percentage(100),
+                    ratatui::layout::Constraint::Length(1),
+                ]
+                .as_ref(),
+            )
+            .split(f.area());
+        let block = Block::default().borders(Borders::ALL).style(
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(self.table.colors.footer_border_color),
+        );
+        let term_area = Rect::new(0, 0, size.width + 2, size.height + 2);
+        let buf = f.buffer_mut();
+        let mut term_buf = Buffer::empty(term_area);
+        let vertical_bar_needed = term_area.height > chunks[0].height;
+        let horizontal_bar_needed = term_area.width > chunks[0].width;
+        let (visible_area, horizontal_bar_area, vertical_bar_area) =
+            match (horizontal_bar_needed, vertical_bar_needed) {
+                (true, true) => {
+                    let ver_chunks = Layout::vertical([
+                        ratatui::layout::Constraint::Percentage(100),
+                        ratatui::layout::Constraint::Length(1),
+                    ])
+                    .split(chunks[0]);
+                    let hor_chunks0 = Layout::horizontal([
+                        ratatui::layout::Constraint::Percentage(100),
+                        ratatui::layout::Constraint::Length(1),
+                    ])
+                    .split(ver_chunks[0]);
+                    let hor_chunks1 = Layout::horizontal([
+                        ratatui::layout::Constraint::Percentage(100),
+                        ratatui::layout::Constraint::Length(1),
+                    ])
+                    .split(ver_chunks[1]);
+                    (hor_chunks0[0], hor_chunks1[0], hor_chunks0[1])
+                }
+                (true, false) => {
+                    let sub_chunks = Layout::vertical([
+                        ratatui::layout::Constraint::Percentage(100),
+                        ratatui::layout::Constraint::Length(1),
+                    ])
+                    .split(chunks[0]);
+                    (sub_chunks[0], sub_chunks[1], Rect::default())
+                }
+                (false, true) => {
+                    let sub_chunks = Layout::horizontal([
+                        ratatui::layout::Constraint::Percentage(100),
+                        ratatui::layout::Constraint::Length(1),
+                    ])
+                    .split(chunks[0]);
+                    (sub_chunks[0], Rect::default(), sub_chunks[1])
+                }
+                (false, false) => (chunks[0], Rect::default(), Rect::default()),
+            };
+
+        if horizontal_bar_needed {
+            use ratatui::widgets::StatefulWidget;
+            let max_horizontal_scroll_offset = (term_area.width - visible_area.width) as usize;
+            self.max_horizontal_scroll_offset = max_horizontal_scroll_offset;
+            self.horizontal_scroll_offset =
+                if self.horizontal_scroll_offset > max_horizontal_scroll_offset {
+                    max_horizontal_scroll_offset
+                } else {
+                    self.horizontal_scroll_offset
+                };
+            // let area = visible_area.intersection(buf.area);
+            let mut state = ScrollbarState::new(max_horizontal_scroll_offset)
+                .position(self.horizontal_scroll_offset);
+            Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
+                .thumb_symbol("🬋")
+                .render(horizontal_bar_area, buf, &mut state);
+        }
+
+        if vertical_bar_needed {
+            use ratatui::widgets::StatefulWidget;
+            let max_vertical_scroll_offset = (term_area.height - visible_area.height) as usize;
+            self.max_vertical_scroll_offset = max_vertical_scroll_offset;
+            self.vertical_scroll_offset =
+                if self.vertical_scroll_offset > max_vertical_scroll_offset {
+                    max_vertical_scroll_offset
+                } else {
+                    self.vertical_scroll_offset
+                };
+            // let area = visible_area.intersection(buf.area);
+            let mut state = ScrollbarState::new(max_vertical_scroll_offset)
+                .position(self.vertical_scroll_offset);
+            Scrollbar::new(ScrollbarOrientation::VerticalRight).render(
+                vertical_bar_area,
+                buf,
+                &mut state,
+            );
+        }
+
+        let pseudo_term = PseudoTerminal::new(screen).block(block);
+        pseudo_term.render(term_area, &mut term_buf);
+        match (horizontal_bar_needed, vertical_bar_needed) {
+            (false, false) => {
+                let width = term_area.width;
+                for (i, cell) in term_buf.content.into_iter().enumerate() {
+                    let x = i as u16 % width;
+                    let y = i as u16 / width;
+                    buf[(visible_area.x + x, visible_area.y + y)] = cell;
+                }
+            }
+            (true, false) => {
+                let drop_cell = term_area.width as usize
+                    - visible_area.width as usize
+                    - self.horizontal_scroll_offset;
+                let iter = &mut term_buf.content.into_iter();
+                for y in 0..term_area.height {
+                    let line = iter
+                        .skip(self.horizontal_scroll_offset)
+                        .take(visible_area.width as usize);
+                    for (x, cell) in line.enumerate() {
+                        buf[(visible_area.x + x as u16, visible_area.y + y)] = cell;
+                    }
+
+                    if drop_cell > 0 {
+                        let _ = iter.nth(drop_cell - 1);
+                    }
+                }
+            }
+            (false, true) => {
+                let width = term_area.width;
+                let visible_content = term_buf
+                    .content
+                    .into_iter()
+                    .skip(width as usize * self.vertical_scroll_offset)
+                    .take((width * visible_area.height) as usize);
+                for (i, cell) in visible_content.enumerate() {
+                    let x = i as u16 % width;
+                    let y = i as u16 / width;
+                    buf[(visible_area.x + x, visible_area.y + y)] = cell;
+                }
+            }
+            (true, true) => {
+                let drop_cell = term_area.width as usize
+                    - visible_area.width as usize
+                    - self.horizontal_scroll_offset;
+                let iter = &mut term_buf.content.into_iter();
+                let v_height = visible_area.height;
+                let offset = self.vertical_scroll_offset * term_area.width as usize;
+                if offset > 0 {
+                    iter.nth(offset - 1);
+                }
+                for y in 0..v_height {
+                    let line = iter
+                        .skip(self.horizontal_scroll_offset)
+                        .take(visible_area.width as usize);
+                    for (x, cell) in line.enumerate() {
+                        buf[(visible_area.x + x as u16, visible_area.y + y)] = cell;
+                    }
+
+                    if drop_cell > 0 {
+                        let _ = iter.nth(drop_cell - 1);
+                    }
+                }
+            }
+        }
+
+        let explanation = if self.pause {
+            format!(
+                "<space> play <.> step <]> next mark <PgUp/PgDn> scroll lines [{}*{}]",
+                term_area.width, term_area.height
+            )
+        } else {
+            format!(
+                "<space> pause <q> exit [{}*{}]",
+                term_area.width, term_area.height
+            )
+        };
+        let explanation = Paragraph::new(explanation).style(
+            Style::default()
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                .fg(self.table.colors.footer_border_color),
+        );
+        f.render_widget(explanation, chunks[1]);
+    }
+
+    fn decrease_scroll_position(&mut self) {
+        self.scroll_position = self.scroll_position.saturating_sub(self.scroll_size);
+    }
+
+    fn increase_scroll_position(&mut self) {
+        self.scroll_position += self.scroll_size;
+        if self.scroll_position > SCROLLBACK_LEN {
+            self.scroll_position = SCROLLBACK_LEN
+        }
     }
 }

@@ -19,4 +19,6 @@ pub enum Error {
     InvalidResize,
     #[error("invalid exit value: {0}")]
     InvalidExit(ParseIntError),
+    #[error("not an asciicast v3 file")]
+    NotAsciicastV3,
 }

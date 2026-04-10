@@ -1,7 +1,8 @@
-mod asciicast;
+pub mod asciicast;
 mod encoder;
 mod error;
 mod file_writer;
+pub mod player;
 mod session;
 mod tty;
 mod util;

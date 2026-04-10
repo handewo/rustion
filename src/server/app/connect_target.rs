@@ -1,9 +1,9 @@
 use crate::asciinema;
-use crate::database::models::{SessionRecording, Target, TargetSecretName, User};
 use crate::database::Uuid;
+use crate::database::models::{SessionRecording, Target, TargetSecretName, User};
 use crate::error::Error;
 use crate::server::app::error::AppError;
-use crate::server::{casbin, HandlerLog};
+use crate::server::{HandlerLog, casbin};
 use log::{debug, trace};
 use russh::client as ru_client;
 use russh::server as ru_server;
@@ -523,6 +523,7 @@ impl ConnectTarget {
             return Err(Error::App(AppError::ChannelNotifyExists));
         };
 
+        let enable_record = backend.enable_record();
         let mut record = self
             .record_session
             .remove(&channel)
@@ -536,19 +537,19 @@ impl ConnectTarget {
                         if let Some(msg) = msg {
                             match msg {
                                 ChannelMsg::Data { data } => {
-                                        record.session.handle_output(data.as_ref()).await;
+                                    record.session.handle_output(data.as_ref()).await;
                                     let _ = handle.data(channel, data).await;
                                 }
                                 ChannelMsg::Eof => {
                                     let _ = handle.eof(channel).await;
                                 }
                                 ChannelMsg::ExtendedData { data, ext: 1 }  => {
-                                        record.session.handle_output(data.as_ref()).await;
+                                    record.session.handle_output(data.as_ref()).await;
                                     let _ = handle.extended_data(channel, 1, data).await;
 
                                 }
                                 ChannelMsg::ExitStatus { exit_status } => {
-                                        record.session.handle_exit(exit_status as i32 ).await;
+                                    record.session.handle_exit(exit_status as i32 ).await;
                                     let _ = handle.exit_status_request(channel, exit_status).await;
                                 }
                                 _ => {}
