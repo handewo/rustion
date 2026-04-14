@@ -2,14 +2,13 @@ use super::casbin;
 use crate::config::Config;
 use crate::database::common::*;
 use crate::database::{models::*, service::DatabaseService};
-use ::log::{error, info};
+use ::log::info;
 use uuid::Uuid;
 
 pub async fn init_service(config: Config) {
     let db = match DatabaseService::new(&config.database).await {
         Ok(d) => d,
         Err(e) => {
-            error!("Failed to initialize database service: {}", e);
             panic!("Failed to initialize database service: {}", e);
         }
     };
@@ -17,66 +16,54 @@ pub async fn init_service(config: Config) {
     // Check if tables are empty
     match db.repository().list_users(false).await {
         Ok(users) if !users.is_empty() => {
-            error!("Table 'users' is not empty - initialization aborted");
             panic!("Table: users is not empty");
         }
         Err(e) => {
-            error!("Failed to list users: {}", e);
             panic!("Failed to list users: {}", e);
         }
         _ => {}
     }
     match db.repository().list_casbin_rules().await {
         Ok(rules) if !rules.is_empty() => {
-            error!("Table 'casbin_rule' is not empty - initialization aborted");
             panic!("Table: casbin_rule is not empty");
         }
         Err(e) => {
-            error!("Failed to list casbin_rules: {}", e);
             panic!("Failed to list casbin_rules: {}", e);
         }
         _ => {}
     }
     match db.repository().list_secrets(false).await {
         Ok(secrets) if !secrets.is_empty() => {
-            error!("Table 'secrets' is not empty - initialization aborted");
             panic!("Table: secrets is not empty");
         }
         Err(e) => {
-            error!("Failed to list secrets: {}", e);
             panic!("Failed to list secrets: {}", e);
         }
         _ => {}
     }
     match db.repository().list_targets(false).await {
         Ok(targets) if !targets.is_empty() => {
-            error!("Table 'targets' is not empty - initialization aborted");
             panic!("Table: targets is not empty");
         }
         Err(e) => {
-            error!("Failed to list targets: {}", e);
             panic!("Failed to list targets: {}", e);
         }
         _ => {}
     }
     match db.repository().list_casbin_names(false).await {
         Ok(names) if !names.is_empty() => {
-            error!("Table 'casbin_names' is not empty - initialization aborted");
             panic!("Table: casbin_names is not empty");
         }
         Err(e) => {
-            error!("Failed to list casbin_names: {}", e);
             panic!("Failed to list casbin_names: {}", e);
         }
         _ => {}
     }
     match db.repository().list_target_secrets(false).await {
         Ok(ts) if !ts.is_empty() => {
-            error!("Table 'target_secrets' is not empty - initialization aborted");
             panic!("Table: target_secrets doesn't empty");
         }
         Err(e) => {
-            error!("Failed to list target_secrets: {}", e);
             panic!("Failed to list target_secrets: {}", e);
         }
         _ => {}
@@ -95,7 +82,6 @@ pub async fn init_service(config: Config) {
             user
         }
         Err(e) => {
-            error!("Failed to create admin user: {}", e);
             panic!("Failed to create admin user: {}", e);
         }
     };
@@ -169,7 +155,6 @@ pub async fn init_service(config: Config) {
             rows
         }
         Err(e) => {
-            error!("Failed to create casbin_names batch: {}", e);
             panic!("Failed to create casbin_names batch: {}", e);
         }
     };
@@ -195,7 +180,6 @@ pub async fn init_service(config: Config) {
     match db.repository().create_casbin_name(&login_group).await {
         Ok(_) => info!("Created login_group casbin_name"),
         Err(e) => {
-            error!("Failed to create login_group: {}", e);
             panic!("Failed to create login_group: {}", e);
         }
     }
@@ -226,8 +210,7 @@ pub async fn init_service(config: Config) {
     match db.repository().create_casbin_rule(&p).await {
         Ok(_) => info!("Created policy: admin can login from localhost (IPv4)"),
         Err(e) => {
-            error!("Failed to create admin login policy (IPv4): {}", e);
-            panic!("Failed to create casbin rule: {}", e);
+            panic!("Failed to create admin login policy (IPv4): {}", e);
         }
     }
 
@@ -245,8 +228,7 @@ pub async fn init_service(config: Config) {
     match db.repository().create_casbin_rule(&p).await {
         Ok(_) => info!("Created policy: admin can access admin panel from localhost (IPv4)"),
         Err(e) => {
-            error!("Failed to create admin panel policy (IPv4): {}", e);
-            panic!("Failed to create casbin rule: {}", e);
+            panic!("Failed to create admin panel policy (IPv4): {}", e);
         }
     }
 
@@ -275,8 +257,7 @@ pub async fn init_service(config: Config) {
     match db.repository().create_casbin_rule(&p).await {
         Ok(_) => info!("Created policy: admin can login from localhost (IPv6)"),
         Err(e) => {
-            error!("Failed to create admin login policy (IPv6): {}", e);
-            panic!("Failed to create casbin rule: {}", e);
+            panic!("Failed to create admin login policy (IPv6): {}", e);
         }
     }
 
@@ -294,8 +275,7 @@ pub async fn init_service(config: Config) {
     match db.repository().create_casbin_rule(&p).await {
         Ok(_) => info!("Created policy: admin can access admin panel from localhost (IPv6)"),
         Err(e) => {
-            error!("Failed to create admin panel policy (IPv6): {}", e);
-            panic!("Failed to create casbin rule: {}", e);
+            panic!("Failed to create admin panel policy (IPv6): {}", e);
         }
     }
 
@@ -319,15 +299,13 @@ pub async fn init_service(config: Config) {
     match db.repository().create_casbin_rule(&p).await {
         Ok(_) => info!("Created policy: login_group can login (no IP restriction)"),
         Err(e) => {
-            error!("Failed to create login_group policy: {}", e);
-            panic!("Failed to create casbin rule: {}", e);
+            panic!("Failed to create login_group policy: {}", e);
         }
     }
 
     let server = match crate::server::BastionServer::with_config(config).await {
         Ok(s) => s,
         Err(e) => {
-            error!("Failed to create BastionServer: {}", e);
             panic!("Failed to create BastionServer: {}", e);
         }
     };
@@ -335,7 +313,6 @@ pub async fn init_service(config: Config) {
     let pass = match server.generate_random_password(u).await {
         Ok(p) => p,
         Err(e) => {
-            error!("Failed to generate random password: {}", e);
             panic!("Failed to generate random password: {}", e);
         }
     };
