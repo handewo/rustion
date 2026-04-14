@@ -671,7 +671,7 @@ where
         match self.editor {
             Editor::User(ref mut e) => {
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
-                    if !e.show_cancel_confirmation {
+                    if !e.form.show_cancel_confirmation {
                         let mut password = String::new();
                         let mut user = e.user.to_owned();
 
@@ -786,7 +786,7 @@ where
             }
             Editor::Secret(ref mut e) => {
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
-                    if !e.show_cancel_confirmation {
+                    if !e.form.show_cancel_confirmation {
                         let mut secret = e.secret.to_owned();
                         if e.private_key_updated {
                             secret.encrypt_private_key(self.backend.encrypt_plain_text())?;
@@ -900,7 +900,7 @@ where
             }
             Editor::CasbinName(ref mut e) => {
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
-                    if !e.show_cancel_confirmation {
+                    if !e.form.show_cancel_confirmation {
                         let casbin_name = e.casbin_name.to_owned();
 
                         let (action, result) = match self.popup {
@@ -1273,14 +1273,14 @@ where
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let text = match self.editor {
-            Editor::User(ref e) => e.as_ref().help_text,
+            Editor::User(ref e) => e.as_ref().form.help_text,
             Editor::Target(ref e) => e.as_ref().form.help_text,
-            Editor::Secret(ref e) => e.as_ref().help_text,
+            Editor::Secret(ref e) => e.as_ref().form.help_text,
             Editor::Bind(ref e) => e.as_ref().help_text,
             Editor::CasbinGroup(ref e) => e.as_ref().help_text,
             Editor::Permission(ref e) => e.as_ref().help_text,
             Editor::GrantRole(ref e) => e.as_ref().help_text,
-            Editor::CasbinName(ref e) => e.as_ref().help_text,
+            Editor::CasbinName(ref e) => e.as_ref().form.help_text,
             Editor::None => {
                 if self.selected_tab == SelectedTab::Users {
                     USER_HELP_TEXT
