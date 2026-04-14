@@ -1,7 +1,9 @@
 pub mod common;
+pub mod form;
 pub mod table;
 pub mod tree;
 
+pub use form::*;
 pub use table::*;
 
 use crossterm::event::KeyCode;

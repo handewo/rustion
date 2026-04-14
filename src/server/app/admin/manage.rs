@@ -733,7 +733,7 @@ where
             }
             Editor::Target(ref mut e) => {
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
-                    if !e.show_cancel_confirmation {
+                    if !e.form.show_cancel_confirmation {
                         let target = e.target.to_owned();
 
                         let (action, result) = match self.popup {
@@ -1274,7 +1274,7 @@ where
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let text = match self.editor {
             Editor::User(ref e) => e.as_ref().help_text,
-            Editor::Target(ref e) => e.as_ref().help_text,
+            Editor::Target(ref e) => e.as_ref().form.help_text,
             Editor::Secret(ref e) => e.as_ref().help_text,
             Editor::Bind(ref e) => e.as_ref().help_text,
             Editor::CasbinGroup(ref e) => e.as_ref().help_text,
