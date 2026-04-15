@@ -42,8 +42,8 @@ inactivity_timeout = "1h"
 
 # Time to wait before sending authentication rejection response
 # This helps prevent brute-force attacks by slowing down failed auth attempts
-# Default: 1000ms (1 second)
-auth_rejection_time = "100ms"
+# Default: 1s
+auth_rejection_time = "1000ms"
 
 # SSH server identification string sent to clients
 # This appears in client logs and SSH banner
