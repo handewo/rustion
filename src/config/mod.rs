@@ -63,6 +63,10 @@ fn default_record_path() -> String {
     "./record".to_string()
 }
 
+fn default_auth_rejection_time() -> Duration {
+    Duration::from_millis(1000)
+}
+
 fn default_max_auth_attempts_per_conn() -> u32 {
     5
 }
@@ -113,6 +117,9 @@ pub struct Config {
     pub record_input: bool,
     #[serde(default = "default_record_path")]
     pub record_path: String,
+    #[serde(default = "default_auth_rejection_time")]
+    #[serde(with = "humantime_serde")]
+    pub auth_rejection_time: Duration,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,6 +170,7 @@ impl Config {
             enable_record: false,
             record_input: false,
             record_path: default_record_path(),
+            auth_rejection_time: default_auth_rejection_time(),
         }
     }
 
@@ -287,7 +295,8 @@ impl std::fmt::Display for Config {
             database: {}\r
             enable_record: {}\r
             record_input: {}\r
-            record_path: {}\r",
+            record_path: {}\r
+            auth_rejection_time: {}\r",
             self.listen,
             self.server_key,
             self.server_id,
@@ -308,6 +317,7 @@ impl std::fmt::Display for Config {
             self.enable_record,
             self.record_input,
             self.record_path,
+            humantime::format_duration(self.auth_rejection_time),
         )
     }
 }
@@ -335,6 +345,7 @@ mod tests {
             enable_record: false,
             record_input: false,
             record_path: default_record_path(),
+            auth_rejection_time: default_auth_rejection_time(),
         };
         assert!(config.parse_listen_addr().is_ok());
 
@@ -355,6 +366,7 @@ mod tests {
             enable_record: false,
             record_input: false,
             record_path: default_record_path(),
+            auth_rejection_time: default_auth_rejection_time(),
         };
         let addr = config.parse_listen_addr().unwrap();
         assert_eq!(addr.port(), 2222);
@@ -376,6 +388,7 @@ mod tests {
             enable_record: false,
             record_input: false,
             record_path: default_record_path(),
+            auth_rejection_time: default_auth_rejection_time(),
         };
         let addr = config.parse_listen_addr().unwrap();
         assert_eq!(addr.port(), 2222);
@@ -403,6 +416,7 @@ mod tests {
             enable_record: false,
             record_input: false,
             record_path: default_record_path(),
+            auth_rejection_time: default_auth_rejection_time(),
         };
         assert!(invalid_config.validate().is_err());
     }

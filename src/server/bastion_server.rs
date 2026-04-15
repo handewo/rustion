@@ -279,6 +279,7 @@ impl BastionServer {
             keys,
             server_id: russh::SshId::Standard(self.config.server_id.clone().into()),
             inactivity_timeout: self.config.inactivity_timeout,
+            auth_rejection_time: self.config.auth_rejection_time,
             ..Default::default()
         };
 

@@ -31,17 +31,30 @@ unban_duration = "15m"
 # Enable re-use target connection
 reuse_target_connection = true
 
-# Max idle time that the target connection should be removed 
+# Max idle time that the target connection should be removed
 # Idle time range is between 1 minute and 24 hours
 target_cache_duration = "30m"
 
+# Time after which an inactive SSH session is disconnected
+# Helps free up resources from idle connections
+# Default: none (no timeout)
 inactivity_timeout = "1h"
+
+# Time to wait before sending authentication rejection response
+# This helps prevent brute-force attacks by slowing down failed auth attempts
+# Default: 1000ms (1 second)
+auth_rejection_time = "100ms"
+
+# SSH server identification string sent to clients
+# This appears in client logs and SSH banner
+# Default: SSH-2.0-rustion_<version>
+# server_id = "SSH-2.0-rustion"
 
 # Important key, don't share and lose
 secret_key = "2MMVPJvaDcwBecSOwvG1/fJueEmJHdNuJq3DoyUQ5I0="
 
-# Enable recording interactive with targets, this only work
-# if pty requested
+# Enable recording interactive with targets
+# This only work if pty requested
 # Default: false
 enable_record = false
 
