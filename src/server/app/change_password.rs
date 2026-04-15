@@ -4,6 +4,7 @@ use crate::error::Error;
 use crate::server::HandlerLog;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use crossterm::event::{NoTtyEvent, SenderWriter};
+use inquire::{Password, PasswordDisplayMode, min_length};
 use log::{debug, warn};
 use russh::server as ru_server;
 use russh::{ChannelId, Pty};
@@ -22,12 +23,7 @@ pub(crate) struct ChangePassword {
 }
 
 enum Status {
-    Type,
-    Retype,
-    FinishType(String),
-    Invalid,
-    SameAsOri,
-    DoNotMatch,
+    Finish(String),
     Terminate,
 }
 
@@ -141,7 +137,7 @@ impl ChangePassword {
                         match status {
                             Some(s) => {
                                 match s {
-                                    Status::FinishType(password) => {
+                                    Status::Finish(password) => {
                                         user.force_init_pass=false;
                                         let mut exit_status = 0;
                                         if backend.update_user_password(password.clone(),user).await.is_err() {
@@ -191,27 +187,7 @@ impl ChangePassword {
         });
         let handler_id = self.handler_id;
 
-        use reedline::{DefaultPrompt, DefaultPromptSegment, FileBackedHistory, Reedline, Signal};
-        let history = Box::new(
-            FileBackedHistory::new(0).unwrap_or_else(|_| panic!("[{}] safe capacity", handler_id)),
-        );
-
-        let mut line_editor = Reedline::create(tty, SenderWriter::new(send_to_session.clone()))
-            .with_ansi_colors(false)
-            .with_history(history);
-
         tokio::task::spawn_blocking(move || {
-            let title = "You have to change password.\r\n";
-            if let Err(e) = send_to_session.blocking_send(title.into()) {
-                warn!(
-                    "[{}] Fail to send data to channel from prompt: {}",
-                    e, handler_id
-                );
-                return;
-            };
-            let prompt = "New password";
-            let re_prompt = "Retype new password";
-            let do_not_match = "Sorry, passwords do not match.\r\n";
             let same_as_ori = "The new password cannot be the same as the original password.\r\n";
             let requires = "Password must meet ALL these requirements:\r
 - Minimum 8 characters\r
@@ -220,104 +196,33 @@ impl ChangePassword {
 - At least one lowercase letter (a-z)\r
 - At least one special character (e.g., !@#$%^&*)\r\n";
 
-            let mut password = String::new();
-            let mut status = Status::Type;
+            let res = Password::new("New Password: ")
+                .with_display_toggle_enabled()
+                .with_display_mode(PasswordDisplayMode::Hidden)
+                .with_validator(min_length!(8))
+                .with_formatter(&|_| String::new())
+                .with_help_message("You have to change password.")
+                .with_custom_confirmation_error_message("Passwords don't match.")
+                .prompt(tty, SenderWriter::new(send_to_session));
 
-            loop {
-                match status {
-                    Status::Type => {
-                        let prompt = DefaultPrompt::new(
-                            DefaultPromptSegment::Basic(prompt.to_string()),
-                            DefaultPromptSegment::Empty,
-                        );
-                        let sig = line_editor.read_line(&prompt);
-                        match sig {
-                            Ok(Signal::Success(p)) => {
-                                password = p;
-                                if !is_valid_password(&password) {
-                                    status = Status::Invalid;
-                                } else if user_for_prompt.verify_password(&password) {
-                                    status = Status::SameAsOri;
-                                } else {
-                                    status = Status::Retype;
-                                }
-                            }
-                            Ok(Signal::CtrlD | Signal::CtrlC) => {
-                                status = Status::Terminate;
-                            }
-                            Ok(_) => unreachable!(),
-                            Err(e) => {
-                                status = Status::Terminate;
-                                warn!("[{}] Fail to get signal from prompt: {}", e, handler_id);
-                            }
-                        }
-                    }
-                    Status::Retype => {
-                        let prompt = DefaultPrompt::new(
-                            DefaultPromptSegment::Basic(re_prompt.to_string()),
-                            DefaultPromptSegment::Empty,
-                        );
-                        let sig = line_editor.read_line(&prompt);
-                        match sig {
-                            Ok(Signal::Success(p)) => {
-                                if p != password {
-                                    status = Status::DoNotMatch;
-                                } else {
-                                    status = Status::FinishType(p);
-                                }
-                            }
-                            Ok(Signal::CtrlD | Signal::CtrlC) => {
-                                status = Status::Terminate;
-                            }
-                            Ok(_) => unreachable!(),
-                            Err(e) => {
-                                status = Status::Terminate;
-                                warn!("[{}] Fail to get signal from prompt: {}", e, handler_id);
-                            }
-                        }
-                    }
-                    Status::DoNotMatch => {
-                        if let Err(e) = send_to_session.blocking_send(do_not_match.into()) {
-                            warn!(
-                                "[{}] Fail to send data to channel from prompt: {}",
-                                e, handler_id
-                            );
-                            break;
-                        };
-                        status = Status::Type;
-                    }
-                    Status::SameAsOri => {
-                        if let Err(e) = send_to_session.blocking_send(same_as_ori.into()) {
-                            warn!(
-                                "[{}] Fail to send data to channel from prompt: {}",
-                                e, handler_id
-                            );
-                            break;
-                        };
-                        status = Status::Type;
-                    }
-                    Status::Invalid => {
-                        if let Err(e) = send_to_session.blocking_send(requires.into()) {
-                            warn!(
-                                "[{}] Fail to send data to channel from prompt: {}",
-                                e, handler_id
-                            );
-                            break;
-                        };
-                        status = Status::Type;
-                    }
-                    Status::Terminate => {
-                        if let Err(e) = send_status.blocking_send(status) {
-                            warn!("[{}] Fail to send status: {}", e, handler_id);
-                        };
-                        break;
-                    }
-                    Status::FinishType(_) => {
-                        if let Err(e) = send_status.blocking_send(status) {
-                            warn!("[{}] Fail to send status: {}", e, handler_id);
-                        };
-                        break;
-                    }
+            let status = match res {
+                Ok(password) => Status::Finish(password),
+                Err(e) => {
+                    debug!("[{}] Change password error: {}", e, handler_id);
+                    Status::Terminate
+                }
+            };
+
+            match status {
+                Status::Terminate => {
+                    if let Err(e) = send_status.blocking_send(status) {
+                        warn!("[{}] Fail to send status: {}", e, handler_id);
+                    };
+                }
+                Status::Finish(_) => {
+                    if let Err(e) = send_status.blocking_send(status) {
+                        warn!("[{}] Fail to send status: {}", e, handler_id);
+                    };
                 }
             }
         });
