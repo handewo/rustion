@@ -94,6 +94,7 @@ impl Completer for BastionCompleter {
 
                                     Suggestion {
                                         value: format!("{span_line}{ext}"),
+                                        display_override: None,
                                         description: None,
                                         style: Some(Style::new()),
                                         extra: None,
@@ -119,6 +120,7 @@ impl Completer for BastionCompleter {
 
                         Suggestion {
                             value: ext.clone(),
+                            display_override: None,
                             description: None,
                             style: Some(Style::new()),
                             extra: None,

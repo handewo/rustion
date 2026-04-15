@@ -1,8 +1,8 @@
-use crate::database::models::User;
 use crate::database::Uuid;
+use crate::database::models::User;
 use crate::error::Error;
 use crate::server::HandlerLog;
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 use crossterm::event::{NoTtyEvent, SenderWriter};
 use log::{debug, warn};
 use russh::server as ru_server;
@@ -198,7 +198,6 @@ impl ChangePassword {
 
         let mut line_editor = Reedline::create(tty, SenderWriter::new(send_to_session.clone()))
             .with_ansi_colors(false)
-            .with_disable_echo(true)
             .with_history(history);
 
         tokio::task::spawn_blocking(move || {
@@ -246,6 +245,7 @@ impl ChangePassword {
                             Ok(Signal::CtrlD | Signal::CtrlC) => {
                                 status = Status::Terminate;
                             }
+                            Ok(_) => unreachable!(),
                             Err(e) => {
                                 status = Status::Terminate;
                                 warn!("[{}] Fail to get signal from prompt: {}", e, handler_id);
@@ -269,6 +269,7 @@ impl ChangePassword {
                             Ok(Signal::CtrlD | Signal::CtrlC) => {
                                 status = Status::Terminate;
                             }
+                            Ok(_) => unreachable!(),
                             Err(e) => {
                                 status = Status::Terminate;
                                 warn!("[{}] Fail to get signal from prompt: {}", e, handler_id);

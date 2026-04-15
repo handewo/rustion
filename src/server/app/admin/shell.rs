@@ -2,15 +2,15 @@ use crate::database::Uuid;
 use crate::server::HandlerLog;
 use log::warn;
 use reedline::{
-    default_emacs_keybindings, ColumnarMenu, DefaultPrompt, DefaultPromptSegment, Emacs,
-    ExampleHighlighter, KeyCode, KeyModifiers, Keybindings, MenuBuilder, Reedline, ReedlineEvent,
-    ReedlineMenu, Signal,
+    ColumnarMenu, DefaultPrompt, DefaultPromptSegment, Emacs, ExampleHighlighter, KeyCode,
+    KeyModifiers, Keybindings, MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal,
+    default_emacs_keybindings,
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use super::common::*;
-use super::{database, manage, Status};
+use super::{Status, database, manage};
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste, NoTtyEvent, SenderWriter};
 
 #[allow(clippy::too_many_arguments)]
@@ -113,6 +113,7 @@ pub(super) fn shell<B>(
                 let _ = send_status.blocking_send(Status::Terminate(0));
                 break;
             }
+            Ok(_) => unreachable!(),
             Err(e) => {
                 let _ = send_status.blocking_send(Status::Terminate(1));
                 warn!("[{}] Fail to get signal from prompt: {}", handler_id, e);

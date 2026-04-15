@@ -1,15 +1,15 @@
-use crate::database::models::{TargetSecretName, User};
 use crate::database::Uuid;
+use crate::database::models::{TargetSecretName, User};
 use crate::error::Error;
+use crate::server::HandlerLog;
 use crate::server::app::error::AppError;
 use crate::server::app::{Application, ConnectTarget};
-use crate::server::HandlerLog;
-use crossbeam_channel::{unbounded, Sender};
+use crossbeam_channel::{Sender, unbounded};
 use crossterm::event::{NoTtyEvent, SenderWriter};
 use log::{debug, trace, warn};
 use reedline::{
-    default_emacs_keybindings, ColumnarMenu, DefaultPrompt, DefaultPromptSegment, Emacs,
-    ExampleHighlighter, FileBackedHistory, MenuBuilder, Reedline, ReedlineMenu, Signal,
+    ColumnarMenu, DefaultPrompt, DefaultPromptSegment, Emacs, ExampleHighlighter,
+    FileBackedHistory, MenuBuilder, Reedline, ReedlineMenu, Signal, default_emacs_keybindings,
 };
 use reedline::{KeyCode, KeyModifiers, Keybindings, ReedlineEvent};
 use russh::server as ru_server;
@@ -340,6 +340,7 @@ impl TargetSelector {
                                 continue;
                             }
                             Ok(Signal::CtrlD) => status = TerminalStatus::Terminate,
+                            Ok(_) => unreachable!(),
                             Err(e) => {
                                 warn!("[{}] Fail to get signal from prompt: {}", handler_id, e);
                             }
@@ -439,6 +440,7 @@ impl TargetSelector {
                                     status = TerminalStatus::Terminate;
                                 }
                             }
+                            Ok(_) => unreachable!(),
                             Err(e) => {
                                 warn!("[{}] Fail to get signal from prompt: {}", handler_id, e);
                             }
