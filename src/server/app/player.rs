@@ -1,11 +1,12 @@
 use crate::database::common as db_common;
 use crate::database::models::{RecordingView, User};
 use crate::error::Error;
-use crate::server::HandlerLog;
-use crate::server::casbin;
 use crate::server::widgets::{
-    AdminTable, DisplayMode, Message, common::DATETIME_LENGTH, render_message_popup,
+    AdminTable, Colors, DisplayMode, FormEditor, FormEvent, FormField, Message, centered_area,
+    common::{DATETIME_LENGTH, MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW},
+    render_message_popup,
 };
+use crate::server::{HandlerLog, casbin};
 use crossterm::event::{
     self, Event, KeyCode, KeyEventKind, KeyModifiers, NoTtyEvent, SenderWriter,
 };
@@ -15,9 +16,10 @@ use tui_term::widget::PseudoTerminal;
 
 use ratatui::layout::{Constraint, Layout, Rect, Size};
 use ratatui::style::{Modifier, Style, palette::tailwind};
-use ratatui::text::Text;
+use ratatui::text::{Line, Text};
 use ratatui::widgets::{
-    Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget,
+    Block, BorderType, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    Widget,
 };
 use ratatui::{Frame, Terminal};
 use std::io::Write;
@@ -43,7 +45,7 @@ use std::time::{Duration, Instant};
 const SCROLLBACK_LEN: usize = 1000;
 const LOG_TYPE: &str = "player";
 const HELP_TEXT: [&str; 2] = [
-    "(Enter) play | (Esc) quit | (↑↓) select",
+    "(Enter) play | (Esc) quit | (↑↓) select | (s) setting",
     "(+/-) zoom in/out | (PgUp/PgDn) page up/down",
 ];
 
@@ -298,6 +300,9 @@ where
 
     is_playing: bool,
     pause: bool,
+
+    setting: Setting,
+
     pub help_text: [&'static str; 2],
 }
 
@@ -343,6 +348,9 @@ where
 
             is_playing: false,
             pause: false,
+
+            setting: Setting::new(),
+
             help_text: HELP_TEXT,
         }
     }
@@ -405,7 +413,11 @@ where
 
         let initial_cols = recording.header.term_cols;
         let initial_rows = recording.header.term_rows;
-        let mut events = player::emit_session_events(recording, 1.5, None)?;
+        let mut events = player::emit_session_events(
+            recording,
+            self.setting.speed,
+            self.setting.idle_time_limit,
+        )?;
 
         let mut size = Size {
             width: initial_cols,
@@ -421,7 +433,7 @@ where
         let mut epoch = Instant::now();
         let mut next_event = self.t_handle.block_on(events.recv()).transpose()?;
         let mut processed_buf = Vec::new();
-        let pause_on_markers = false;
+        let pause_on_markers = self.setting.pause_on_markers;
         let mut pause_elapsed_time: Option<u64> = None;
 
         while let Some(asciicast::Event { time, data }) = &next_event {
@@ -498,9 +510,6 @@ where
                             } else {
                                 self.horizontal_scroll_offset.saturating_add(1)
                             };
-                            terminal.draw(|f| {
-                                self.player_ui(f, parser.read().unwrap().screen(), size)
-                            })?;
                         }
                         KeyCode::Char('h') | KeyCode::Left => {
                             self.horizontal_scroll_offset = if self.horizontal_scroll_offset == 0 {
@@ -508,53 +517,18 @@ where
                             } else {
                                 self.horizontal_scroll_offset.saturating_sub(1)
                             };
-                            terminal.draw(|f| {
-                                self.player_ui(f, parser.read().unwrap().screen(), size)
-                            })?;
                         }
                         KeyCode::Char('f') if ctrl_pressed => {
-                            self.decrease_scroll_position();
-                            parser
-                                .write()
-                                .unwrap()
-                                .screen_mut()
-                                .set_scrollback(self.scroll_position);
-                            terminal.draw(|f| {
-                                self.player_ui(f, parser.read().unwrap().screen(), size)
-                            })?;
+                            self.decrease_scroll_position(&parser);
                         }
                         KeyCode::PageDown => {
-                            self.decrease_scroll_position();
-                            parser
-                                .write()
-                                .unwrap()
-                                .screen_mut()
-                                .set_scrollback(self.scroll_position);
-                            terminal.draw(|f| {
-                                self.player_ui(f, parser.read().unwrap().screen(), size)
-                            })?;
+                            self.decrease_scroll_position(&parser);
                         }
                         KeyCode::Char('b') if ctrl_pressed => {
-                            self.increase_scroll_position();
-                            parser
-                                .write()
-                                .unwrap()
-                                .screen_mut()
-                                .set_scrollback(self.scroll_position);
-                            terminal.draw(|f| {
-                                self.player_ui(f, parser.read().unwrap().screen(), size)
-                            })?;
+                            self.increase_scroll_position(&parser);
                         }
                         KeyCode::PageUp => {
-                            self.increase_scroll_position();
-                            parser
-                                .write()
-                                .unwrap()
-                                .screen_mut()
-                                .set_scrollback(self.scroll_position);
-                            terminal.draw(|f| {
-                                self.player_ui(f, parser.read().unwrap().screen(), size)
-                            })?;
+                            self.increase_scroll_position(&parser);
                         }
                         KeyCode::Char('j') | KeyCode::Down => {
                             self.vertical_scroll_offset =
@@ -563,9 +537,6 @@ where
                                 } else {
                                     self.vertical_scroll_offset.saturating_add(1)
                                 };
-                            terminal.draw(|f| {
-                                self.player_ui(f, parser.read().unwrap().screen(), size)
-                            })?;
                         }
                         KeyCode::Char('k') | KeyCode::Up => {
                             self.vertical_scroll_offset = if self.vertical_scroll_offset == 0 {
@@ -573,12 +544,10 @@ where
                             } else {
                                 self.vertical_scroll_offset.saturating_sub(1)
                             };
-                            terminal.draw(|f| {
-                                self.player_ui(f, parser.read().unwrap().screen(), size)
-                            })?;
                         }
-                        _ => {}
+                        _ => continue,
                     }
+                    terminal.draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))?;
                 }
             } else {
                 parser.write().unwrap().screen_mut().set_scrollback(0);
@@ -710,6 +679,27 @@ where
                     }
                 }
 
+                if self.setting.editing_mode {
+                    match self.setting.form.handle_key_event(key.code, key.modifiers) {
+                        FormEvent::Save => {
+                            if let Err(e) = self.setting.verify() {
+                                self.setting.form.set_save_error(vec![e.to_string()]);
+                            } else {
+                                self.setting.editing_mode = false;
+                                self.setting.form.show_cancel_confirmation = false;
+                                self.table.colors = Colors::new(&tailwind::BLUE);
+                            }
+                        }
+                        FormEvent::Cancel => {
+                            self.setting.editing_mode = false;
+                            self.setting.form.show_cancel_confirmation = false;
+                            self.table.colors = Colors::new(&tailwind::BLUE);
+                        }
+                        FormEvent::None => {}
+                    }
+                    continue;
+                }
+
                 let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
 
                 let items_len = self.items.len();
@@ -722,6 +712,10 @@ where
                     KeyCode::Char('-') => self.table.zoom_out(),
                     KeyCode::Char('r') => {
                         self.refresh_data();
+                    }
+                    KeyCode::Char('s') => {
+                        self.setting.editing_mode = true;
+                        self.table.colors.gray();
                     }
                     KeyCode::Char('q') => break,
                     KeyCode::Char('c') if ctrl_pressed => break,
@@ -762,6 +756,9 @@ where
         if let Some(ref msg) = self.message {
             render_message_popup(table_area, frame.buffer_mut(), msg);
         }
+        if self.setting.editing_mode {
+            self.render_setting_popup(frame, table_area);
+        }
         self.render_footer(frame, footer_area);
     }
 
@@ -778,7 +775,12 @@ where
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        let info_footer = Paragraph::new(Text::from_iter(self.help_text))
+        let help_text = if self.setting.editing_mode {
+            self.setting.form.help_text
+        } else {
+            self.help_text
+        };
+        let info_footer = Paragraph::new(Text::from_iter(help_text))
             .style(
                 Style::new()
                     .fg(self.table.colors.row_fg)
@@ -792,6 +794,27 @@ where
             );
 
         frame.render_widget(info_footer, area);
+    }
+
+    fn render_setting_popup(&mut self, frame: &mut Frame, area: Rect) {
+        let popup_area = if area.width <= MAX_POPUP_WINDOW_COL {
+            area
+        } else {
+            centered_area(
+                area,
+                MAX_POPUP_WINDOW_COL,
+                area.height.min(MAX_POPUP_WINDOW_ROW),
+            )
+        };
+        let title = Line::styled("Setting", Style::default().bold());
+        let popup = Block::bordered()
+            .title(title)
+            .title_style(Style::new().fg(self.table.colors.header_fg))
+            .border_style(Style::new().fg(self.table.colors.footer_border_color))
+            .border_type(BorderType::Double);
+        frame.render_widget(Clear, popup_area);
+        frame.render_widget(popup, popup_area);
+        self.setting.form.render_ui(popup_area, frame.buffer_mut());
     }
 
     fn player_ui(&mut self, f: &mut Frame, screen: &Screen, size: Size) {
@@ -978,14 +1001,68 @@ where
         f.render_widget(explanation, chunks[1]);
     }
 
-    fn decrease_scroll_position(&mut self) {
+    fn decrease_scroll_position(&mut self, parser: &RwLock<vt100::Parser>) {
         self.scroll_position = self.scroll_position.saturating_sub(self.scroll_size);
+        parser
+            .write()
+            .unwrap()
+            .screen_mut()
+            .set_scrollback(self.scroll_position);
     }
 
-    fn increase_scroll_position(&mut self) {
+    fn increase_scroll_position(&mut self, parser: &RwLock<vt100::Parser>) {
         self.scroll_position += self.scroll_size;
         if self.scroll_position > SCROLLBACK_LEN {
             self.scroll_position = SCROLLBACK_LEN
         }
+        parser
+            .write()
+            .unwrap()
+            .screen_mut()
+            .set_scrollback(self.scroll_position);
+    }
+}
+
+// Field indices
+const F_SPEED: usize = 0;
+const F_IDLE_TIME_LIMIT: usize = 1;
+const F_PAUSE_ON_MARKERS: usize = 2;
+
+#[derive(Debug)]
+pub struct Setting {
+    pub pause_on_markers: bool,
+    pub speed: f64,
+    pub idle_time_limit: Option<f64>,
+    pub editing_mode: bool,
+    pub form: FormEditor,
+}
+
+impl Setting {
+    pub fn new() -> Self {
+        let form = FormEditor::new(vec![
+            FormField::text("Speed", Some(1.0f64.to_string())),
+            FormField::text("Idle time limit", None),
+            FormField::checkbox("Pause on markers", false),
+        ]);
+
+        Self {
+            pause_on_markers: false,
+            speed: 1.0,
+            idle_time_limit: None,
+            editing_mode: false,
+            form,
+        }
+    }
+
+    pub fn verify(&mut self) -> Result<(), std::num::ParseFloatError> {
+        self.speed = self.form.get_text(F_SPEED).trim().parse()?;
+        let idle_time_limit_text = self.form.get_text(F_IDLE_TIME_LIMIT);
+        self.idle_time_limit = if idle_time_limit_text.trim().is_empty() {
+            None
+        } else {
+            Some(idle_time_limit_text.trim().parse()?)
+        };
+        self.pause_on_markers = self.form.get_checkbox(F_PAUSE_ON_MARKERS);
+        Ok(())
     }
 }
