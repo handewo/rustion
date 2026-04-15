@@ -299,6 +299,7 @@ where
     scroll_position: usize,
 
     is_playing: bool,
+    is_finished: bool,
     pause: bool,
 
     setting: Setting,
@@ -347,6 +348,7 @@ where
             scroll_position: 0,
 
             is_playing: false,
+            is_finished: false,
             pause: false,
 
             setting: Setting::new(),
@@ -553,7 +555,6 @@ where
                 parser.write().unwrap().screen_mut().set_scrollback(0);
                 self.scroll_position = 0;
                 while let Some(asciicast::Event { time, data }) = &next_event {
-                    terminal.draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))?;
                     let delay = time.as_micros() as i64 - epoch.elapsed().as_micros() as i64;
 
                     if delay > 0 && event::poll(tty, Duration::from_micros(delay as u64))? {
@@ -644,10 +645,69 @@ where
                         _ => (),
                     }
 
+                    terminal.draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))?;
                     next_event = self.t_handle.block_on(events.recv()).transpose()?;
                 }
             }
         }
+        self.is_finished = true;
+        if !self.setting.auto_exit {
+            loop {
+                terminal.draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))?;
+                if let Event::Key(key) = event::read(tty)?
+                    && key.kind == KeyEventKind::Press
+                {
+                    let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
+                    match key.code {
+                        KeyCode::Char('l') | KeyCode::Right => {
+                            self.horizontal_scroll_offset = if self.horizontal_scroll_offset
+                                == self.max_horizontal_scroll_offset
+                            {
+                                0
+                            } else {
+                                self.horizontal_scroll_offset.saturating_add(1)
+                            }
+                        }
+                        KeyCode::Char('h') | KeyCode::Left => {
+                            self.horizontal_scroll_offset = if self.horizontal_scroll_offset == 0 {
+                                self.max_horizontal_scroll_offset
+                            } else {
+                                self.horizontal_scroll_offset.saturating_sub(1)
+                            };
+                        }
+                        KeyCode::Char('j') | KeyCode::Down => {
+                            self.vertical_scroll_offset =
+                                if self.vertical_scroll_offset == self.max_vertical_scroll_offset {
+                                    0
+                                } else {
+                                    self.vertical_scroll_offset.saturating_add(1)
+                                }
+                        }
+                        KeyCode::Char('k') | KeyCode::Up => {
+                            self.vertical_scroll_offset = if self.vertical_scroll_offset == 0 {
+                                self.max_vertical_scroll_offset
+                            } else {
+                                self.vertical_scroll_offset.saturating_sub(1)
+                            };
+                        }
+                        KeyCode::Char('f') if ctrl_pressed => {
+                            self.decrease_scroll_position(&parser);
+                        }
+                        KeyCode::PageDown => {
+                            self.decrease_scroll_position(&parser);
+                        }
+                        KeyCode::Char('b') if ctrl_pressed => {
+                            self.increase_scroll_position(&parser);
+                        }
+                        KeyCode::PageUp => {
+                            self.increase_scroll_position(&parser);
+                        }
+                        _ => break,
+                    }
+                }
+            }
+        }
+        self.is_finished = false;
         Ok(())
     }
 
@@ -890,9 +950,11 @@ where
             // let area = visible_area.intersection(buf.area);
             let mut state = ScrollbarState::new(max_horizontal_scroll_offset)
                 .position(self.horizontal_scroll_offset);
-            Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
-                .thumb_symbol("🬋")
-                .render(horizontal_bar_area, buf, &mut state);
+            Scrollbar::new(ScrollbarOrientation::HorizontalBottom).render(
+                horizontal_bar_area,
+                buf,
+                &mut state,
+            );
         }
 
         if vertical_bar_needed {
@@ -987,9 +1049,11 @@ where
                 "<space> play <.> step <]> next mark <PgUp/PgDn> scroll lines [{}*{}]",
                 term_area.width, term_area.height
             )
+        } else if self.is_finished {
+            "Playback ended. Press any key to exit.".to_string()
         } else {
             format!(
-                "<space> pause <q> exit [{}*{}]",
+                "<space> pause <q> exit recording window size: [{}*{}]",
                 term_area.width, term_area.height
             )
         };
@@ -1027,10 +1091,12 @@ where
 const F_SPEED: usize = 0;
 const F_IDLE_TIME_LIMIT: usize = 1;
 const F_PAUSE_ON_MARKERS: usize = 2;
+const F_AUTO_EXIT: usize = 3;
 
 #[derive(Debug)]
 pub struct Setting {
     pub pause_on_markers: bool,
+    pub auto_exit: bool,
     pub speed: f64,
     pub idle_time_limit: Option<f64>,
     pub editing_mode: bool,
@@ -1041,14 +1107,16 @@ impl Setting {
     pub fn new() -> Self {
         let form = FormEditor::new(vec![
             FormField::text("Speed", Some(1.0f64.to_string())),
-            FormField::text("Idle time limit", None),
+            FormField::text("Idle time limit", Some(1.0f64.to_string())),
             FormField::checkbox("Pause on markers", false),
+            FormField::checkbox("Auto exit", false),
         ]);
 
         Self {
             pause_on_markers: false,
+            auto_exit: false,
             speed: 1.0,
-            idle_time_limit: None,
+            idle_time_limit: Some(1.0),
             editing_mode: false,
             form,
         }
@@ -1063,6 +1131,7 @@ impl Setting {
             Some(idle_time_limit_text.trim().parse()?)
         };
         self.pause_on_markers = self.form.get_checkbox(F_PAUSE_ON_MARKERS);
+        self.auto_exit = self.form.get_checkbox(F_AUTO_EXIT);
         Ok(())
     }
 }
