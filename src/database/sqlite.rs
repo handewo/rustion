@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use log::{debug, info};
-use sqlx::{Pool, Row, Sqlite, sqlite::SqlitePool};
+use sqlx::{Pool, Row, Sqlite, sqlite::{SqlitePool, SqliteConnectOptions}};
 use uuid::Uuid;
 
 use crate::database::DatabaseRepository;
@@ -20,10 +20,13 @@ pub struct SqliteRepository {
 
 impl SqliteRepository {
     pub async fn new(database_path: &str) -> Result<Self, Error> {
-        let database_url = format!("sqlite:{}", database_path);
         info!("Connecting to SQLite database: {}", database_path);
 
-        let pool = SqlitePool::connect(&database_url).await?;
+        let options = SqliteConnectOptions::new()
+            .filename(database_path)
+            .create_if_missing(true);
+
+        let pool = SqlitePool::connect_with(options).await?;
 
         let repo = Self { pool };
         repo.initialize().await?;
