@@ -37,8 +37,8 @@ target_cache_duration = "30m"
 
 # Time after which an inactive SSH session is disconnected
 # Helps free up resources from idle connections
-# Default: 1h
-inactivity_timeout = "1h"
+# Default: none (no timeout)
+# inactivity_timeout = "1h"
 
 # Time to wait before sending authentication rejection response
 # This helps prevent brute-force attacks by slowing down failed auth attempts

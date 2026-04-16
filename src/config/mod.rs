@@ -1,10 +1,10 @@
 pub mod error;
 
+use crate::config::error::ConfigError;
 use crate::database::DatabaseConfig;
 use crate::error::Error;
-use crate::config::error::ConfigError;
 use aes_gcm::KeyInit;
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::net::SocketAddr;
@@ -233,10 +233,12 @@ impl Config {
                                 })
                             })
                     })
-                    .map_err(|e| Error::Config(ConfigError::InvalidListenAddress {
-                        addr: s.clone(),
-                        reason: e.to_string(),
-                    }))
+                    .map_err(|e| {
+                        Error::Config(ConfigError::InvalidListenAddress {
+                            addr: s.clone(),
+                            reason: e.to_string(),
+                        })
+                    })
             }
         }
     }
@@ -261,10 +263,11 @@ impl Config {
         let key = general_purpose::STANDARD
             .decode(sk)
             .map_err(|e| Error::Config(ConfigError::SecretTokenDecode { source: e }))?;
-        aes_gcm::Aes256Gcm::new_from_slice(&key)
-            .map_err(|e| Error::Config(ConfigError::SecretTokenKeyError {
+        aes_gcm::Aes256Gcm::new_from_slice(&key).map_err(|e| {
+            Error::Config(ConfigError::SecretTokenKeyError {
                 reason: e.to_string(),
-            }))?;
+            })
+        })?;
 
         Ok(())
     }

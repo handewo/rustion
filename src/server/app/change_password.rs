@@ -272,7 +272,7 @@ impl ChangePassword {
                 .with_display_mode(PasswordDisplayMode::Hidden)
                 .with_validators(validators)
                 .with_formatter(&|_| String::new())
-                .with_help_message("You have to change password.")
+                .with_help_message("Please change your password")
                 .with_custom_confirmation_error_message("Passwords don't match.")
                 .prompt(tty, SenderWriter::new(send_to_session));
 
