@@ -12,9 +12,9 @@ use ::log::{error, info, warn};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent};
 use ratatui::backend::NottyBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{self, Color, Style, Stylize};
-use ratatui::text::{Line, Text};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Tabs, Widget};
+use ratatui::style::{self, Color, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Widget};
 use ratatui::{Frame, Terminal};
 use std::fmt;
 use std::io::Write;
@@ -169,6 +169,7 @@ where
     editor: Editor<B>,
     message: Option<Message>,
     log: HandlerLog,
+    tab_scroll_offset: usize,
 }
 
 impl<B> App<B>
@@ -207,6 +208,7 @@ where
             editor: Editor::None,
             message: None,
             log,
+            tab_scroll_offset: 0,
         }
     }
 
@@ -1142,6 +1144,40 @@ where
         self.longest_item_lens = self.items.constraint_len_calculator();
     }
 
+    fn tab_visibility(offset: usize, area_width: usize) -> (usize, bool, bool) {
+        let tab_count = MANAGE_LIST.len();
+        let tab_w: usize = 17;
+        let div_w: usize = 1;
+        let arrow_w: usize = 2;
+
+        let has_left = offset > 0;
+        let left_res = if has_left { arrow_w } else { 0 };
+        let remaining = tab_count.saturating_sub(offset);
+
+        // Try with right arrow reserved
+        let usable_r = area_width.saturating_sub(left_res + arrow_w);
+        let count_r = if usable_r >= tab_w {
+            ((usable_r + div_w) / (tab_w + div_w)).min(remaining)
+        } else {
+            0
+        };
+
+        // Check if all remaining tabs fit without right arrow
+        if offset + count_r >= tab_count {
+            let usable_nr = area_width.saturating_sub(left_res);
+            let count_nr = if usable_nr >= tab_w {
+                ((usable_nr + div_w) / (tab_w + div_w)).min(remaining)
+            } else {
+                0
+            };
+            if offset + count_nr >= tab_count {
+                return (count_nr, has_left, false);
+            }
+        }
+
+        (count_r, has_left, offset + count_r < tab_count)
+    }
+
     fn render_tabs(&mut self, frame: &mut Frame, area: Rect) {
         if self.selected_tab != self.last_selected_tab {
             self.refresh_data();
@@ -1149,25 +1185,73 @@ where
             self.last_selected_tab = self.selected_tab
         }
 
-        let tabs = Tabs::new(
-            MANAGE_LIST
-                .iter()
-                .map(|v| format!("{v:^17}").fg(self.editor_colors.tab_font)),
-        )
-        .style(self.editor_colors.tab_bg)
-        .highlight_style(
-            Style::default()
-                .magenta()
-                .on_black()
-                .bold()
-                .fg(self.editor_colors.tab_fg)
-                .bg(self.editor_colors.tab_bg),
-        )
-        .select(self.selected_tab as usize)
-        .divider(" ")
-        .padding("", "");
+        let width = area.width as usize;
+        let selected = self.selected_tab as usize;
 
-        frame.render_widget(tabs, area);
+        // Scroll left if selected tab is before the visible window
+        if selected < self.tab_scroll_offset {
+            self.tab_scroll_offset = selected;
+        }
+
+        // Scroll right if selected tab is beyond the visible window
+        loop {
+            let (visible_count, _, _) = Self::tab_visibility(self.tab_scroll_offset, width);
+            if visible_count == 0 || selected < self.tab_scroll_offset + visible_count {
+                break;
+            }
+            self.tab_scroll_offset += 1;
+        }
+
+        let (visible_count, has_left, has_right) =
+            Self::tab_visibility(self.tab_scroll_offset, width);
+
+        if visible_count == 0 {
+            return;
+        }
+
+        let mut spans: Vec<Span> = Vec::new();
+
+        if has_left {
+            spans.push(Span::styled(
+                "◄ ",
+                Style::default().fg(self.editor_colors.tab_font),
+            ));
+        }
+
+        let start = self.tab_scroll_offset;
+        let end = start + visible_count;
+        for i in start..end {
+            if i > start {
+                spans.push(Span::styled(
+                    " ",
+                    Style::default().bg(self.editor_colors.tab_bg),
+                ));
+            }
+
+            let label = format!("{:^17}", MANAGE_LIST[i]);
+            let style = if i == selected {
+                Style::default()
+                    .bold()
+                    .fg(self.editor_colors.tab_fg)
+                    .bg(self.editor_colors.tab_bg)
+            } else {
+                Style::default()
+                    .fg(self.editor_colors.tab_font)
+                    .bg(self.editor_colors.tab_bg)
+            };
+            spans.push(Span::styled(label, style));
+        }
+
+        if has_right {
+            spans.push(Span::styled(
+                " ►",
+                Style::default().fg(self.editor_colors.tab_font),
+            ));
+        }
+
+        let line = Line::from(spans);
+        let paragraph = Paragraph::new(line).style(self.editor_colors.tab_bg);
+        frame.render_widget(paragraph, area);
     }
 
     fn render_notice(&mut self, frame: &mut Frame, area: Rect, msg: &str) {
