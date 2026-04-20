@@ -76,7 +76,7 @@ impl EditorColors {
         Self {
             border_color: color.c400,
             title_color: tailwind::SLATE.c200,
-            tab_font: tailwind::SLATE.c400,
+            tab_font: tailwind::SLATE.c300,
             tab_fg: tailwind::SLATE.c200,
             tab_bg: color.c900,
         }
@@ -1144,6 +1144,8 @@ where
         self.longest_item_lens = self.items.constraint_len_calculator();
     }
 
+    /// Returns (full_tab_count, has_left_arrow, has_right_arrow) for the given
+    /// scroll offset and available width. Only counts tabs that fit completely.
     fn tab_visibility(offset: usize, area_width: usize) -> (usize, bool, bool) {
         let tab_count = MANAGE_LIST.len();
         let tab_w: usize = 17;
@@ -1163,6 +1165,8 @@ where
         };
 
         // Check if all remaining tabs fit without right arrow
+        // FIXME: The last tab at least has two space tail.
+        // Since the usable_r = area_width - left_res - **arrow_w**
         if offset + count_r >= tab_count {
             let usable_nr = area_width.saturating_sub(left_res);
             let count_nr = if usable_nr >= tab_w {
@@ -1187,6 +1191,9 @@ where
 
         let width = area.width as usize;
         let selected = self.selected_tab as usize;
+        let tab_count = MANAGE_LIST.len();
+        let tab_w: usize = 17;
+        let arrow_w: usize = 2; // "◄ " or " ►"
 
         // Scroll left if selected tab is before the visible window
         if selected < self.tab_scroll_offset {
@@ -1209,44 +1216,50 @@ where
             return;
         }
 
+        let dim_style = Style::default().fg(self.editor_colors.tab_font);
+
         let mut spans: Vec<Span> = Vec::new();
+        let mut used: usize = 0;
 
         if has_left {
-            spans.push(Span::styled(
-                "◄ ",
-                Style::default().fg(self.editor_colors.tab_font),
-            ));
+            spans.push(Span::styled("◄ ", dim_style));
+            used += arrow_w;
         }
 
         let start = self.tab_scroll_offset;
         let end = start + visible_count;
-        for i in start..end {
+        for (i, item) in MANAGE_LIST.iter().enumerate().take(end).skip(start) {
             if i > start {
-                spans.push(Span::styled(
-                    " ",
-                    Style::default().bg(self.editor_colors.tab_bg),
-                ));
+                spans.push(Span::raw(" "));
+                used += 1;
             }
 
-            let label = format!("{:^17}", MANAGE_LIST[i]);
+            let label = format!("{:^17}", item);
             let style = if i == selected {
                 Style::default()
                     .bold()
                     .fg(self.editor_colors.tab_fg)
                     .bg(self.editor_colors.tab_bg)
             } else {
-                Style::default()
-                    .fg(self.editor_colors.tab_font)
-                    .bg(self.editor_colors.tab_bg)
+                dim_style
             };
             spans.push(Span::styled(label, style));
+            used += tab_w;
         }
 
+        // Fill remaining space with a partial next tab if one exists
         if has_right {
-            spans.push(Span::styled(
-                " ►",
-                Style::default().fg(self.editor_colors.tab_font),
-            ));
+            let leftover = width.saturating_sub(used + arrow_w);
+            let next_idx = end;
+            if leftover > 1 && next_idx < tab_count {
+                // divider + partial label
+                spans.push(Span::raw(" "));
+                let partial_w = leftover - 1; // 1 for divider
+                let full_label = format!("{:^17}", MANAGE_LIST[next_idx]);
+                let truncated: String = full_label.chars().take(partial_w).collect();
+                spans.push(Span::styled(truncated, dim_style));
+            }
+            spans.push(Span::styled(" ►", dim_style));
         }
 
         let line = Line::from(spans);
