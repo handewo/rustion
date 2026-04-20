@@ -1,11 +1,11 @@
 mod util;
 mod v3;
 
+use super::{Error, Result};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, BufRead};
 use std::path::Path;
-use super::{Error, Result};
-use std::collections::HashMap;
 use std::time::Duration;
 pub use v3::V3Encoder;
 
@@ -121,14 +121,14 @@ pub fn limit_idle_time(
 
     events.map(move |event| {
         event.map(|event| {
-            let delay = event.time - prev_time;
+            let delay = event.time.saturating_sub(prev_time);
 
             if delay > limit {
                 offset += delay - limit;
             }
 
             prev_time = event.time;
-            let time = event.time - offset;
+            let time = event.time.saturating_sub(offset);
 
             Event { time, ..event }
         })
