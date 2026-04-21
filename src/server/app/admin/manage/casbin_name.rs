@@ -3,15 +3,11 @@ use crate::database::models::CasbinName;
 use crate::error::Error;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    widgets::Widget,
-};
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 // Radio button options for ptype selection (static for RadioButtons widget)
 const PTYPE_OPTIONS: [RadioOption; 3] = [
-    RadioOption::new("Rule", "g1"),   // g1 - user groups/roles
+    RadioOption::new("Role", "g1"),   // g1 - user groups/roles
     RadioOption::new("Target", "g2"), // g2 - object groups
     RadioOption::new("Action", "g3"), // g3 - action groups
 ];

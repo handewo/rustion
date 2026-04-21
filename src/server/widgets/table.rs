@@ -402,7 +402,7 @@ impl FieldsToArray for CasbinName {
             DisplayMode::Manage => {
                 // Convert ptype to friendly name for display
                 let ptype_display = match self.ptype.as_str() {
-                    "g1" => "Rule",
+                    "g1" => "Role",
                     "g2" => "Target",
                     "g3" => "Action",
                     _ => &self.ptype,
