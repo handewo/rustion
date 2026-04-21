@@ -13,7 +13,8 @@ use moka::ops::compute::{CompResult, Op};
 use petgraph::stable_graph::StableDiGraph;
 use russh::client as ru_client;
 use russh::keys::Algorithm;
-use russh::keys::ssh_key::rand_core::OsRng;
+use aes_gcm::aead::OsRng;
+use rand::rng;
 use russh::server::{Config as RusshConfig, Server};
 
 use super::bastion_handler::BastionHandler;
@@ -270,7 +271,7 @@ impl BastionServer {
         } else {
             warn!("Server key file not found, generating a random key",);
             vec![
-                russh::keys::PrivateKey::random(&mut OsRng, Algorithm::Ed25519)
+                russh::keys::PrivateKey::random(&mut rng(), Algorithm::Ed25519)
                     .map_err(russh::Error::from)?,
             ]
         };
