@@ -1,9 +1,11 @@
 use crate::error::Error;
 use chrono::Utc;
-use log::warn;
+use log::{debug, warn};
 use russh::client as ru_client;
 use russh::keys::ssh_key::{self, PublicKey};
+use russh::{Preferred, keys::Algorithm};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -51,7 +53,25 @@ impl Target {
     }
 
     pub(crate) async fn build_connect(self) -> Result<ru_client::Handle<Self>, Error> {
-        let config = Arc::new(ru_client::Config::default());
+        let pub_key = PublicKey::from_openssh(&self.server_public_key)?;
+        let preferred = if let Ok(algo) = Algorithm::new(pub_key.algorithm().as_str()) {
+            debug!(
+                "Preferred key: {} from target: {}({})",
+                algo, self.name, self.id
+            );
+            Preferred {
+                key: Cow::Owned(vec![algo]),
+                ..<_>::default()
+            }
+        } else {
+            Preferred::default()
+        };
+
+        let config = Arc::new(russh::client::Config {
+            preferred,
+            ..Default::default()
+        });
+
         ru_client::connect(config, (self.hostname.clone(), self.port), self).await
     }
 
@@ -93,8 +113,9 @@ impl ru_client::Handler for Target {
             return Ok(true);
         }
         warn!(
-            "The public key of target: {} doesn't match: {}",
+            "The public key of target: {}({}) doesn't match: {}",
             self.name,
+            self.id,
             server_public_key.to_string()
         );
         Ok(false)
