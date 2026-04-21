@@ -430,7 +430,9 @@ impl super::HandlerBackend for BastionServer {
             None => return Ok(None),
         };
 
-        let mut handle = target.build_connect().await?;
+        let mut handle = target
+            .build_connect(self.config.client_id.clone())
+            .await?;
 
         if let Some(k) = secret.take_private_key() {
             let key = match russh::keys::decode_secret_key(

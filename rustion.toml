@@ -50,6 +50,11 @@ auth_rejection_time = "1000ms"
 # Default: SSH-2.0-rustion_<version>
 # server_id = "SSH-2.0-rustion"
 
+# SSH client identification string sent to target servers
+# This appears in target server logs when rustion connects
+# Default: SSH-2.0-rustion_<version>
+# client_id = "SSH-2.0-rustion"
+
 # Important key, don't share and lose
 secret_key = "2MMVPJvaDcwBecSOwvG1/fJueEmJHdNuJq3DoyUQ5I0="
 

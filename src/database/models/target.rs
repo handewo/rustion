@@ -3,7 +3,7 @@ use chrono::Utc;
 use log::{debug, warn};
 use russh::client as ru_client;
 use russh::keys::ssh_key::{self, PublicKey};
-use russh::{Preferred, keys::Algorithm};
+use russh::{Preferred, SshId, keys::Algorithm};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::str::FromStr;
@@ -52,7 +52,10 @@ impl Target {
         self
     }
 
-    pub(crate) async fn build_connect(self) -> Result<ru_client::Handle<Self>, Error> {
+    pub(crate) async fn build_connect(
+        self,
+        client_id: String,
+    ) -> Result<ru_client::Handle<Self>, Error> {
         let pub_key = PublicKey::from_openssh(&self.server_public_key)?;
         let preferred = if let Ok(algo) = Algorithm::new(pub_key.algorithm().as_str()) {
             debug!(
@@ -68,6 +71,7 @@ impl Target {
         };
 
         let config = Arc::new(russh::client::Config {
+            client_id: SshId::Standard(Cow::Owned(client_id)),
             preferred,
             ..Default::default()
         });
