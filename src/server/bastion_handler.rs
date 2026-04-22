@@ -1,8 +1,8 @@
+use super::HandlerBackend;
 use super::app::{self, Application};
 use super::error::ServerError;
-use super::HandlerBackend;
-use crate::database::models::User;
 use crate::database::Uuid;
+use crate::database::models::User;
 use crate::error::Error;
 use crate::server::casbin::ExtendPolicyReq;
 use futures::future::FutureExt;
@@ -11,7 +11,7 @@ use russh::keys::ssh_key::PublicKey;
 use russh::server as ru_server;
 use russh::{Channel, ChannelId, Pty};
 use std::sync::Arc;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 static LOG_TYPE: &str = "server";
 
@@ -272,6 +272,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
     ) -> Result<(), Self::Error> {
         match self.app {
             Application::ConnectTarget(ref mut app) => app.channel_eof(channel, session).await,
+            Application::Admin(ref mut app) => app.channel_eof(channel, session).await,
             _ => {
                 warn!("[{}] Unsupported eof request", self.id);
                 session.channel_failure(channel)?;
@@ -374,6 +375,10 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 session.channel_failure(channel)?;
                 session.close(channel)?;
                 Ok(())
+            }
+            Application::Admin(ref mut app) => {
+                app.exec_request(self.backend.clone(), channel, data, session)
+                    .await
             }
             _ => {
                 warn!("[{}] Unsupported exec request", self.id);

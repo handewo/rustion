@@ -31,6 +31,7 @@ pub(crate) struct Admin {
     tty: Option<NoTtyEvent>,
     send_to_tty: Option<Sender<Vec<u8>>>,
     recv_from_tty: Option<Receiver<Vec<u8>>>,
+    sender: Option<mpsc::Sender<Vec<u8>>>,
 
     log: HandlerLog,
 }
@@ -43,6 +44,7 @@ impl Admin {
             tty: None,
             send_to_tty: None,
             recv_from_tty: None,
+            sender: None,
             log,
         }
     }
@@ -55,6 +57,13 @@ impl Admin {
     ) -> Result<(), Error> {
         if let Some(sender) = self.send_to_tty.as_ref() {
             sender.send(data.into()).map_err(std::io::Error::other)?;
+        }
+
+        if let Some(sender) = self.sender.as_ref() {
+            sender
+                .send(data.into())
+                .await
+                .map_err(std::io::Error::other)?;
         }
 
         Ok(())
@@ -80,6 +89,37 @@ impl Admin {
         self.tty = Some(tty);
         self.send_to_tty = Some(send_to_tty);
         self.recv_from_tty = Some(recv_from_tty);
+
+        Ok(())
+    }
+
+    pub(crate) async fn exec_request<B: 'static + crate::server::HandlerBackend + Send + Sync>(
+        &mut self,
+        _backend: Arc<B>,
+        channel: ChannelId,
+        _data: &[u8],
+        session: &mut ru_server::Session,
+    ) -> Result<(), Error> {
+        let (sender, mut receiver) = mpsc::channel(20);
+        self.sender = Some(sender);
+        let handle_session = session.handle();
+        tokio::spawn(async move {
+            while let Some(_data) = receiver.recv().await {
+                todo!()
+            }
+            let _ = handle_session.exit_status_request(channel, 0).await;
+            let _ = handle_session.close(channel).await;
+        });
+        Ok(())
+    }
+
+    pub(crate) async fn channel_eof(
+        &mut self,
+        _channel: ChannelId,
+        _session: &mut ru_server::Session,
+    ) -> Result<(), Error> {
+        self.send_to_tty = None;
+        self.sender = None;
 
         Ok(())
     }
