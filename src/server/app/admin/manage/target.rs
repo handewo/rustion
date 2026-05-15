@@ -16,7 +16,8 @@ const F_HOSTNAME: usize = 1;
 const F_PORT: usize = 2;
 const F_SERVER_PUBLIC_KEY: usize = 3;
 const F_DESCRIPTION: usize = 4;
-const F_IS_ACTIVE: usize = 5;
+const F_PROXY: usize = 5;
+const F_IS_ACTIVE: usize = 6;
 
 #[derive(Debug)]
 pub struct TargetEditor {
@@ -32,6 +33,7 @@ impl TargetEditor {
             FormField::text("*Port*", Some(target.port.to_string())),
             FormField::text("*Server Public Key*", Some(target.server_public_key.clone())),
             FormField::text("Description", target.description.clone()),
+            FormField::text("Proxy", target.proxy.clone()),
             FormField::checkbox("Is Active", target.is_active),
         ]);
         Self { target, form }
@@ -86,6 +88,9 @@ impl TargetEditor {
 
         let desc = self.form.get_text(F_DESCRIPTION).trim().to_string();
         self.target.description = (!desc.is_empty()).then_some(desc);
+
+        let proxy = self.form.get_text(F_PROXY).trim().to_string();
+        self.target.proxy = (!proxy.is_empty()).then_some(proxy);
 
         self.target.is_active = self.form.get_checkbox(F_IS_ACTIVE);
 

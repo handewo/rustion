@@ -307,6 +307,12 @@ impl TableData {
                     .max()
                     .unwrap_or(0)
                     .max(8);
+                let proxy_len = data
+                    .iter()
+                    .map(|v| v.proxy.as_deref().map(|s| s.len()).unwrap_or(0))
+                    .max()
+                    .unwrap_or(0)
+                    .max(5);
                 let server_public_key_len = data
                     .iter()
                     .map(|v| v.print_server_key().len())
@@ -328,6 +334,7 @@ impl TableData {
                     Constraint::Length(5),
                     Constraint::Length(server_public_key_len as u16),
                     Constraint::Length(desc_len as u16),
+                    Constraint::Length(proxy_len as u16),
                     Constraint::Length(9), // is_active
                     Constraint::Length(LENGTH_UUID),
                     Constraint::Length(LENGTH_TIMSTAMP),
@@ -564,6 +571,7 @@ impl crate::server::widgets::TableData for TableData {
                     "port",
                     "server_public_key",
                     "description",
+                    "proxy",
                     "is_active",
                     "updated_by",
                     "updated_at",

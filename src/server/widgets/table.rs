@@ -317,6 +317,7 @@ impl FieldsToArray for Target {
                     self.port.to_string(),
                     self.print_server_key(),
                     self.description.clone().unwrap_or_default(),
+                    self.proxy.clone().unwrap_or_default(),
                     self.is_active.to_string(),
                     self.updated_by.to_string(),
                     self.updated_at.to_string(),
@@ -329,6 +330,7 @@ impl FieldsToArray for Target {
                     self.port.to_string(),
                     self.print_server_key(),
                     self.description.clone().unwrap_or_default(),
+                    self.proxy.clone().unwrap_or_default(),
                     self.is_active.to_string(),
                 ]
             }

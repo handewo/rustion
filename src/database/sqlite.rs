@@ -65,6 +65,7 @@ impl SqliteRepository {
                 port INTEGER NOT NULL,
                 server_public_key TEXT NOT NULL,
                 description TEXT,
+                proxy TEXT,
                 is_active BOOLEAN NOT NULL CHECK (is_active IN (0, 1)),
                 updated_by BLOB NOT NULL,
                 updated_at INTEGER NOT NULL,
@@ -399,8 +400,8 @@ LEFT JOIN (
         sqlx::query(
             r#"
             INSERT INTO targets
-            (id, name, hostname, port, server_public_key, description, is_active, updated_by, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, name, hostname, port, server_public_key, description, proxy, is_active, updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(target.id)
@@ -409,6 +410,7 @@ LEFT JOIN (
         .bind(target.port as i64)
         .bind(&target.server_public_key)
         .bind(&target.description)
+        .bind(&target.proxy)
         .bind(target.is_active)
         .bind(target.updated_by)
         .bind(target.updated_at)
@@ -427,7 +429,7 @@ LEFT JOIN (
         id: &Uuid,
         active_only: bool,
     ) -> Result<Option<Target>, Error> {
-        let mut query = r#"SELECT id, name, hostname, port, server_public_key, description,
+        let mut query = r#"SELECT id, name, hostname, port, server_public_key, description, proxy,
             is_active, updated_by, updated_at FROM targets WHERE id = ?"#
             .to_string();
         if active_only {
@@ -447,7 +449,7 @@ LEFT JOIN (
         }
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         let sql = format!(
-            r#"SELECT id, name, hostname, port, server_public_key, description,
+            r#"SELECT id, name, hostname, port, server_public_key, description, proxy,
             is_active, updated_by, updated_at FROM targets WHERE id IN ({placeholders})"#
         );
 
@@ -471,7 +473,7 @@ LEFT JOIN (
         }
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         let mut sql = format!(
-            r#"SELECT t.id, t.name, t.hostname, t.port, t.server_public_key, t.description,
+            r#"SELECT t.id, t.name, t.hostname, t.port, t.server_public_key, t.description, t.proxy,
             t.is_active, t.updated_by, t.updated_at FROM target_secrets ts
             INNER JOIN targets t ON ts.target_id = t.id
             WHERE ts.id IN ({placeholders})"#
@@ -493,7 +495,7 @@ LEFT JOIN (
 
     async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, Error> {
         let row = sqlx::query_as::<_, Target>(
-            r#"SELECT id, name, hostname, port, server_public_key, description,
+            r#"SELECT id, name, hostname, port, server_public_key, description, proxy,
             is_active, updated_by, updated_at FROM targets WHERE name = ?"#,
         )
         .bind(name)
@@ -505,7 +507,7 @@ LEFT JOIN (
 
     async fn get_target_by_hostname(&self, hostname: &str) -> Result<Option<Target>, Error> {
         let row = sqlx::query_as::<_, Target>(
-            r#"SELECT id, name, hostname, port, server_public_key, description,
+            r#"SELECT id, name, hostname, port, server_public_key, description, proxy,
             is_active, updated_by, updated_at FROM targets WHERE hostname = ?"#,
         )
         .bind(hostname)
@@ -523,7 +525,7 @@ LEFT JOIN (
         sqlx::query(
             r#"
             UPDATE targets
-            SET name = ?, hostname = ?, port = ?, server_public_key = ?, description = ?,
+            SET name = ?, hostname = ?, port = ?, server_public_key = ?, description = ?, proxy = ?,
             is_active = ?, updated_by = ?, updated_at = ?
             WHERE id = ?
             "#,
@@ -533,6 +535,7 @@ LEFT JOIN (
         .bind(updated_target.port as i64)
         .bind(&updated_target.server_public_key)
         .bind(&updated_target.description)
+        .bind(&updated_target.proxy)
         .bind(updated_target.is_active)
         .bind(updated_target.updated_by)
         .bind(updated_target.updated_at)
@@ -563,7 +566,7 @@ LEFT JOIN (
 
     async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, Error> {
         let mut query = String::from(
-            r#"SELECT id, name, hostname, port, server_public_key, description,
+            r#"SELECT id, name, hostname, port, server_public_key, description, proxy,
                   is_active, updated_by, updated_at
            FROM targets"#,
         );
@@ -1470,12 +1473,12 @@ WHERE ptype = 'g3'
         }
 
         let rows = (0..targets.len())
-            .map(|_| "(?,?,?,?,?,?,?,?,?)")
+            .map(|_| "(?,?,?,?,?,?,?,?,?,?)")
             .collect::<Vec<_>>()
             .join(",");
         let query = format!(
             r"INSERT INTO targets
-          (id, name, hostname, port, server_public_key, description,
+          (id, name, hostname, port, server_public_key, description, proxy,
            is_active, updated_by, updated_at)
           VALUES {rows}"
         );
@@ -1489,6 +1492,7 @@ WHERE ptype = 'g3'
                 .bind(t.port as i64)
                 .bind(&t.server_public_key)
                 .bind(&t.description)
+                .bind(&t.proxy)
                 .bind(t.is_active)
                 .bind(t.updated_by)
                 .bind(t.updated_at);
@@ -1700,7 +1704,7 @@ WHERE ptype = 'g3'
         let search_pattern = format!("%{}%", query);
         let targets = sqlx::query_as::<_, Target>(
             r#"
-            SELECT id, name, hostname, port, server_public_key, description,
+            SELECT id, name, hostname, port, server_public_key, description, proxy,
             is_active, updated_by, updated_at
             FROM targets 
             WHERE name LIKE ? OR hostname LIKE ? OR description LIKE ?

@@ -21,6 +21,7 @@ pub struct Target {
     pub port: u16,
     pub server_public_key: String,
     pub description: Option<String>,
+    pub proxy: Option<String>,
     pub is_active: bool,
     pub updated_by: Uuid, // User ID who last updated this target
     pub updated_at: i64,
@@ -36,6 +37,7 @@ impl Target {
             port: 22,
             server_public_key: String::default(),
             description: None,
+            proxy: None,
             is_active: true,
             updated_by,
             updated_at: now.timestamp_millis(),

@@ -1522,12 +1522,20 @@ impl TableData {
                     .unwrap_or(0)
                     .max(11);
 
+                let proxy_len = data
+                    .iter()
+                    .map(|v| v.proxy.as_deref().map(|s| s.len()).unwrap_or(0))
+                    .max()
+                    .unwrap_or(0)
+                    .max(5);
+
                 vec![
                     Constraint::Length(name_len as u16),
                     Constraint::Length(hostname_len as u16),
                     Constraint::Length(5),
                     Constraint::Length(server_public_key_len as u16),
                     Constraint::Length(desc_len as u16),
+                    Constraint::Length(proxy_len as u16),
                     Constraint::Length(9), // is_active
                 ]
             }
@@ -1676,6 +1684,7 @@ impl crate::server::widgets::TableData for TableData {
                 "port",
                 "server_public_key",
                 "description",
+                "proxy",
                 "is_active",
             ],
             Self::Secrets(_) => vec![
