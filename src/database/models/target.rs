@@ -103,6 +103,11 @@ impl Target {
         if PublicKey::from_str(&self.server_public_key).is_err() {
             return Err(ValidateError::ServerPublicKey);
         }
+        if let Some(ref proxy) = self.proxy {
+            if SshProxy::from_str(proxy).is_err() {
+                return Err(ValidateError::ProxyInvalid);
+            }
+        }
         Ok(())
     }
 }
@@ -137,6 +142,7 @@ pub enum ValidateError {
     PortNotNumber,
     PortInvalid,
     ServerPublicKey,
+    ProxyInvalid,
 }
 
 impl std::fmt::Display for ValidateError {
@@ -158,6 +164,9 @@ impl std::fmt::Display for ValidateError {
             ServerPublicKey => {
                 write!(f, "server public key is invalid")
             }
+            ProxyInvalid => {
+                write!(f, "proxy is invalid, expected format: ssh://<uuid>, http://<url>, or https://<url>[?insecure]")
+            }
             PortNotNumber => {
                 write!(f, "port is not a number")
             }
@@ -166,6 +175,75 @@ impl std::fmt::Display for ValidateError {
             }
         }
     }
+}
+
+/// Proxy configuration for target connections.
+///
+/// Serialized format for storage in `Target.proxy` (String):
+/// - `ssh://<uuid>`                          → Ssh proxy via another target
+/// - `http://proxy.example.com:8080`         → HTTP proxy
+/// - `https://proxy.example.com:443`          → HTTPS proxy (verify TLS)
+/// - `https://proxy.example.com:443?insecure` → HTTPS proxy (skip TLS verification)
+#[derive(Debug, Clone, PartialEq)]
+pub enum SshProxy {
+    Ssh(Uuid),
+    Http(String),
+    /// (url, verify_tls)
+    Https(String, bool),
+}
+
+impl std::fmt::Display for SshProxy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SshProxy::Ssh(uuid) => write!(f, "ssh://{uuid}"),
+            SshProxy::Http(url) => write!(f, "http://{url}"),
+            SshProxy::Https(url, verify_tls) => {
+                if *verify_tls {
+                    write!(f, "https://{url}")
+                } else {
+                    write!(f, "https://{url}?insecure")
+                }
+            }
+        }
+    }
+}
+
+impl FromStr for SshProxy {
+    type Err = ProxyParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(rest) = s.strip_prefix("ssh://") {
+            let uuid = Uuid::parse_str(rest).map_err(|_| ProxyParseError::InvalidUuid)?;
+            Ok(SshProxy::Ssh(uuid))
+        } else if let Some(rest) = s.strip_prefix("https://") {
+            if rest.is_empty() {
+                return Err(ProxyParseError::EmptyUrl);
+            }
+            let verify_tls = !rest.contains("?insecure");
+            let url = rest.replace("?insecure", "");
+            if url.is_empty() {
+                return Err(ProxyParseError::EmptyUrl);
+            }
+            Ok(SshProxy::Https(url, verify_tls))
+        } else if let Some(rest) = s.strip_prefix("http://") {
+            if rest.is_empty() {
+                return Err(ProxyParseError::EmptyUrl);
+            }
+            Ok(SshProxy::Http(rest.to_string()))
+        } else {
+            Err(ProxyParseError::MissingScheme)
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProxyParseError {
+    #[error("proxy string must start with ssh://, http://, or https://")]
+    MissingScheme,
+    #[error("invalid UUID in ssh proxy")]
+    InvalidUuid,
+    #[error("proxy URL cannot be empty")]
+    EmptyUrl,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
