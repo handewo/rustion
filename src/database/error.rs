@@ -12,6 +12,9 @@ pub enum DatabaseError {
     TargetValidation(#[from] super::models::target::ValidateError),
 
     #[error(transparent)]
+    ProxyParseError(#[from] super::models::target::ProxyParseError),
+
+    #[error(transparent)]
     SecretValidation(#[from] super::models::target_secret::ValidateError),
 
     #[error(transparent)]
@@ -20,3 +23,4 @@ pub enum DatabaseError {
     #[error(transparent)]
     CasbinNameValidation(#[from] super::models::casbin_rule::ValidateError),
 }
+

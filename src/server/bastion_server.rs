@@ -2,6 +2,7 @@ use super::casbin;
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
 use crate::server::error::ServerError;
+use aes_gcm::aead::OsRng;
 use aes_gcm::aead::{Aead, rand_core::RngCore};
 use argon2::{
     Argon2,
@@ -11,15 +12,16 @@ use log::{error, info, trace, warn};
 use moka::future::Cache;
 use moka::ops::compute::{CompResult, Op};
 use petgraph::stable_graph::StableDiGraph;
+use rand::rng;
 use russh::client as ru_client;
 use russh::keys::Algorithm;
-use aes_gcm::aead::OsRng;
-use rand::rng;
 use russh::server::{Config as RusshConfig, Server};
+use std::str::FromStr;
 
 use super::bastion_handler::BastionHandler;
 use crate::config::Config;
 use crate::database::models;
+use crate::database::models::target::SshProxy;
 use crate::database::service::DatabaseService;
 use crate::error::Error;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
@@ -403,22 +405,21 @@ impl super::HandlerBackend for BastionServer {
     async fn connect_to_target(
         &self,
         target: models::Target,
-        target_secret_id: &Uuid,
-        force_build_cconnect: bool,
+        target_secret_id: Uuid,
+        force_build_connect: bool,
     ) -> Result<Option<Arc<ru_client::Handle<models::Target>>>, Error> {
-        let conn_key = format!("{}-{}", target_secret_id, target.id);
         if let Some(pool) = self.connection_pool.as_ref() {
-            if force_build_cconnect {
-                pool.invalidate(&conn_key).await;
+            if force_build_connect {
+                pool.invalidate(&target_secret_id).await;
             }
-            if let Some(t) = pool.get(&conn_key).await {
+            if let Some(t) = pool.get(&target_secret_id).await {
                 return Ok(Some(t));
             }
         };
         let mut secret = match self
             .database
             .repository()
-            .get_secret_by_target_secret_id(target_secret_id, true)
+            .get_secret_by_target_secret_id(&target_secret_id, true)
             .await?
         {
             Some(s) => {
@@ -430,9 +431,17 @@ impl super::HandlerBackend for BastionServer {
             None => return Ok(None),
         };
 
-        let mut handle = target
-            .build_connect(self.config.client_id.clone())
-            .await?;
+        let proxy = target
+            .proxy
+            .as_deref()
+            .map(SshProxy::from_str)
+            .transpose()
+            .map_err(crate::database::error::DatabaseError::from)?;
+
+        let mut handle = match proxy {
+            Some(_) => todo!(),
+            None => target.build_connect(self.config.client_id.clone()).await?,
+        };
 
         if let Some(k) = secret.take_private_key() {
             let key = match russh::keys::decode_secret_key(
@@ -470,7 +479,7 @@ impl super::HandlerBackend for BastionServer {
             if auth_res.success() {
                 let handle = Arc::new(handle);
                 if let Some(pool) = self.connection_pool.as_ref() {
-                    pool.insert(conn_key, handle.clone()).await;
+                    pool.insert(target_secret_id, handle.clone()).await;
                 };
                 return Ok(Some(handle));
             }
@@ -482,7 +491,7 @@ impl super::HandlerBackend for BastionServer {
             if auth_res.success() {
                 let handle = Arc::new(handle);
                 if let Some(pool) = self.connection_pool.as_ref() {
-                    pool.insert(conn_key, handle.clone()).await;
+                    pool.insert(target_secret_id, handle.clone()).await;
                 };
                 return Ok(Some(handle));
             }

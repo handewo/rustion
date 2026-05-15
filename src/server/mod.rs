@@ -11,9 +11,9 @@ mod widgets;
 pub use bastion_server::BastionServer;
 pub use casbin::{Label, RuleGroup};
 
-use crate::database::models::{Target, TargetSecretName, User};
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
+use crate::database::models::{Target, TargetSecretName, User};
 use crate::error::Error;
 use crate::server::casbin::GroupType;
 use futures::future::BoxFuture;
@@ -81,7 +81,7 @@ pub(super) trait HandlerBackend: Send + Clone {
     fn connect_to_target(
         &self,
         target: Target,
-        target_secret_id: &Uuid,
+        target_secret_id: Uuid,
         force_build_connect: bool,
     ) -> impl Future<Output = Result<Option<Arc<ru_client::Handle<Target>>>, Error>> + Send;
 

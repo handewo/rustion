@@ -664,7 +664,7 @@ impl ConnectTarget {
         };
 
         let target_sec_id = if let Some(tsn) = self.target_sec_name.as_ref() {
-            &tsn.id
+            tsn.id
         } else {
             return Ok(());
         };
