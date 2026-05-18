@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::str::FromStr;
 use std::sync::Arc;
+use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
 const MAX_NAME_LEN: usize = 50;
@@ -57,6 +58,7 @@ impl Target {
     pub(crate) async fn build_connect(
         self,
         client_id: String,
+        proxy: Option<impl AsyncRead + AsyncWrite + Unpin + Send + 'static>,
     ) -> Result<ru_client::Handle<Self>, Error> {
         let pub_key = PublicKey::from_openssh(&self.server_public_key)?;
         let preferred = if let Ok(algo) = Algorithm::new(pub_key.algorithm().as_str()) {
@@ -78,7 +80,10 @@ impl Target {
             ..Default::default()
         });
 
-        ru_client::connect(config, (self.hostname.clone(), self.port), self).await
+        match proxy {
+            Some(p) => ru_client::connect_stream(config, p, self).await,
+            None => ru_client::connect(config, (self.hostname.clone(), self.port), self).await,
+        }
     }
 
     pub fn print_server_key(&self) -> String {
@@ -103,10 +108,10 @@ impl Target {
         if PublicKey::from_str(&self.server_public_key).is_err() {
             return Err(ValidateError::ServerPublicKey);
         }
-        if let Some(ref proxy) = self.proxy {
-            if SshProxy::from_str(proxy).is_err() {
-                return Err(ValidateError::ProxyInvalid);
-            }
+        if let Some(ref proxy) = self.proxy
+            && SshProxy::from_str(proxy).is_err()
+        {
+            return Err(ValidateError::ProxyInvalid);
         }
         Ok(())
     }
@@ -165,7 +170,10 @@ impl std::fmt::Display for ValidateError {
                 write!(f, "server public key is invalid")
             }
             ProxyInvalid => {
-                write!(f, "proxy is invalid, expected format: ssh://<uuid>, http://<url>, or https://<url>[?insecure]")
+                write!(
+                    f,
+                    "proxy is invalid, expected format: ssh://<uuid>, http://<url>, or https://<url>[?insecure]"
+                )
             }
             PortNotNumber => {
                 write!(f, "port is not a number")

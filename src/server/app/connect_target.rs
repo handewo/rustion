@@ -653,7 +653,11 @@ impl ConnectTarget {
         Ok(true)
     }
 
-    async fn do_connect_to_target<B>(&mut self, backend: Arc<B>) -> Result<(), Error>
+    async fn do_connect_to_target<B>(
+        &mut self,
+        backend: Arc<B>,
+        force_build_connect: bool,
+    ) -> Result<(), Error>
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
@@ -671,7 +675,7 @@ impl ConnectTarget {
 
         // NOTE: target_handle could be re-assigned.
         self.target_handle = backend
-            .connect_to_target(target.clone(), target_sec_id, false)
+            .connect_to_target(target.clone(), target_sec_id, force_build_connect)
             .await?;
 
         debug!(
@@ -691,7 +695,7 @@ impl ConnectTarget {
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
-        self.do_connect_to_target(backend.clone()).await?;
+        self.do_connect_to_target(backend.clone(), false).await?;
         let handle = if let Some(h) = self.target_handle.as_ref() {
             h
         } else {
@@ -709,7 +713,7 @@ impl ConnectTarget {
                         | russh::Error::SendError,
                     ) => {
                         // Try again if the cache of target connection is unavailable
-                        self.do_connect_to_target(backend).await?;
+                        self.do_connect_to_target(backend, true).await?;
                         let handle = if let Some(h) = self.target_handle.as_ref() {
                             h
                         } else {
@@ -730,7 +734,7 @@ impl ConnectTarget {
                         | russh::Error::SendError,
                     ) => {
                         // Try again if the cache of target connection is unavailable
-                        self.do_connect_to_target(backend).await?;
+                        self.do_connect_to_target(backend, true).await?;
                         let handle = if let Some(h) = self.target_handle.as_ref() {
                             h
                         } else {

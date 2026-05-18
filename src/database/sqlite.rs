@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use log::{debug, info};
-use sqlx::{Pool, Row, Sqlite, sqlite::{SqlitePool, SqliteConnectOptions}};
+use sqlx::{
+    Pool, Row, Sqlite,
+    sqlite::{SqliteConnectOptions, SqlitePool},
+};
 use uuid::Uuid;
 
 use crate::database::DatabaseRepository;
@@ -1289,6 +1292,49 @@ WHERE ptype = 'g3'
         };
 
         Ok(())
+    }
+
+    async fn list_target_secrets_by_target_id(
+        &self,
+        target_id: &Uuid,
+        active_only: bool,
+    ) -> Result<Vec<TargetSecret>, Error> {
+        let mut query = String::from(
+            r#"SELECT id, target_id, secret_id, is_active, updated_by, updated_at
+           FROM target_secrets ts INNER JOIN targets t ON ts.target_id = t.id
+           WHERE ts.target_id = ?"#,
+        );
+
+        if active_only {
+            query.push_str(" AND ts.is_active = 1 AND t.is_active = 1");
+        }
+
+        sqlx::query_as::<_, TargetSecret>(&query)
+            .bind(target_id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(Error::Sqlx)
+    }
+
+    async fn get_target_by_target_secret_id(
+        &self,
+        id: &Uuid,
+        active_only: bool,
+    ) -> Result<Option<Target>, Error> {
+        let mut query = r#"SELECT t.id, t.name, t.hostname, t.port, t.server_public_key, t.description, t.proxy,
+            t.is_active, t.updated_by, t.updated_at FROM target_secrets ts
+            INNER JOIN targets t ON ts.secret_id = t.id
+            WHERE ts.id = ?"#
+            .to_string();
+        if active_only {
+            query.push_str(" AND ts.is_active = 1 AND t.is_active = 1");
+        }
+        let row = sqlx::query_as::<_, Target>(&query)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        Ok(row)
     }
 
     async fn get_secret_by_target_secret_id(

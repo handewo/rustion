@@ -64,8 +64,13 @@ pub trait DatabaseRepository: Send + Sync {
     /// Target operations
     async fn create_target(&self, target: &Target) -> Result<Target, Error>;
     async fn get_target_by_id(&self, id: &Uuid, active_only: bool)
-        -> Result<Option<Target>, Error>;
+    -> Result<Option<Target>, Error>;
     async fn get_targets_by_ids(&self, ids: &[&Uuid]) -> Result<Vec<Target>, Error>;
+    async fn get_target_by_target_secret_id(
+        &self,
+        id: &Uuid,
+        active_only: bool,
+    ) -> Result<Option<Target>, Error>;
     async fn get_targets_by_target_secret_ids(
         &self,
         ids: &[&Uuid],
@@ -94,6 +99,11 @@ pub trait DatabaseRepository: Send + Sync {
 
     /// TargetSecret operations
     async fn list_target_secrets(&self, active_only: bool) -> Result<Vec<TargetSecret>, Error>;
+    async fn list_target_secrets_by_target_id(
+        &self,
+        target_id: &Uuid,
+        active_only: bool,
+    ) -> Result<Vec<TargetSecret>, Error>;
     async fn create_target_secret(
         &self,
         target_secret: &TargetSecret,

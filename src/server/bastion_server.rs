@@ -1,6 +1,7 @@
 use super::casbin;
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
+use crate::server::HandlerBackend;
 use crate::server::error::ServerError;
 use aes_gcm::aead::OsRng;
 use aes_gcm::aead::{Aead, rand_core::RngCore};
@@ -28,6 +29,7 @@ use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::{Engine as _, engine::general_purpose};
 use std::path::Path;
 use std::sync::Arc;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::RwLock;
 
 #[derive(Clone)]
@@ -306,6 +308,57 @@ impl BastionServer {
         Ok(hash.to_string())
     }
 
+    async fn connect_to_proxy(
+        &self,
+        dest: &models::Target,
+        proxy: SshProxy,
+    ) -> Result<Option<impl AsyncRead + AsyncWrite + Unpin + Send + 'static>, Error> {
+        match proxy {
+            SshProxy::Ssh(id) => {
+                let target = if let Some(t) = self
+                    .db_repository()
+                    .get_target_by_target_secret_id(&id, true)
+                    .await?
+                {
+                    t
+                } else {
+                    return Ok(None);
+                };
+                let agent = if let Some(t) = self.connect_to_target(target, id, false).await? {
+                    t
+                } else {
+                    return Ok(None);
+                };
+                match agent
+                    .as_ref()
+                    .channel_open_direct_tcpip(&dest.hostname, dest.port as u32, "127.0.0.1", 0)
+                    .await
+                {
+                    Ok(ch) => Ok(Some(ch.into_stream())),
+                    Err(
+                        russh::Error::ChannelOpenFailure(
+                            russh::ChannelOpenFailure::AdministrativelyProhibited,
+                        )
+                        | russh::Error::SendError,
+                    ) => {
+                        let ch = agent
+                            .as_ref()
+                            .channel_open_direct_tcpip(
+                                &dest.hostname,
+                                dest.port as u32,
+                                "127.0.0.1",
+                                0,
+                            )
+                            .await?;
+                        Ok(Some(ch.into_stream()))
+                    }
+                    Err(e) => Err(e.into()),
+                }
+            }
+            _ => todo!(),
+        }
+    }
+
     fn decrypt_with_secret_key(&self, text: &str) -> Result<String, Error> {
         let encrypt_key = general_purpose::STANDARD
             .decode(text)
@@ -438,10 +491,19 @@ impl super::HandlerBackend for BastionServer {
             .transpose()
             .map_err(crate::database::error::DatabaseError::from)?;
 
-        let mut handle = match proxy {
-            Some(_) => todo!(),
-            None => target.build_connect(self.config.client_id.clone()).await?,
+        let stream = match proxy {
+            Some(p) => {
+                if let Some(s) = self.connect_to_proxy(&target, p).await? {
+                    Some(s)
+                } else {
+                    return Ok(None);
+                }
+            }
+            None => None,
         };
+        let mut handle = target
+            .build_connect(self.config.client_id.clone(), stream)
+            .await?;
 
         if let Some(k) = secret.take_private_key() {
             let key = match russh::keys::decode_secret_key(
