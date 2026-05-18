@@ -1323,7 +1323,7 @@ WHERE ptype = 'g3'
     ) -> Result<Option<Target>, Error> {
         let mut query = r#"SELECT t.id, t.name, t.hostname, t.port, t.server_public_key, t.description, t.proxy,
             t.is_active, t.updated_by, t.updated_at FROM target_secrets ts
-            INNER JOIN targets t ON ts.secret_id = t.id
+            INNER JOIN targets t ON ts.target_id = t.id
             WHERE ts.id = ?"#
             .to_string();
         if active_only {

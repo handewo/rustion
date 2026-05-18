@@ -17,6 +17,8 @@ use rand::rng;
 use russh::client as ru_client;
 use russh::keys::Algorithm;
 use russh::server::{Config as RusshConfig, Server};
+use std::future::Future;
+use std::pin::Pin;
 use std::str::FromStr;
 
 use super::bastion_handler::BastionHandler;
@@ -29,8 +31,19 @@ use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::{Engine as _, engine::general_purpose};
 use std::path::Path;
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::RwLock;
+
+type PinBoxStream<'a> = Pin<
+    Box<
+        dyn Future<
+                Output = Result<
+                    Option<Pin<Box<dyn crate::database::models::target::Stream>>>,
+                    Error,
+                >,
+            > + Send
+            + 'a,
+    >,
+>;
 
 #[derive(Clone)]
 pub struct BastionServer {
@@ -308,55 +321,66 @@ impl BastionServer {
         Ok(hash.to_string())
     }
 
-    async fn connect_to_proxy(
-        &self,
-        dest: &models::Target,
+    fn connect_to_proxy<'a>(
+        &'a self,
+        dest: &'a models::Target,
         proxy: SshProxy,
-    ) -> Result<Option<impl AsyncRead + AsyncWrite + Unpin + Send + 'static>, Error> {
-        match proxy {
-            SshProxy::Ssh(id) => {
-                let target = if let Some(t) = self
-                    .db_repository()
-                    .get_target_by_target_secret_id(&id, true)
-                    .await?
-                {
-                    t
-                } else {
-                    return Ok(None);
-                };
-                let agent = if let Some(t) = self.connect_to_target(target, id, false).await? {
-                    t
-                } else {
-                    return Ok(None);
-                };
-                match agent
-                    .as_ref()
-                    .channel_open_direct_tcpip(&dest.hostname, dest.port as u32, "127.0.0.1", 0)
-                    .await
-                {
-                    Ok(ch) => Ok(Some(ch.into_stream())),
-                    Err(
-                        russh::Error::ChannelOpenFailure(
-                            russh::ChannelOpenFailure::AdministrativelyProhibited,
-                        )
-                        | russh::Error::SendError,
-                    ) => {
-                        let ch = agent
-                            .as_ref()
-                            .channel_open_direct_tcpip(
-                                &dest.hostname,
-                                dest.port as u32,
-                                "127.0.0.1",
-                                0,
+    ) -> PinBoxStream<'a> {
+        Box::pin(async move {
+            match proxy {
+                SshProxy::Ssh(id) => {
+                    let target = if let Some(t) = self
+                        .db_repository()
+                        .get_target_by_target_secret_id(&id, true)
+                        .await?
+                    {
+                        t
+                    } else {
+                        return Ok(None);
+                    };
+                    let agent =
+                        if let Some(t) = self.connect_to_target(target.clone(), id, false).await? {
+                            t
+                        } else {
+                            return Ok(None);
+                        };
+                    match agent
+                        .as_ref()
+                        .channel_open_direct_tcpip(&dest.hostname, dest.port as u32, "127.0.0.1", 0)
+                        .await
+                    {
+                        Ok(ch) => Ok(Some(Box::pin(ch.into_stream())
+                            as Pin<Box<dyn crate::database::models::target::Stream>>)),
+                        Err(
+                            russh::Error::ChannelOpenFailure(
+                                russh::ChannelOpenFailure::AdministrativelyProhibited,
                             )
-                            .await?;
-                        Ok(Some(ch.into_stream()))
+                            | russh::Error::SendError,
+                        ) => {
+                            let agent =
+                                if let Some(t) = self.connect_to_target(target, id, true).await? {
+                                    t
+                                } else {
+                                    return Ok(None);
+                                };
+                            let ch = agent
+                                .as_ref()
+                                .channel_open_direct_tcpip(
+                                    &dest.hostname,
+                                    dest.port as u32,
+                                    "127.0.0.1",
+                                    0,
+                                )
+                                .await?;
+                            Ok(Some(Box::pin(ch.into_stream())
+                                as Pin<Box<dyn crate::database::models::target::Stream>>))
+                        }
+                        Err(e) => Err(e.into()),
                     }
-                    Err(e) => Err(e.into()),
                 }
+                _ => todo!(),
             }
-            _ => todo!(),
-        }
+        })
     }
 
     fn decrypt_with_secret_key(&self, text: &str) -> Result<String, Error> {

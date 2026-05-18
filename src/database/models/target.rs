@@ -6,12 +6,16 @@ use russh::keys::ssh_key::{self, PublicKey};
 use russh::{Preferred, SshId, keys::Algorithm};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
 const MAX_NAME_LEN: usize = 50;
+
+pub(crate) trait Stream: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Stream for T {}
 
 /// Target model for database storage
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -58,7 +62,7 @@ impl Target {
     pub(crate) async fn build_connect(
         self,
         client_id: String,
-        proxy: Option<impl AsyncRead + AsyncWrite + Unpin + Send + 'static>,
+        proxy: Option<Pin<Box<dyn Stream>>>,
     ) -> Result<ru_client::Handle<Self>, Error> {
         let pub_key = PublicKey::from_openssh(&self.server_public_key)?;
         let preferred = if let Ok(algo) = Algorithm::new(pub_key.algorithm().as_str()) {
