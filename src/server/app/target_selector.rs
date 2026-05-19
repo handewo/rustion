@@ -343,6 +343,7 @@ impl TargetSelector {
                             Ok(_) => unreachable!(),
                             Err(e) => {
                                 warn!("[{}] Fail to get signal from prompt: {}", handler_id, e);
+                                return;
                             }
                         }
                     }
@@ -443,6 +444,7 @@ impl TargetSelector {
                             Ok(_) => unreachable!(),
                             Err(e) => {
                                 warn!("[{}] Fail to get signal from prompt: {}", handler_id, e);
+                                return;
                             }
                         }
                     }
