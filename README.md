@@ -1,25 +1,25 @@
 # Rustion
 
-**Rustion** is a lightweight, high-performance SSH bastion/jump, TUI management host server written in Rust.
+**Rustion** is a lightweight, high-performance SSH bastion/jump host server with a TUI management interface, written in Rust 🦀.
 
-## What is a Bastion Server?
+## 🤔 What is a Bastion Server?
 
 A bastion server (also known as a jump host) is a secure gateway that acts as the single entry point for accessing internal servers. Instead of connecting directly to target machines, users first connect to the bastion, which then forwards their connection to the intended destination. This architecture:
 
-- Centralizes access control and auditing
-- Reduces the attack surface of your infrastructure
-- Provides a single point for monitoring and logging all SSH activity
-- Enables fine-grained authorization policies
+- 🔒 Centralizes access control and auditing
+- 🎯 Reduces the attack surface of your infrastructure
+- 📋 Provides a single point for monitoring and logging all SSH activity
+- 🛡️ Enables fine-grained authorization policies
 
 Rustion implements this concept with modern Rust technologies, offering security, performance, and flexibility.
 
-**Warning:** Rustion is under active development and should **not** be used in production environments without thorough testing. The API and DB structure may change.
+⚠️ **Warning:** Rustion is under active development and should **not** be used in production environments without thorough testing. The API and DB structure may change.
 
 ---
 
-## Features
+## ✨ Features
 
-### Core Capabilities
+### 🚀 Core Capabilities
 
 - **Fine-grained Authorization** - Control exactly who can access which targets, when, and from where
 - **SSH Protocol Implementation** - Built on `russh` crate for native SSH protocol support (no OpenSSH dependency)
@@ -27,7 +27,7 @@ Rustion implements this concept with modern Rust technologies, offering security
 - **Brute-force Protection** - Rate limiting and slow rejection responses to deter attacks
 - **Connection Pooling** - Reuse target connections for improved performance
 
-### Role-Based Access Control (RBAC)
+### 👥 Role-Based Access Control (RBAC)
 
 Rustion implements a custom lightweight Casbin-style RBAC engine using `petgraph` for role hierarchy management:
 
@@ -42,7 +42,7 @@ Rustion implements a custom lightweight Casbin-style RBAC engine using `petgraph
 - IP CIDR restrictions (e.g., only from specific networks)
 - Expiry dates for temporary access
 
-### Admin TUI Interface
+### 🖥️ Admin TUI Interface
 
 A full-featured terminal user interface for administration:
 
@@ -85,7 +85,7 @@ A full-featured terminal user interface for administration:
 
 ---
 
-## Build from source
+## 🔨 Build from source
 
 ### Clone & Run service
 
@@ -98,10 +98,10 @@ cd rustion
 ssh-keygen -t ed25519 -f server_key.pem -N ''
 
 # Initialize Rustion (creates admin user with temporary password)
-./rustion --init
+cargo run -- --init
 
 # Start the server
-./rustion
+cargo run
 # [2025-11-05T06:54:16Z INFO  rustion] Starting Rustion application
 # [2025-11-05T06:54:16Z INFO  rustion::server::bastion_server] Rustion server started on 127.0.0.1:2222
 ```
@@ -142,7 +142,7 @@ ssh -p 2222 user@root@target@localhost
 
 ---
 
-## Roadmap / Goals
+## 🗺️ Roadmap / Goals
 
 - Support for additional databases (MySQL, PostgreSQL)
 - Integration with external authentication systems (SSO, LDAP, OIDC)
@@ -156,7 +156,7 @@ ssh -p 2222 user@root@target@localhost
 
 ---
 
-## Non-Goals
+## 🚫 Non-Goals
 
 - Web-based administration UI (not planned)
 - Acting as a general-purpose SSH server (bastion-focused only)
@@ -164,13 +164,13 @@ ssh -p 2222 user@root@target@localhost
 
 ---
 
-## License
+## 📄 License
 
 This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
 Contributions are welcome! Please:
 
