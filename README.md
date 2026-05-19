@@ -53,6 +53,8 @@ A full-featured terminal user interface for administration:
 - Policy binding management
 - Session recording viewer
 
+![TUI](assets/vhs/manage.gif)
+
 <details><summary>Screenshots</summary>
 
 **Add User**
