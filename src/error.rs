@@ -36,4 +36,7 @@ pub enum Error {
 
     #[error(transparent)]
     Record(#[from] crate::asciinema::Error),
+
+    #[error(transparent)]
+    Utils(#[from] crate::utils::HttpProxyError),
 }

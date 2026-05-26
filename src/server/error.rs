@@ -77,4 +77,7 @@ pub enum ServerError {
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    #[error("Invalid proxy URL")]
+    InvalidProxyUrl,
 }

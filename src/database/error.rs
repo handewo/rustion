@@ -14,6 +14,9 @@ pub enum DatabaseError {
     #[error(transparent)]
     ProxyParseError(#[from] super::models::target::ProxyParseError),
 
+    #[error("invalid proxy URI")]
+    InvalidProxy,
+
     #[error(transparent)]
     SecretValidation(#[from] super::models::target_secret::ValidateError),
 

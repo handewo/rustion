@@ -113,7 +113,7 @@ impl Target {
             return Err(ValidateError::ServerPublicKey);
         }
         if let Some(ref proxy) = self.proxy
-            && SshProxy::from_str(proxy).is_err()
+            && validate_proxy_uri(proxy).is_err()
         {
             return Err(ValidateError::ProxyInvalid);
         }
@@ -176,7 +176,7 @@ impl std::fmt::Display for ValidateError {
             ProxyInvalid => {
                 write!(
                     f,
-                    "proxy is invalid, expected format: ssh://<uuid>, http://<url>, or https://<url>[?insecure]"
+                    "proxy is invalid, expected format: ssh://<uuid>, http://<url>, or https://<url>[?insecure=true]"
                 )
             }
             PortNotNumber => {
@@ -189,62 +189,38 @@ impl std::fmt::Display for ValidateError {
     }
 }
 
-/// Proxy configuration for target connections.
+/// Validate a proxy URI string.
 ///
-/// Serialized format for storage in `Target.proxy` (String):
-/// - `ssh://<uuid>`                          → Ssh proxy via another target
-/// - `http://proxy.example.com:8080`         → HTTP proxy
-/// - `https://proxy.example.com:443`          → HTTPS proxy (verify TLS)
-/// - `https://proxy.example.com:443?insecure` → HTTPS proxy (skip TLS verification)
-#[derive(Debug, Clone, PartialEq)]
-pub enum SshProxy {
-    Ssh(Uuid),
-    Http(String),
-    /// (url, verify_tls)
-    Https(String, bool),
-}
-
-impl std::fmt::Display for SshProxy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SshProxy::Ssh(uuid) => write!(f, "ssh://{uuid}"),
-            SshProxy::Http(url) => write!(f, "http://{url}"),
-            SshProxy::Https(url, verify_tls) => {
-                if *verify_tls {
-                    write!(f, "https://{url}")
-                } else {
-                    write!(f, "https://{url}?insecure")
-                }
-            }
+/// Accepted formats:
+/// - `ssh://<uuid>`                                 → Ssh proxy via another target
+/// - `http://proxy.example.com:8080`                → HTTP proxy
+/// - `https://proxy.example.com:443`                → HTTPS proxy (verify TLS)
+/// - `https://proxy.example.com:443?insecure=true`  → HTTPS proxy (skip TLS verification)
+pub fn validate_proxy_uri(s: &str) -> Result<(), ProxyParseError> {
+    let uri = s
+        .parse::<http::Uri>()
+        .map_err(|_| ProxyParseError::InvalidUrl)?;
+    match uri.scheme_str() {
+        Some("ssh") => {
+            let host = uri.host().ok_or(ProxyParseError::InvalidUuid)?;
+            Uuid::parse_str(host).map_err(|_| ProxyParseError::InvalidUuid)?;
+            Ok(())
         }
-    }
-}
-
-impl FromStr for SshProxy {
-    type Err = ProxyParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(rest) = s.strip_prefix("ssh://") {
-            let uuid = Uuid::parse_str(rest).map_err(|_| ProxyParseError::InvalidUuid)?;
-            Ok(SshProxy::Ssh(uuid))
-        } else if let Some(rest) = s.strip_prefix("https://") {
-            if rest.is_empty() {
+        Some("https") => {
+            let authority = uri.authority().ok_or(ProxyParseError::EmptyUrl)?;
+            if authority.host().is_empty() {
                 return Err(ProxyParseError::EmptyUrl);
             }
-            let verify_tls = !rest.contains("?insecure");
-            let url = rest.replace("?insecure", "");
-            if url.is_empty() {
-                return Err(ProxyParseError::EmptyUrl);
-            }
-            Ok(SshProxy::Https(url, verify_tls))
-        } else if let Some(rest) = s.strip_prefix("http://") {
-            if rest.is_empty() {
-                return Err(ProxyParseError::EmptyUrl);
-            }
-            Ok(SshProxy::Http(rest.to_string()))
-        } else {
-            Err(ProxyParseError::MissingScheme)
+            Ok(())
         }
+        Some("http") => {
+            let authority = uri.authority().ok_or(ProxyParseError::EmptyUrl)?;
+            if authority.host().is_empty() {
+                return Err(ProxyParseError::EmptyUrl);
+            }
+            Ok(())
+        }
+        _ => Err(ProxyParseError::MissingScheme),
     }
 }
 
@@ -256,6 +232,8 @@ pub enum ProxyParseError {
     InvalidUuid,
     #[error("proxy URL cannot be empty")]
     EmptyUrl,
+    #[error("proxy URL is invalid")]
+    InvalidUrl,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

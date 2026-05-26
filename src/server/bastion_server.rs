@@ -3,6 +3,7 @@ use crate::database::DatabaseRepository;
 use crate::database::Uuid;
 use crate::server::HandlerBackend;
 use crate::server::error::ServerError;
+use crate::utils::proxy_connect;
 use aes_gcm::aead::OsRng;
 use aes_gcm::aead::{Aead, rand_core::RngCore};
 use argon2::{
@@ -19,12 +20,10 @@ use russh::keys::Algorithm;
 use russh::server::{Config as RusshConfig, Server};
 use std::future::Future;
 use std::pin::Pin;
-use std::str::FromStr;
 
 use super::bastion_handler::BastionHandler;
 use crate::config::Config;
 use crate::database::models;
-use crate::database::models::target::SshProxy;
 use crate::database::service::DatabaseService;
 use crate::error::Error;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
@@ -324,11 +323,16 @@ impl BastionServer {
     fn connect_to_proxy<'a>(
         &'a self,
         dest: &'a models::Target,
-        proxy: SshProxy,
+        proxy: http::Uri,
     ) -> PinBoxStream<'a> {
         Box::pin(async move {
-            match proxy {
-                SshProxy::Ssh(id) => {
+            match proxy.scheme_str() {
+                Some("ssh") => {
+                    let host = proxy
+                        .host()
+                        .ok_or(Error::Server(ServerError::InvalidProxyUrl))?;
+                    let id = crate::database::Uuid::parse_str(host)
+                        .map_err(|_| Error::Server(ServerError::InvalidProxyUrl))?;
                     let target = if let Some(t) = self
                         .db_repository()
                         .get_target_by_target_secret_id(&id, true)
@@ -378,7 +382,13 @@ impl BastionServer {
                         Err(e) => Err(e.into()),
                     }
                 }
-                _ => todo!(),
+                Some("http") | Some("https") => {
+                    let stream = proxy_connect(proxy, dest.hostname.clone(), dest.port).await?;
+                    Ok(Some(
+                        Box::pin(stream) as Pin<Box<dyn crate::database::models::target::Stream>>
+                    ))
+                }
+                _ => Err(Error::Server(ServerError::InvalidProxyUrl)),
             }
         })
     }
@@ -511,9 +521,9 @@ impl super::HandlerBackend for BastionServer {
         let proxy = target
             .proxy
             .as_deref()
-            .map(SshProxy::from_str)
+            .map(http::Uri::try_from)
             .transpose()
-            .map_err(crate::database::error::DatabaseError::from)?;
+            .map_err(|_| crate::database::error::DatabaseError::InvalidProxy)?;
 
         let stream = match proxy {
             Some(p) => {

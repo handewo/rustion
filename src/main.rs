@@ -6,8 +6,9 @@ pub mod database;
 pub mod error;
 mod server;
 mod terminal;
+mod utils;
 
-use log::{debug, error, info, LevelFilter};
+use log::{LevelFilter, debug, error, info};
 
 fn log_level_to_filter(level: &config::LogLevel) -> LevelFilter {
     match level {
