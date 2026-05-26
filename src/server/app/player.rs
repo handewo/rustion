@@ -634,12 +634,10 @@ where
                             parser.write().unwrap().screen_mut().set_size(*rows, *cols);
                         }
 
-                        EventData::Marker(_) => {
-                            if pause_on_markers {
-                                pause_elapsed_time = Some(time.as_micros() as u64);
-                                next_event = self.t_handle.block_on(events.recv()).transpose()?;
-                                break;
-                            }
+                        EventData::Marker(_) if pause_on_markers => {
+                            pause_elapsed_time = Some(time.as_micros() as u64);
+                            next_event = self.t_handle.block_on(events.recv()).transpose()?;
+                            break;
                         }
 
                         _ => (),

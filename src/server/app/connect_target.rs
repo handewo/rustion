@@ -609,7 +609,7 @@ impl ConnectTarget {
     }
 
     pub async fn check_permission<B>(
-        &mut self,
+        &self,
         backend: Arc<B>,
         action_uuid: Uuid,
         ip: Option<std::net::IpAddr>,

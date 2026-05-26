@@ -503,19 +503,18 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         session: &mut ru_server::Session,
     ) -> Result<(), Self::Error> {
         match self.app {
-            Application::ConnectTarget(ref mut app) => {
+            Application::ConnectTarget(ref app)
                 if !app
                     .check_permission(
                         self.backend.clone(),
                         crate::database::common::InternalUuids::get().act_pty,
                         self.client_ip.map(|v| v.ip()),
                     )
-                    .await?
-                {
-                    session.channel_failure(channel)?;
-                    session.close(channel)?;
-                    return Ok(());
-                }
+                    .await? =>
+            {
+                session.channel_failure(channel)?;
+                session.close(channel)?;
+                return Ok(());
             }
             Application::Admin(ref mut app) => {
                 app.pty_request(

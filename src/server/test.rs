@@ -2,10 +2,10 @@
 mod tests {
     use crate::database::common::OBJ_LOGIN;
     use crate::database::models::{
-        casbin_rule::CasbinName, target_secret::TargetSecret, CasbinRule, Secret, Target,
-        TargetSecretName, User,
+        CasbinRule, Secret, Target, TargetSecretName, User, casbin_rule::CasbinName,
+        target_secret::TargetSecret,
     };
-    use crate::database::{common, service::DatabaseService, DatabaseConfig};
+    use crate::database::{DatabaseConfig, common, service::DatabaseService};
     use crate::server::casbin::{ExtendPolicy, ExtendPolicyReq, IpPolicy};
     use crate::server::{self, HandlerBackend};
     use chrono::{Datelike, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc};
@@ -158,12 +158,16 @@ mod tests {
                 .len(),
             32
         );
-        assert!(alice_lt
-            .iter()
-            .any(|v| v.id == Uuid::from_str("65f4527b-2fa1-4e19-8324-204b68c7f1c6").unwrap()));
-        assert!(alice_lt
-            .iter()
-            .any(|v| v.id.to_string() == "ee267744-b110-469e-917d-8754d8aafa3c"));
+        assert!(
+            alice_lt
+                .iter()
+                .any(|v| v.id == Uuid::from_str("65f4527b-2fa1-4e19-8324-204b68c7f1c6").unwrap())
+        );
+        assert!(
+            alice_lt
+                .iter()
+                .any(|v| v.id.to_string() == "ee267744-b110-469e-917d-8754d8aafa3c")
+        );
 
         assert_eq!(alice_lt.len(), 85);
 
@@ -171,9 +175,11 @@ mod tests {
         assert_eq!(paul_lt.len(), 1);
 
         let jack_lt = server.list_targets_for_user(&jack.id, true).await.unwrap();
-        assert!(!jack_lt
-            .iter()
-            .any(|v| v.id.to_string() == "ee267744-b110-469e-917d-8754d8aafa3c"));
+        assert!(
+            !jack_lt
+                .iter()
+                .any(|v| v.id.to_string() == "ee267744-b110-469e-917d-8754d8aafa3c")
+        );
         assert_eq!(jack_lt.len(), 26);
 
         let bob_lt = server.list_targets_for_user(&bob.id, true).await.unwrap();
@@ -193,12 +199,16 @@ mod tests {
                 .len(),
             25
         );
-        assert!(bob_lt
-            .iter()
-            .any(|v| v.id == Uuid::from_str("7f003584-21ed-4963-a7a1-892810f74e66").unwrap()));
-        assert!(!bob_lt
-            .iter()
-            .any(|v| v.id.to_string() == "ee267744-b110-469e-917d-8754d8aafa3c"));
+        assert!(
+            bob_lt
+                .iter()
+                .any(|v| v.id == Uuid::from_str("7f003584-21ed-4963-a7a1-892810f74e66").unwrap())
+        );
+        assert!(
+            !bob_lt
+                .iter()
+                .any(|v| v.id.to_string() == "ee267744-b110-469e-917d-8754d8aafa3c")
+        );
 
         assert_eq!(bob_lt.len(), 52);
 
@@ -210,96 +220,116 @@ mod tests {
                 .len(),
             27
         );
-        assert!(server
-            .enforce(
-                alice.id,
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                bob.id,
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                alice.id,
-                Uuid::from_str("a0a30d81-d0b0-4736-82cf-1f63140cf1dc").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                bob.id,
-                Uuid::from_str("65f4527b-2fa1-4e19-8324-204b68c7f1c6").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(!server
-            .enforce(
-                bob.id,
-                Uuid::from_str("65f4527b-2fa1-4e19-8324-204b68c7f1c6").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                alice.id,
-                Uuid::from_str("65f4527b-2fa1-4e19-8324-204b68c7f1c6").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                alice.id,
-                Uuid::from_str("a0a30d81-d0b0-4736-82cf-1f63140cf1dc").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(!server
-            .enforce(
-                bob.id,
-                Uuid::from_str("a0a30d81-d0b0-4736-82cf-1f63140cf1dc").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                alice.id,
-                Uuid::from_str("62b5d32d-4518-4d8f-8e7a-3fe858e67486").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                bob.id,
-                Uuid::from_str("62b5d32d-4518-4d8f-8e7a-3fe858e67486").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
+        assert!(
+            server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    bob.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("a0a30d81-d0b0-4736-82cf-1f63140cf1dc").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    bob.id,
+                    Uuid::from_str("65f4527b-2fa1-4e19-8324-204b68c7f1c6").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            !server
+                .enforce(
+                    bob.id,
+                    Uuid::from_str("65f4527b-2fa1-4e19-8324-204b68c7f1c6").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("65f4527b-2fa1-4e19-8324-204b68c7f1c6").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("a0a30d81-d0b0-4736-82cf-1f63140cf1dc").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            !server
+                .enforce(
+                    bob.id,
+                    Uuid::from_str("a0a30d81-d0b0-4736-82cf-1f63140cf1dc").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("62b5d32d-4518-4d8f-8e7a-3fe858e67486").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    bob.id,
+                    Uuid::from_str("62b5d32d-4518-4d8f-8e7a-3fe858e67486").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
 
         let mut r = rules
             .iter()
@@ -308,54 +338,65 @@ mod tests {
             .clone();
         r.v2 = exec_uuid;
         r = db.repository().update_casbin_rule(&r).await.unwrap();
-        assert!(!server
-            .enforce(
-                alice.id,
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                alice.id,
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
+        assert!(
+            !server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
 
         // tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-        assert!(server
-            .enforce(bob.id, obj_login, login_uuid, ExtendPolicyReq::default(),)
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(alice.id, obj_login, login_uuid, ExtendPolicyReq::default(),)
-            .await
-            .unwrap());
-        assert!(!server
-            .enforce(admin.id, obj_login, login_uuid, ExtendPolicyReq::default(),)
-            .await
-            .unwrap());
+        assert!(
+            server
+                .enforce(bob.id, obj_login, login_uuid, ExtendPolicyReq::default(),)
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(alice.id, obj_login, login_uuid, ExtendPolicyReq::default(),)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !server
+                .enforce(admin.id, obj_login, login_uuid, ExtendPolicyReq::default(),)
+                .await
+                .unwrap()
+        );
         let mut io = db
             .repository()
             .list_casbin_names(true)
             .await
             .unwrap()
             .iter()
-            .filter(|v| v.name == OBJ_LOGIN)
-            .next_back()
+            .rfind(|v| v.name == OBJ_LOGIN)
             .unwrap()
             .clone();
         io.is_active = false;
         db.repository().update_casbin_name(&io).await.unwrap();
-        assert!(!server
-            .enforce(alice.id, obj_login, login_uuid, ExtendPolicyReq::default(),)
-            .await
-            .unwrap());
+        assert!(
+            !server
+                .enforce(alice.id, obj_login, login_uuid, ExtendPolicyReq::default(),)
+                .await
+                .unwrap()
+        );
 
         let offset = FixedOffset::east_opt(3 * 3600).unwrap();
         let ep = ExtendPolicy {
@@ -375,48 +416,54 @@ mod tests {
         };
         r.v3 = ep.to_string();
         r = db.repository().update_casbin_rule(&r).await.unwrap();
-        assert!(!server
-            .enforce(
-                alice.id,
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                alice.id,
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq {
-                    ip: None,
-                    now: NaiveDate::from_ymd_opt(1999, 12, 1)
-                        .unwrap()
-                        .and_hms_opt(0, 0, 0)
-                        .unwrap()
-                        .and_utc(),
-                },
-            )
-            .await
-            .unwrap());
+        assert!(
+            !server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq {
+                        ip: None,
+                        now: NaiveDate::from_ymd_opt(1999, 12, 1)
+                            .unwrap()
+                            .and_hms_opt(0, 0, 0)
+                            .unwrap()
+                            .and_utc(),
+                    },
+                )
+                .await
+                .unwrap()
+        );
 
-        assert!(!server
-            .enforce(
-                alice.id,
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq {
-                    ip: None,
-                    now: NaiveDate::from_ymd_opt(1999, 12, 31)
-                        .unwrap()
-                        .and_hms_opt(21, 0, 1)
-                        .unwrap()
-                        .and_utc(),
-                },
-            )
-            .await
-            .unwrap());
+        assert!(
+            !server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq {
+                        ip: None,
+                        now: NaiveDate::from_ymd_opt(1999, 12, 31)
+                            .unwrap()
+                            .and_hms_opt(21, 0, 1)
+                            .unwrap()
+                            .and_utc(),
+                    },
+                )
+                .await
+                .unwrap()
+        );
 
         let ep = ExtendPolicy {
             ip_policy: None,
@@ -436,48 +483,54 @@ mod tests {
         };
         r.v3 = ep.to_string();
         r = db.repository().update_casbin_rule(&r).await.unwrap();
-        assert!(!server
-            .enforce(
-                alice.id,
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq {
-                    ip: None,
-                    now: Utc::now()
-                        .with_time(NaiveTime::from_hms_opt(5, 34, 59).unwrap())
-                        .unwrap()
-                },
-            )
-            .await
-            .unwrap());
-        assert!(!server
-            .enforce(
-                alice.id,
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq {
-                    ip: None,
-                    now: Utc::now()
-                        .with_time(NaiveTime::from_hms_opt(14, 35, 0).unwrap())
-                        .unwrap()
-                },
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                alice.id,
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq {
-                    ip: None,
-                    now: Utc::now()
-                        .with_time(NaiveTime::from_hms_opt(10, 0, 0).unwrap())
-                        .unwrap()
-                },
-            )
-            .await
-            .unwrap());
+        assert!(
+            !server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq {
+                        ip: None,
+                        now: Utc::now()
+                            .with_time(NaiveTime::from_hms_opt(5, 34, 59).unwrap())
+                            .unwrap()
+                    },
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            !server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq {
+                        ip: None,
+                        now: Utc::now()
+                            .with_time(NaiveTime::from_hms_opt(14, 35, 0).unwrap())
+                            .unwrap()
+                    },
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq {
+                        ip: None,
+                        now: Utc::now()
+                            .with_time(NaiveTime::from_hms_opt(10, 0, 0).unwrap())
+                            .unwrap()
+                    },
+                )
+                .await
+                .unwrap()
+        );
 
         let ep = ExtendPolicy {
             ip_policy: Some(IpPolicy::Deny(IpNetwork::from_str("10.0.0.0/8").unwrap())),
@@ -497,44 +550,50 @@ mod tests {
         };
         r.v3 = ep.to_string();
         db.repository().update_casbin_rule(&r).await.unwrap();
-        assert!(!server
-            .enforce(
-                alice.id,
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq {
-                    ip: None,
-                    now: Utc::now()
-                        .with_time(NaiveTime::from_hms_opt(10, 0, 0).unwrap())
-                        .unwrap()
-                },
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                alice.id,
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq {
-                    ip: Some("192.168.1.1".parse().unwrap()),
-                    now: Utc::now()
-                        .with_time(NaiveTime::from_hms_opt(10, 0, 0).unwrap())
-                        .unwrap()
-                },
-            )
-            .await
-            .unwrap());
+        assert!(
+            !server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq {
+                        ip: None,
+                        now: Utc::now()
+                            .with_time(NaiveTime::from_hms_opt(10, 0, 0).unwrap())
+                            .unwrap()
+                    },
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq {
+                        ip: Some("192.168.1.1".parse().unwrap()),
+                        now: Utc::now()
+                            .with_time(NaiveTime::from_hms_opt(10, 0, 0).unwrap())
+                            .unwrap()
+                    },
+                )
+                .await
+                .unwrap()
+        );
 
-        assert!(server
-            .enforce(
-                bob.id,
-                Uuid::from_str("7f003584-21ed-4963-a7a1-892810f74e66").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
+        assert!(
+            server
+                .enforce(
+                    bob.id,
+                    Uuid::from_str("7f003584-21ed-4963-a7a1-892810f74e66").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
         let mut ts = target_secrets
             .iter()
             .find(|v| v.id == Uuid::from_str("7f003584-21ed-4963-a7a1-892810f74e66").unwrap())
@@ -542,25 +601,29 @@ mod tests {
             .clone();
         ts.is_active = false;
         db.repository().update_target_secret(&ts).await.unwrap();
-        assert!(!server
-            .enforce(
-                bob.id,
-                Uuid::from_str("7f003584-21ed-4963-a7a1-892810f74e66").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
+        assert!(
+            !server
+                .enforce(
+                    bob.id,
+                    Uuid::from_str("7f003584-21ed-4963-a7a1-892810f74e66").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
 
-        assert!(server
-            .enforce(
-                bob.id,
-                Uuid::from_str("bc957df2-9712-4f5d-8588-c546664e520a").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
+        assert!(
+            server
+                .enforce(
+                    bob.id,
+                    Uuid::from_str("bc957df2-9712-4f5d-8588-c546664e520a").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
         let mut t = targets
             .iter()
             .find(|v| v.id.to_string() == "328ed0d0-8f40-4711-be0e-86a5cea44046")
@@ -568,49 +631,57 @@ mod tests {
             .clone();
         t.is_active = false;
         db.repository().update_target(&t).await.unwrap();
-        assert!(!server
-            .enforce(
-                bob.id,
-                Uuid::from_str("bc957df2-9712-4f5d-8588-c546664e520a").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
+        assert!(
+            !server
+                .enforce(
+                    bob.id,
+                    Uuid::from_str("bc957df2-9712-4f5d-8588-c546664e520a").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
 
         db.repository()
             .delete_casbin_rule(&Uuid::parse_str("f45acaa9-c0e4-4e6a-a95a-a35efc6e528f").unwrap())
             .await
             .unwrap();
         server.load_role_manager().await.unwrap();
-        assert!(server
-            .enforce(
-                alice.id,
-                Uuid::from_str("a0a30d81-d0b0-4736-82cf-1f63140cf1dc").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(!server
-            .enforce(
-                alice.id,
-                Uuid::from_str("a0a30d81-d0b0-4736-82cf-1f63140cf1dc").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
+        assert!(
+            server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("a0a30d81-d0b0-4736-82cf-1f63140cf1dc").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            !server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("a0a30d81-d0b0-4736-82cf-1f63140cf1dc").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
 
-        assert!(server
-            .enforce(
-                bob.id,
-                Uuid::from_str("84bfa21c-c1ed-4858-b19d-f520c3458c7f").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
+        assert!(
+            server
+                .enforce(
+                    bob.id,
+                    Uuid::from_str("84bfa21c-c1ed-4858-b19d-f520c3458c7f").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
         let mut s = secrets
             .iter()
             .find(|v| v.id.to_string() == "986aed01-172c-4fcd-9686-bb812e86cf0e")
@@ -618,39 +689,45 @@ mod tests {
             .clone();
         s.is_active = false;
         db.repository().update_secret(&s).await.unwrap();
-        assert!(!server
-            .enforce(
-                bob.id,
-                Uuid::from_str("84bfa21c-c1ed-4858-b19d-f520c3458c7f").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
+        assert!(
+            !server
+                .enforce(
+                    bob.id,
+                    Uuid::from_str("84bfa21c-c1ed-4858-b19d-f520c3458c7f").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
 
-        assert!(server
-            .enforce(
-                bob.id,
-                Uuid::from_str("f0f2bc11-cb7e-4626-9dd0-712d94bdfba8").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
+        assert!(
+            server
+                .enforce(
+                    bob.id,
+                    Uuid::from_str("f0f2bc11-cb7e-4626-9dd0-712d94bdfba8").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
         db.repository()
             .delete_casbin_rule(&Uuid::parse_str("6e62e16d-052e-4992-be35-4d1482449d90").unwrap())
             .await
             .unwrap();
         server.load_role_manager().await.unwrap();
-        assert!(!server
-            .enforce(
-                bob.id,
-                Uuid::from_str("f0f2bc11-cb7e-4626-9dd0-712d94bdfba8").unwrap(),
-                exec_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
+        assert!(
+            !server
+                .enforce(
+                    bob.id,
+                    Uuid::from_str("f0f2bc11-cb7e-4626-9dd0-712d94bdfba8").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
@@ -734,45 +811,53 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert!(!server
-            .enforce(
-                jack.id,
-                Uuid::from_str("980f07aa-866c-481f-92a0-727587576a05").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                admin.id,
-                // mars
-                Uuid::from_str("5846631d-62c2-4de8-83c0-b1f25667ca5c").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                admin.id,
-                // saturn
-                Uuid::from_str("3d5c1f2b-2e7c-4f29-b7bd-cb826966f2e0").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
-        assert!(server
-            .enforce(
-                admin.id,
-                // venus
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
+        assert!(
+            !server
+                .enforce(
+                    jack.id,
+                    Uuid::from_str("980f07aa-866c-481f-92a0-727587576a05").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    admin.id,
+                    // mars
+                    Uuid::from_str("5846631d-62c2-4de8-83c0-b1f25667ca5c").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    admin.id,
+                    // saturn
+                    Uuid::from_str("3d5c1f2b-2e7c-4f29-b7bd-cb826966f2e0").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            server
+                .enforce(
+                    admin.id,
+                    // venus
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
         let admin_lt = server.list_targets_for_user(&admin.id, true).await.unwrap();
         assert_eq!(
             admin_lt
@@ -809,16 +894,18 @@ mod tests {
             .unwrap();
         let t = t.set_active(false);
         db.repository().update_target(&t).await.unwrap();
-        assert!(!server
-            .enforce(
-                admin.id,
-                // venus
-                Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
-                shell_uuid,
-                ExtendPolicyReq::default(),
-            )
-            .await
-            .unwrap());
+        assert!(
+            !server
+                .enforce(
+                    admin.id,
+                    // venus
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    shell_uuid,
+                    ExtendPolicyReq::default(),
+                )
+                .await
+                .unwrap()
+        );
         let admin_lt = server.list_targets_for_user(&admin.id, true).await.unwrap();
         assert_eq!(
             admin_lt
@@ -849,9 +936,11 @@ mod tests {
         );
         db.repository().create_casbin_rule(&r).await.unwrap();
         server.load_role_manager().await.unwrap();
-        assert!(server
-            .enforce(admin.id, obj_login, login_uuid, ExtendPolicyReq::default(),)
-            .await
-            .unwrap());
+        assert!(
+            server
+                .enforce(admin.id, obj_login, login_uuid, ExtendPolicyReq::default(),)
+                .await
+                .unwrap()
+        );
     }
 }

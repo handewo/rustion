@@ -429,13 +429,12 @@ impl FromStr for ExtendPolicy {
                     "start_time and end_time must both be present or both absent".into(),
                 ));
             }
-            (Some(s), Some(e)) => {
-                if s.timezone() != e.timezone() {
-                    return Err(ExtendPolicyParseError::TimeConsistencyError(
-                        "timezone of start_time and end_time must be equal".into(),
-                    ));
-                }
+            (Some(s), Some(e)) if s.timezone() != e.timezone() => {
+                return Err(ExtendPolicyParseError::TimeConsistencyError(
+                    "timezone of start_time and end_time must be equal".into(),
+                ));
             }
+
             _ => {}
         }
 
@@ -477,12 +476,10 @@ impl Serialize for ExtendPolicy {
                     "start_time and end_time must both be present or both absent",
                 ));
             }
-            (Some(s), Some(e)) => {
-                if s.timezone() != e.timezone() {
-                    return Err(ser::Error::custom(
-                        "timezone of start_time and end_time must be equal",
-                    ));
-                }
+            (Some(s), Some(e)) if s.timezone() != e.timezone() => {
+                return Err(ser::Error::custom(
+                    "timezone of start_time and end_time must be equal",
+                ));
             }
             _ => {}
         }
