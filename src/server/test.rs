@@ -6,7 +6,7 @@ mod tests {
         target_secret::TargetSecret,
     };
     use crate::database::{DatabaseConfig, common, service::DatabaseService};
-    use crate::server::casbin::{ExtendPolicy, ExtendPolicyReq, IpPolicy};
+    use crate::server::casbin::{ExtendPolicy, ExtendPolicyReq, IpPolicy, TimeWithOffset};
     use crate::server::{self, HandlerBackend};
     use chrono::{Datelike, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc};
     use ipnetwork::IpNetwork;
@@ -414,7 +414,7 @@ mod tests {
                     .unwrap(),
             ),
         };
-        r.v3 = ep.to_string();
+        r.v3 = serde_json::to_string(&ep).unwrap();
         r = db.repository().update_casbin_rule(&r).await.unwrap();
         assert!(
             !server
@@ -467,21 +467,17 @@ mod tests {
 
         let ep = ExtendPolicy {
             ip_policy: None,
-            start_time: Some(
-                Utc::now()
-                    .with_timezone(&offset)
-                    .with_time(NaiveTime::from_hms_opt(8, 35, 0).unwrap())
-                    .unwrap(),
-            ),
-            end_time: Some(
-                Utc::now()
-                    .with_timezone(&offset)
-                    .with_time(NaiveTime::from_hms_opt(17, 35, 0).unwrap())
-                    .unwrap(),
-            ),
+            start_time: Some(TimeWithOffset {
+                time: NaiveTime::from_hms_opt(8, 35, 0).unwrap(),
+                offset,
+            }),
+            end_time: Some(TimeWithOffset {
+                time: NaiveTime::from_hms_opt(17, 35, 0).unwrap(),
+                offset,
+            }),
             expire_date: Some(Utc::now().with_timezone(&offset).with_year(3000).unwrap()),
         };
-        r.v3 = ep.to_string();
+        r.v3 = serde_json::to_string(&ep).unwrap();
         r = db.repository().update_casbin_rule(&r).await.unwrap();
         assert!(
             !server
@@ -534,21 +530,17 @@ mod tests {
 
         let ep = ExtendPolicy {
             ip_policy: Some(IpPolicy::Deny(IpNetwork::from_str("10.0.0.0/8").unwrap())),
-            start_time: Some(
-                Utc::now()
-                    .with_timezone(&offset)
-                    .with_time(NaiveTime::from_hms_opt(8, 35, 0).unwrap())
-                    .unwrap(),
-            ),
-            end_time: Some(
-                Utc::now()
-                    .with_timezone(&offset)
-                    .with_time(NaiveTime::from_hms_opt(17, 35, 0).unwrap())
-                    .unwrap(),
-            ),
+            start_time: Some(TimeWithOffset {
+                time: NaiveTime::from_hms_opt(8, 35, 0).unwrap(),
+                offset,
+            }),
+            end_time: Some(TimeWithOffset {
+                time: NaiveTime::from_hms_opt(17, 35, 0).unwrap(),
+                offset,
+            }),
             expire_date: Some(Utc::now().with_timezone(&offset).with_year(3000).unwrap()),
         };
-        r.v3 = ep.to_string();
+        r.v3 = serde_json::to_string(&ep).unwrap();
         db.repository().update_casbin_rule(&r).await.unwrap();
         assert!(
             !server
@@ -929,7 +921,7 @@ mod tests {
             admin.id,
             obj_login,
             all_req_uuid,
-            String::new(),
+            String::from("{}"),
             String::new(),
             String::new(),
             admin.id,

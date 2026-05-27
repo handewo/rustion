@@ -1,6 +1,6 @@
 use crate::database::Uuid;
 use crate::error::Error;
-use crate::server::error::{ExtendPolicyParseError, ServerError};
+use crate::server::error::{ExtendPolicyError, ServerError};
 use ipnetwork::IpNetwork;
 use log::trace;
 use std::fmt;
@@ -14,7 +14,7 @@ use {
 };
 
 use chrono::{DateTime, FixedOffset, NaiveTime, Utc};
-use serde::{Deserialize, Deserializer, Serialize, Serializer, ser};
+use serde::{Deserialize, Serialize, de};
 use std::str::FromStr;
 
 pub struct RoleManage {
@@ -291,12 +291,54 @@ impl RoleManage {
     }
 }
 /// This is used for p.ext
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExtendPolicy {
     pub ip_policy: Option<IpPolicy>,
-    pub start_time: Option<DateTime<FixedOffset>>,
-    pub end_time: Option<DateTime<FixedOffset>>,
+    pub start_time: Option<TimeWithOffset>,
+    pub end_time: Option<TimeWithOffset>,
     pub expire_date: Option<DateTime<FixedOffset>>,
+}
+
+impl ExtendPolicy {
+    pub fn validate(&self) -> Result<(), ExtendPolicyError> {
+        // ensure start_time and end_time are consistent
+        match (&self.start_time, &self.end_time) {
+            (Some(_), None) => Err(ExtendPolicyError::EndTimeAbsent),
+            (None, Some(_)) => Err(ExtendPolicyError::StartTimeAbsent),
+            (Some(s), Some(e)) if s.offset != e.offset => Err(ExtendPolicyError::DifferentTimezone),
+
+            _ => Ok(()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TimeWithOffset {
+    pub time: NaiveTime,
+    pub offset: FixedOffset,
+}
+
+impl Serialize for TimeWithOffset {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        // "12:23 +0800"
+        serializer.serialize_str(&format!("{} {}", self.time.format("%H:%M"), self.offset,))
+    }
+}
+
+impl<'de> Deserialize<'de> for TimeWithOffset {
+    fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        let (time_str, offset_str) = s
+            .rsplit_once(' ')
+            .ok_or_else(|| serde::de::Error::custom("expected 'HH:MM ±HH:MM'"))?;
+        let time =
+            NaiveTime::parse_from_str(time_str, "%H:%M").map_err(serde::de::Error::custom)?;
+        let offset = FixedOffset::from_str(offset_str).map_err(serde::de::Error::custom)?;
+        Ok(TimeWithOffset { time, offset })
+    }
 }
 
 /// This is used for r.ext
@@ -324,7 +366,7 @@ impl ExtendPolicyReq {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum IpPolicy {
     Allow(IpNetwork),
     Deny(IpNetwork),
@@ -332,11 +374,23 @@ pub enum IpPolicy {
 
 pub fn verify_extend_policy(ext_req: &ExtendPolicyReq, ext_str: &str) -> Result<bool, Error> {
     trace!("ext_req: {:?} ext_str: \"{}\"", ext_req, ext_str);
-    let ext: ExtendPolicy = ext_str.parse().map_err(ServerError::ExtendPolicyParse)?;
+    let ext: ExtendPolicy = serde_json::from_str(ext_str)?;
+    ext.validate().map_err(ServerError::ExtendPolicy)?;
     if !is_ip_in_cidr(ext_req.ip, ext.ip_policy) {
         return Ok(false);
     }
-    if !is_in_period(ext_req.now, ext.start_time, ext.end_time) {
+    let now = ext_req.now;
+    let start_time = ext
+        .start_time
+        .map(|t| parse_time(&now, &t))
+        .transpose()
+        .map_err(ServerError::ExtendPolicy)?;
+    let end_time = ext
+        .end_time
+        .map(|t| parse_time(&now, &t))
+        .transpose()
+        .map_err(ServerError::ExtendPolicy)?;
+    if !is_in_period(now, start_time, end_time) {
         return Ok(false);
     }
     if let Some(ep) = ext.expire_date
@@ -347,155 +401,14 @@ pub fn verify_extend_policy(ext_req: &ExtendPolicyReq, ext_str: &str) -> Result<
     Ok(true)
 }
 
-impl fmt::Display for ExtendPolicy {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut parts = Vec::new();
-
-        if let Some(ip) = &self.ip_policy {
-            match ip {
-                IpPolicy::Allow(v) => parts.push(v.to_string()),
-                IpPolicy::Deny(v) => parts.push(format!("!{}", v)),
-            }
-        } else {
-            parts.push("".to_string());
-        }
-
-        if let Some(start) = &self.start_time {
-            parts.push(start.format("%H:%M %z").to_string());
-        } else {
-            parts.push("".to_string());
-        }
-        if let Some(end) = &self.end_time {
-            parts.push(end.format("%H:%M %z").to_string());
-        } else {
-            parts.push("".to_string());
-        }
-        if let Some(expire) = &self.expire_date {
-            parts.push(expire.format("%Y-%m-%d %H:%M:%S %z").to_string());
-        } else {
-            parts.push("".to_string());
-        }
-
-        write!(f, "{}", parts.join(","))
-    }
-}
-
-impl FromStr for ExtendPolicy {
-    type Err = ExtendPolicyParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = s.split(',').collect();
-
-        let ip_policy = if !parts.is_empty() && !parts[0].is_empty() {
-            if parts[0].starts_with('!') {
-                Some(IpPolicy::Deny(parts[0][1..].parse().map_err(
-                    |e: ipnetwork::IpNetworkError| {
-                        ExtendPolicyParseError::InvalidIpPolicy(e.to_string())
-                    },
-                )?))
-            } else {
-                Some(IpPolicy::Allow(parts[0].parse().map_err(
-                    |e: ipnetwork::IpNetworkError| {
-                        ExtendPolicyParseError::InvalidIpPolicy(e.to_string())
-                    },
-                )?))
-            }
-        } else {
-            None
-        };
-
-        let start_time = if parts.len() > 1 && !parts[1].is_empty() {
-            Some(
-                parse_time(parts[1])
-                    .map_err(|e| ExtendPolicyParseError::InvalidTimeFormat(e.to_string()))?,
-            )
-        } else {
-            None
-        };
-
-        let end_time = if parts.len() > 2 && !parts[2].is_empty() {
-            Some(
-                parse_time(parts[2])
-                    .map_err(|e| ExtendPolicyParseError::InvalidTimeFormat(e.to_string()))?,
-            )
-        } else {
-            None
-        };
-
-        // ensure start_time and end_time are consistent
-        match (&start_time, &end_time) {
-            (Some(_), None) | (None, Some(_)) => {
-                return Err(ExtendPolicyParseError::TimeConsistencyError(
-                    "start_time and end_time must both be present or both absent".into(),
-                ));
-            }
-            (Some(s), Some(e)) if s.timezone() != e.timezone() => {
-                return Err(ExtendPolicyParseError::TimeConsistencyError(
-                    "timezone of start_time and end_time must be equal".into(),
-                ));
-            }
-
-            _ => {}
-        }
-
-        let expire_date = if parts.len() > 3 && !parts[3].is_empty() {
-            Some(
-                DateTime::parse_from_str(parts[3], "%Y-%m-%d %H:%M:%S %z")
-                    .map_err(|e| ExtendPolicyParseError::InvalidExpireDateFormat(e.to_string()))?,
-            )
-        } else {
-            None
-        };
-
-        Ok(ExtendPolicy {
-            ip_policy,
-            start_time,
-            end_time,
-            expire_date,
-        })
-    }
-}
-
-fn parse_time(time_str: &str) -> Result<DateTime<FixedOffset>, chrono::ParseError> {
-    // FIXME: It's better to use the time when request arrive rather than `Utc::now()`.
-    let now = Utc::now();
-    let s = NaiveTime::parse_from_str(time_str, "%H:%M %z")?;
-    let s_tz = FixedOffset::from_str(time_str.split_whitespace().nth(1).unwrap_or("+0000"))?;
-    Ok(now.with_timezone(&s_tz).with_time(s).unwrap())
-}
-
-impl Serialize for ExtendPolicy {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // ensure start_time and end_time are consistent
-        match (self.start_time, self.end_time) {
-            (Some(_), None) | (None, Some(_)) => {
-                return Err(ser::Error::custom(
-                    "start_time and end_time must both be present or both absent",
-                ));
-            }
-            (Some(s), Some(e)) if s.timezone() != e.timezone() => {
-                return Err(ser::Error::custom(
-                    "timezone of start_time and end_time must be equal",
-                ));
-            }
-            _ => {}
-        }
-
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> Deserialize<'de> for ExtendPolicy {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        ExtendPolicy::from_str(&s).map_err(serde::de::Error::custom)
-    }
+fn parse_time(
+    now: &DateTime<Utc>,
+    policy_time: &TimeWithOffset,
+) -> Result<DateTime<FixedOffset>, ExtendPolicyError> {
+    now.with_timezone(&policy_time.offset)
+        .with_time(policy_time.time)
+        .single()
+        .ok_or(ExtendPolicyError::InvalidSingleTime)
 }
 
 /// Returns true if `t` is in the half-open period `[start, end)`.
@@ -559,30 +472,26 @@ mod tests {
 
     #[test]
     fn test_parse_extend_policy() {
-        let input = "!192.168.0.0/16,11:30 +0800,17:30 +0800,2025-09-10 16:30:00 +0800";
-        let policy: ExtendPolicy = input.parse().unwrap();
+        let input = r#"{"ip_policy":{"Deny":"192.168.0.0/16"},"start_time":"11:30 +08:00","end_time":"17:30 +0800","expire_date":"2025-09-10 16:30:00 +0800"}"#;
+        let policy: ExtendPolicy = serde_json::from_str(input).unwrap();
 
         let offset = FixedOffset::east_opt(8 * 3600).unwrap();
         assert!(
             matches!(policy.ip_policy, Some(IpPolicy::Deny(ref ip)) if ip == &IpNetwork::from_str("192.168.0.0/16").unwrap())
         );
         assert_eq!(
-            policy.start_time,
-            Some(
-                Utc::now()
-                    .with_timezone(&offset)
-                    .with_time(NaiveTime::from_hms_opt(11, 30, 0).unwrap())
-                    .unwrap()
-            )
+            parse_time(&Utc::now(), &policy.start_time.unwrap()).unwrap(),
+            Utc::now()
+                .with_timezone(&offset)
+                .with_time(NaiveTime::from_hms_opt(11, 30, 0).unwrap())
+                .unwrap()
         );
         assert_eq!(
-            policy.end_time,
-            Some(
-                Utc::now()
-                    .with_timezone(&offset)
-                    .with_time(NaiveTime::from_hms_opt(17, 30, 0).unwrap())
-                    .unwrap()
-            )
+            parse_time(&Utc::now(), &policy.end_time.unwrap()).unwrap(),
+            Utc::now()
+                .with_timezone(&offset)
+                .with_time(NaiveTime::from_hms_opt(17, 30, 0).unwrap())
+                .unwrap()
         );
         assert_eq!(
             policy.expire_date,
@@ -598,32 +507,26 @@ mod tests {
             )
         );
 
-        assert_eq!(policy.to_string(), input);
-
-        let input = "10.0.0.0/8,08:00 -0330,20:00 -0330,2030-01-01 00:00:00 -0330";
-        let policy: ExtendPolicy = input.parse().unwrap();
+        let input = r#"{"ip_policy":{"Allow":"10.0.0.0/8"},"start_time":"08:00 -0330","end_time":"20:00 -0330","expire_date":"2030-01-01 00:00:00 -0330"}"#;
+        let policy: ExtendPolicy = serde_json::from_str(input).unwrap();
 
         let offset = FixedOffset::west_opt(3 * 3600 + 1800).unwrap();
         assert!(
             matches!(policy.ip_policy, Some(IpPolicy::Allow(ref ip)) if ip == &IpNetwork::from_str("10.0.0.0/8").unwrap())
         );
         assert_eq!(
-            policy.start_time,
-            Some(
-                Utc::now()
-                    .with_timezone(&offset)
-                    .with_time(NaiveTime::from_hms_opt(8, 0, 0).unwrap())
-                    .unwrap()
-            )
+            parse_time(&Utc::now(), &policy.start_time.unwrap()).unwrap(),
+            Utc::now()
+                .with_timezone(&offset)
+                .with_time(NaiveTime::from_hms_opt(8, 0, 0).unwrap())
+                .unwrap()
         );
         assert_eq!(
-            policy.end_time,
-            Some(
-                Utc::now()
-                    .with_timezone(&offset)
-                    .with_time(NaiveTime::from_hms_opt(20, 0, 0).unwrap())
-                    .unwrap()
-            )
+            parse_time(&Utc::now(), &policy.end_time.unwrap()).unwrap(),
+            Utc::now()
+                .with_timezone(&offset)
+                .with_time(NaiveTime::from_hms_opt(20, 0, 0).unwrap())
+                .unwrap()
         );
         assert_eq!(
             policy.expire_date,
@@ -639,31 +542,29 @@ mod tests {
             )
         );
 
-        assert_eq!(policy.to_string(), input);
+        let input = r#"{"ip_policy":{"Allow":"10.0.0.0/8"},"start_time":"08:00 -08:00","end_time":null,"expire_date":"2030-01-01 00:00:00 -0330"}"#;
+        let policy: ExtendPolicy = serde_json::from_str(input).unwrap();
+        assert_eq!(policy.validate(), Err(ExtendPolicyError::EndTimeAbsent));
+        let input = r#"{"ip_policy":{"Allow":"10.0.0.0/8"},"start_time":null,"end_time":"08:00 -0800","expire_date":"2030-01-01 00:00:00 -0330"}"#;
+        let policy: ExtendPolicy = serde_json::from_str(input).unwrap();
+        assert_eq!(policy.validate(), Err(ExtendPolicyError::StartTimeAbsent));
+        let input = r#"{"ip_policy":{"Allow":"10.0.0.0/8"}}"#;
+        assert!(serde_json::from_str::<ExtendPolicy>(input).is_ok());
+        let input = "{}";
+        assert!(serde_json::from_str::<ExtendPolicy>(input).is_ok());
+        let input = r#"{"ip_policy":{"Allow":"1000.0.0.0/8"}}"#;
+        assert!(serde_json::from_str::<ExtendPolicy>(input).is_err());
+        let input = r#"{"ip_policy":{"Allow":"10.0.0.0/80"}}"#;
+        assert!(serde_json::from_str::<ExtendPolicy>(input).is_err());
 
-        let input = "10.0.0.0/8,,20:00 +0000,2030-01-01 00:00:00 +0000";
-        assert!(input.parse::<ExtendPolicy>().is_err());
-        let input = "10.0.0.0/8,20:00 +0000,,2030-01-01 00:00:00 +0000";
-        assert!(input.parse::<ExtendPolicy>().is_err());
-        let input = "10.0.0.0/8,,";
-        assert!(input.parse::<ExtendPolicy>().is_ok());
-        let input = "";
-        assert!(input.parse::<ExtendPolicy>().is_ok());
-        let input = ",,";
-        assert!(input.parse::<ExtendPolicy>().is_ok());
-        let input = "1000.0.0.0/8,,";
-        assert!(input.parse::<ExtendPolicy>().is_err());
-        let input = "10.0.0.0/80,,";
-        assert!(input.parse::<ExtendPolicy>().is_err());
-
-        let input = "10.0.0.0/8,,,2030-01-01 00:00:00 +0000";
-        let policy: ExtendPolicy = input.parse().unwrap();
+        let input = r#"{"ip_policy":{"Allow":"10.0.0.0/8"},"start_time":null,"end_time":null,"expire_date":"2030-01-01 00:00:00 +0000"}"#;
+        let policy: ExtendPolicy = serde_json::from_str(input).unwrap();
         let offset = FixedOffset::east_opt(0).unwrap();
         assert!(
             matches!(policy.ip_policy, Some(IpPolicy::Allow(ref ip)) if ip == &IpNetwork::from_str("10.0.0.0/8").unwrap())
         );
-        assert_eq!(policy.start_time, None);
-        assert_eq!(policy.end_time, None);
+        assert!(policy.start_time.is_none());
+        assert!(policy.end_time.is_none());
         assert_eq!(
             policy.expire_date,
             Some(
@@ -678,14 +579,14 @@ mod tests {
             )
         );
 
-        let input = "10.0.0.0/8,,,";
-        let policy: ExtendPolicy = input.parse().unwrap();
+        let input = r#"{"ip_policy":{"Allow":"10.0.0.0/8"},"start_time":null,"end_time":null}"#;
+        let policy: ExtendPolicy = serde_json::from_str(input).unwrap();
         assert!(
             matches!(policy.ip_policy, Some(IpPolicy::Allow(ref ip)) if ip == &IpNetwork::from_str("10.0.0.0/8").unwrap())
         );
-        assert_eq!(policy.start_time, None);
-        assert_eq!(policy.end_time, None);
-        assert_eq!(policy.expire_date, None);
+        assert!(policy.start_time.is_none());
+        assert!(policy.end_time.is_none());
+        assert!(policy.expire_date.is_none());
     }
 
     #[test]
@@ -693,18 +594,14 @@ mod tests {
         let offset = FixedOffset::east_opt(3 * 3600).unwrap();
         let ext = ExtendPolicy {
             ip_policy: Some(IpPolicy::Allow(IpNetwork::from_str("10.0.0.0/8").unwrap())),
-            start_time: Some(
-                Utc::now()
-                    .with_timezone(&offset)
-                    .with_time(NaiveTime::from_hms_opt(8, 0, 0).unwrap())
-                    .unwrap(),
-            ),
-            end_time: Some(
-                Utc::now()
-                    .with_timezone(&offset)
-                    .with_time(NaiveTime::from_hms_opt(20, 0, 0).unwrap())
-                    .unwrap(),
-            ),
+            start_time: Some(TimeWithOffset {
+                time: NaiveTime::from_hms_opt(8, 0, 0).unwrap(),
+                offset,
+            }),
+            end_time: Some(TimeWithOffset {
+                time: NaiveTime::from_hms_opt(20, 0, 0).unwrap(),
+                offset,
+            }),
             expire_date: Some(
                 offset
                     .from_local_datetime(
@@ -719,7 +616,7 @@ mod tests {
         let serialized = serde_json::to_string(&ext).unwrap();
         assert_eq!(
             serialized,
-            "\"10.0.0.0/8,08:00 +0300,20:00 +0300,2030-01-01 00:00:00 +0300\""
+            r#"{"ip_policy":{"Allow":"10.0.0.0/8"},"start_time":"08:00 +03:00","end_time":"20:00 +03:00","expire_date":"2030-01-01T00:00:00+03:00"}"#
         );
 
         let ext = ExtendPolicy {
@@ -737,8 +634,11 @@ mod tests {
                     .unwrap(),
             ),
         };
-        let serialized = ext.to_string();
-        assert_eq!(serialized, "!10.0.0.0/8,,,2030-01-01 00:00:00 +0300");
+        let serialized = serde_json::to_string(&ext).unwrap();
+        assert_eq!(
+            serialized,
+            r#"{"ip_policy":{"Deny":"10.0.0.0/8"},"start_time":null,"end_time":null,"expire_date":"2030-01-01T00:00:00+03:00"}"#
+        );
 
         let ext = ExtendPolicy {
             ip_policy: None,
@@ -755,42 +655,45 @@ mod tests {
                     .unwrap(),
             ),
         };
-        let serialized = ext.to_string();
-        assert_eq!(serialized, ",,,2030-01-01 00:00:00 +0300");
+        let serialized = serde_json::to_string(&ext).unwrap();
+        assert_eq!(
+            serialized,
+            r#"{"ip_policy":null,"start_time":null,"end_time":null,"expire_date":"2030-01-01T00:00:00+03:00"}"#
+        );
 
         let ext = ExtendPolicy {
             ip_policy: None,
-            start_time: Some(
-                Utc::now()
-                    .with_timezone(&offset)
-                    .with_time(NaiveTime::from_hms_opt(8, 0, 0).unwrap())
-                    .unwrap(),
-            ),
-            end_time: Some(
-                Utc::now()
-                    .with_timezone(&offset)
-                    .with_time(NaiveTime::from_hms_opt(8, 35, 0).unwrap())
-                    .unwrap(),
-            ),
+            start_time: Some(TimeWithOffset {
+                time: NaiveTime::from_hms_opt(8, 0, 0).unwrap(),
+                offset,
+            }),
+            end_time: Some(TimeWithOffset {
+                time: NaiveTime::from_hms_opt(8, 35, 0).unwrap(),
+                offset,
+            }),
             expire_date: None,
         };
-        let serialized = ext.to_string();
-        assert_eq!(serialized, ",08:00 +0300,08:35 +0300,");
+        let serialized = serde_json::to_string(&ext).unwrap();
+        assert_eq!(
+            serialized,
+            r#"{"ip_policy":null,"start_time":"08:00 +03:00","end_time":"08:35 +03:00","expire_date":null}"#
+        );
 
         let ext = ExtendPolicy {
             ip_policy: None,
             start_time: None,
-            end_time: Some(
-                Utc::now()
-                    .with_timezone(&offset)
-                    .with_time(NaiveTime::from_hms_opt(8, 35, 0).unwrap())
-                    .unwrap(),
-            ),
+            end_time: Some(TimeWithOffset {
+                time: NaiveTime::from_hms_opt(8, 35, 0).unwrap(),
+                offset,
+            }),
             expire_date: None,
         };
-        let ext_string = ext.to_string();
-        assert_eq!(ext_string, ",,08:35 +0300,");
-        assert!(serde_json::to_string(&ext).is_err());
+        let ext_string = serde_json::to_string(&ext).unwrap();
+        assert_eq!(
+            ext_string,
+            r#"{"ip_policy":null,"start_time":null,"end_time":"08:35 +03:00","expire_date":null}"#
+        );
+        assert!(ext.validate().is_err());
     }
 
     #[test]

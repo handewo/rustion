@@ -65,7 +65,7 @@ ratatui = { git = "https://github.com/handewo/ratatui.git", default-features = f
 tui-textarea = { git = "https://github.com/handewo/tui-textarea.git", default-features = false, features = [
   "no-tty",
 ] }
-ipnetwork = "0.21"
+ipnetwork = { version = "0.21", features = ["serde"] }
 futures-util = "0.3.31"
 petgraph = { version = "0.8.3" }
 unicode-width = "0.2.1"
@@ -88,4 +88,3 @@ bytes = "1.11.1"
 
 [dev-dependencies]
 tempfile = "3.0"
-serde_json = "1"

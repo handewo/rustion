@@ -1,9 +1,13 @@
-use crate::server::widgets::{table_object_group_len_calculator, AdminTable, DisplayMode, EditorColors, SingleLineText, centered_area, render_cancel_dialog, render_message_popup, render_textarea, Message, COMMON_HELP, text_editing_style, text_input_position};
 use crate::database::error::DatabaseError;
 use crate::database::models::{ObjectGroup, PermissionPolicy};
 use crate::error::Error;
 use crate::server::casbin::ExtendPolicy;
 use crate::server::error::ServerError;
+use crate::server::widgets::{
+    AdminTable, COMMON_HELP, DisplayMode, EditorColors, Message, SingleLineText, centered_area,
+    render_cancel_dialog, render_message_popup, render_textarea, table_object_group_len_calculator,
+    text_editing_style, text_input_position,
+};
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
@@ -11,7 +15,6 @@ use ratatui::{
     style::palette::tailwind,
     widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::runtime::Handle;
 
@@ -327,8 +330,9 @@ impl PermissionEditor {
     fn verify_permission(&mut self) -> Result<(), Error> {
         let extend_policy = self.extend_policy_text.get_input();
         self.perm.rule.v3 = extend_policy.trim().into();
-        let _ =
-            ExtendPolicy::from_str(&self.perm.rule.v3).map_err(ServerError::ExtendPolicyParse)?;
+        let ext: ExtendPolicy = serde_json::from_str(&self.perm.rule.v3)?;
+        ext.validate().map_err(ServerError::ExtendPolicy)?;
+
         self.perm
             .verify()
             .map_err(|e| Error::Database(DatabaseError::PermissionPolicyValidation(e)))?;

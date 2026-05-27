@@ -1,19 +1,19 @@
-use thiserror::Error;
 use base64::DecodeError;
+use thiserror::Error;
 
-#[derive(Debug, Error)]
-pub enum ExtendPolicyParseError {
-    #[error("Invalid IP policy format: {0}")]
-    InvalidIpPolicy(String),
+#[derive(Debug, Error, PartialEq)]
+pub enum ExtendPolicyError {
+    #[error("Invalid single time")]
+    InvalidSingleTime,
 
-    #[error("Invalid time format: {0}")]
-    InvalidTimeFormat(String),
+    #[error("End time absent")]
+    EndTimeAbsent,
 
-    #[error("Time consistency error: {0}")]
-    TimeConsistencyError(String),
+    #[error("Start time absent")]
+    StartTimeAbsent,
 
-    #[error("Invalid expire date format: {0}")]
-    InvalidExpireDateFormat(String),
+    #[error("Start time and end time have different timezone")]
+    DifferentTimezone,
 }
 
 #[derive(Debug, Error)]
@@ -60,7 +60,7 @@ pub enum ServerError {
 
     // ExtendPolicy errors
     #[error(transparent)]
-    ExtendPolicyParse(#[from] ExtendPolicyParseError),
+    ExtendPolicy(#[from] ExtendPolicyError),
 
     #[error("Rule ID is none for bound role")]
     MissingRuleId,
