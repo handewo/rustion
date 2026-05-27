@@ -22,7 +22,7 @@ thiserror = "2.0.18"
 tokio = "1.46.0"
 toml = "1"
 # Database dependencies
-sqlx = { version = "0.8", features = [
+sqlx = { version = "0.9", features = [
   "runtime-tokio",
   "tls-rustls-aws-lc-rs",
   "sqlite",

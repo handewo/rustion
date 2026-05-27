@@ -17,10 +17,10 @@ pub(crate) use user::{User, UserWithRole};
 use serde::{Deserialize, Serialize};
 
 use sqlx::{
+    Type,
     decode::Decode,
     encode::{Encode, IsNull},
-    sqlite::{Sqlite, SqliteArgumentValue, SqliteTypeInfo, SqliteValueRef},
-    Type,
+    sqlite::{Sqlite, SqliteArgumentsBuffer, SqliteTypeInfo, SqliteValueRef},
 };
 
 /// Wrapper around Vec<String> that is stored as JSON TEXT.
@@ -39,11 +39,10 @@ impl Type<Sqlite> for StringArray {
 impl<'q> Encode<'q, Sqlite> for StringArray {
     fn encode_by_ref(
         &self,
-        buf: &mut Vec<SqliteArgumentValue<'q>>,
+        buf: &mut SqliteArgumentsBuffer,
     ) -> Result<IsNull, sqlx::error::BoxDynError> {
         let json = serde_json::to_string(&self.0)?;
-        buf.push(SqliteArgumentValue::Text(json.into()));
-        Ok(IsNull::No)
+        <&str as sqlx::Encode<sqlx::Sqlite>>::encode_by_ref(&json.as_str(), buf)
     }
 }
 

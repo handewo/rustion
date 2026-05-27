@@ -283,18 +283,16 @@ impl DatabaseRepository for SqliteRepository {
         username: &str,
         active_only: bool,
     ) -> Result<Option<User>, Error> {
-        let mut query =
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             r#"SELECT id, username, email, password_hash, authorized_keys, force_init_pass,
-        is_active, updated_by, updated_at
-            FROM users WHERE username = ?"#
-                .to_string();
+            is_active, updated_by, updated_at
+            FROM users WHERE username = "#,
+        );
+        qb.push_bind(username);
         if active_only {
-            query.push_str(" AND is_active = 1");
+            qb.push(" AND is_active = 1");
         }
-        let row = sqlx::query_as::<_, User>(&query)
-            .bind(username)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = qb.build_query_as::<User>().fetch_optional(&self.pool).await?;
 
         Ok(row)
     }
@@ -345,7 +343,7 @@ impl DatabaseRepository for SqliteRepository {
     }
 
     async fn list_users_with_role(&self, active_only: bool) -> Result<Vec<UserWithRole>, Error> {
-        let mut query = String::from(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             r#"SELECT
     u.id,
     u.username,
@@ -367,31 +365,29 @@ LEFT JOIN (
     GROUP BY ru.v1
 ) r ON u.id = r.user_id"#,
         );
-
         if active_only {
-            query.push_str(" WHERE is_active = 1");
+            qb.push(" WHERE is_active = 1");
         }
-        query.push_str(" ORDER BY username");
+        qb.push(" ORDER BY username");
 
-        sqlx::query_as::<_, UserWithRole>(&query)
+        qb.build_query_as::<UserWithRole>()
             .fetch_all(&self.pool)
             .await
             .map_err(Error::Sqlx)
     }
 
     async fn list_users(&self, active_only: bool) -> Result<Vec<User>, Error> {
-        let mut query = String::from(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             r#"SELECT id, username, email, password_hash, authorized_keys,
                  force_init_pass, is_active, updated_by, updated_at
-          FROM users"#,
+               FROM users"#,
         );
-
         if active_only {
-            query.push_str(" WHERE is_active = 1");
+            qb.push(" WHERE is_active = 1");
         }
-        query.push_str(" ORDER BY username");
+        qb.push(" ORDER BY username");
 
-        sqlx::query_as::<_, User>(&query)
+        qb.build_query_as::<User>()
             .fetch_all(&self.pool)
             .await
             .map_err(Error::Sqlx)
@@ -432,16 +428,15 @@ LEFT JOIN (
         id: &Uuid,
         active_only: bool,
     ) -> Result<Option<Target>, Error> {
-        let mut query = r#"SELECT id, name, hostname, port, server_public_key, description, proxy,
-            is_active, updated_by, updated_at FROM targets WHERE id = ?"#
-            .to_string();
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
+            r#"SELECT id, name, hostname, port, server_public_key, description, proxy,
+            is_active, updated_by, updated_at FROM targets WHERE id = "#,
+        );
+        qb.push_bind(*id);
         if active_only {
-            query.push_str(" AND is_active = 1");
+            qb.push(" AND is_active = 1");
         }
-        let row = sqlx::query_as::<_, Target>(&query)
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = qb.build_query_as::<Target>().fetch_optional(&self.pool).await?;
 
         Ok(row)
     }
@@ -450,18 +445,17 @@ LEFT JOIN (
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        let sql = format!(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             r#"SELECT id, name, hostname, port, server_public_key, description, proxy,
-            is_active, updated_by, updated_at FROM targets WHERE id IN ({placeholders})"#
+            is_active, updated_by, updated_at FROM targets WHERE id IN ("#,
         );
-
-        let mut query = sqlx::query_as::<_, Target>(&sql);
-
+        let mut sep = qb.separated(", ");
         for id in ids {
-            query = query.bind(id);
+            sep.push_bind(*id);
         }
-        let rows = query.fetch_all(&self.pool).await?;
+        qb.push(")");
+
+        let rows = qb.build_query_as::<Target>().fetch_all(&self.pool).await?;
 
         Ok(rows)
     }
@@ -474,24 +468,23 @@ LEFT JOIN (
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        let mut sql = format!(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             r#"SELECT t.id, t.name, t.hostname, t.port, t.server_public_key, t.description, t.proxy,
             t.is_active, t.updated_by, t.updated_at FROM target_secrets ts
             INNER JOIN targets t ON ts.target_id = t.id
-            WHERE ts.id IN ({placeholders})"#
+            WHERE ts.id IN ("#,
         );
+        let mut sep = qb.separated(", ");
+        for id in ids {
+            sep.push_bind(*id);
+        }
+        qb.push(")");
 
         if active_only {
-            sql.push_str(" AND ts.is_active = 1 AND t.is_active = 1");
+            qb.push(" AND ts.is_active = 1 AND t.is_active = 1");
         }
 
-        let mut query = sqlx::query_as::<_, Target>(&sql);
-
-        for id in ids {
-            query = query.bind(id);
-        }
-        let rows = query.fetch_all(&self.pool).await?;
+        let rows = qb.build_query_as::<Target>().fetch_all(&self.pool).await?;
 
         Ok(rows)
     }
@@ -568,17 +561,16 @@ LEFT JOIN (
     }
 
     async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, Error> {
-        let mut query = String::from(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             r#"SELECT id, name, hostname, port, server_public_key, description, proxy,
                   is_active, updated_by, updated_at
-           FROM targets"#,
+               FROM targets"#,
         );
-
         if active_only {
-            query.push_str(" WHERE is_active = 1");
+            qb.push(" WHERE is_active = 1");
         }
 
-        sqlx::query_as::<_, Target>(&query)
+        qb.build_query_as::<Target>()
             .fetch_all(&self.pool)
             .await
             .map_err(Error::Sqlx)
@@ -597,23 +589,29 @@ LEFT JOIN (
         user_id: &Uuid,
         active_only: bool,
     ) -> Result<Vec<TargetSecretName>, Error> {
-        let mut query = r#"
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
+            r#"
             SELECT l.pid, ts.id, t.id AS target_id, t.name AS target_name, s.id AS secret_id, s.user AS secret_user
-            FROM (WITH all_policy AS (SELECT id, v1 FROM casbin_rule WHERE v0 = ? AND ptype = 'p'
+            FROM (WITH all_policy AS (SELECT id, v1 FROM casbin_rule WHERE v0 = "#,
+        );
+        qb.push_bind(*user_id);
+        qb.push(r#" AND ptype = 'p'
             UNION ALL SELECT id, v1 FROM casbin_rule WHERE ptype = 'p' AND v0 IN
-            (SELECT v1 FROM casbin_rule WHERE v0 = ? AND ptype = 'g1'))
+            (SELECT v1 FROM casbin_rule WHERE v0 = "#);
+        qb.push_bind(*user_id);
+        qb.push(r#" AND ptype = 'g1'))
             SELECT p.id AS pid, c.v0 AS id FROM (SELECT * FROM casbin_rule WHERE ptype = 'g2') c INNER JOIN all_policy p ON p.v1 = c.v1
             UNION ALL SELECT p.id AS pid, p.v1 AS id FROM all_policy p LEFT JOIN (SELECT * FROM casbin_rule WHERE ptype = 'g2') c
             ON p.v1 = c.v1 WHERE c.v1 IS NULL) l INNER JOIN target_secrets ts ON ts.id = l.id
-            INNER JOIN targets t ON ts.target_id = t.id INNER JOIN secrets s ON ts.secret_id = s.id
-            "#
-            .to_string();
+            INNER JOIN targets t ON ts.target_id = t.id INNER JOIN secrets s ON ts.secret_id = s.id"#);
         if active_only {
-            query.push_str(" WHERE ts.is_active = 1 AND t.is_active = 1 AND s.is_active = 1");
+            qb.push(
+                " WHERE ts.is_active = 1 AND t.is_active = 1 AND s.is_active = 1",
+            );
         }
-        let targets = sqlx::query_as::<_, TargetSecretName>(&query)
-            .bind(user_id)
-            .bind(user_id)
+
+        let targets = qb
+            .build_query_as::<TargetSecretName>()
             .fetch_all(&self.pool)
             .await?;
 
@@ -629,25 +627,31 @@ LEFT JOIN (
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        let mut sql = format!(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             r#"
-            SELECT ? AS pid, ts.id, t.id AS target_id, t.name AS target_name, s.id AS secret_id, s.user AS secret_user
+            SELECT "#,
+        );
+        qb.push_bind(*pid);
+        qb.push(
+            r#" AS pid, ts.id, t.id AS target_id, t.name AS target_name, s.id AS secret_id, s.user AS secret_user
             FROM target_secrets ts INNER JOIN targets t ON ts.target_id = t.id
             INNER JOIN secrets s ON ts.secret_id = s.id
-            WHERE ts.id IN ({placeholders})"#
+            WHERE ts.id IN ("#,
         );
+        let mut sep = qb.separated(", ");
+        for id in ids {
+            sep.push_bind(*id);
+        }
+        qb.push(")");
 
         if active_only {
-            sql.push_str(" AND ts.is_active = 1 AND t.is_active = 1 AND s.is_active = 1");
+            qb.push(" AND ts.is_active = 1 AND t.is_active = 1 AND s.is_active = 1");
         }
 
-        let mut query = sqlx::query_as::<_, TargetSecretName>(&sql).bind(pid);
-        for id in ids {
-            query = query.bind(id);
-        }
-
-        let targets = query.fetch_all(&self.pool).await?;
+        let targets = qb
+            .build_query_as::<TargetSecretName>()
+            .fetch_all(&self.pool)
+            .await?;
 
         Ok(targets)
     }
@@ -955,24 +959,22 @@ WHERE c.ptype = 'g3';"#
     }
 
     async fn list_user_group(&self) -> Result<Vec<ObjectGroup>, Error> {
-        let query = String::from(
-            r#"SELECT 
-    id, 
-    username AS name, 
-    0 AS is_group 
-FROM users 
+        let query = r#"SELECT
+    id,
+    username AS name,
+    0 AS is_group
+FROM users
 
 UNION ALL
 
-SELECT 
-    id, 
-    name, 
-    1 AS is_group 
-FROM casbin_names 
-WHERE ptype = 'g1';"#,
-        );
+SELECT
+    id,
+    name,
+    1 AS is_group
+FROM casbin_names
+WHERE ptype = 'g1';"#;
 
-        let rows = sqlx::query_as::<_, ObjectGroup>(&query)
+        let rows = sqlx::query_as::<_, ObjectGroup>(query)
             .fetch_all(&self.pool)
             .await?;
 
@@ -980,32 +982,30 @@ WHERE ptype = 'g1';"#,
     }
 
     async fn list_target_group(&self) -> Result<Vec<ObjectGroup>, Error> {
-        let query = String::from(
-            r#"
-        SELECT 
-    ts.id, 
-    s.user || '(' || s.name || ')'|| '@' || t.name || ':' || t.port AS name, 
-    0 AS is_group 
-FROM target_secrets AS ts 
-LEFT JOIN targets AS t ON ts.target_id = t.id 
-LEFT JOIN secrets AS s ON ts.secret_id = s.id 
+        let query = r#"
+        SELECT
+    ts.id,
+    s.user || '(' || s.name || ')'|| '@' || t.name || ':' || t.port AS name,
+    0 AS is_group
+FROM target_secrets AS ts
+LEFT JOIN targets AS t ON ts.target_id = t.id
+LEFT JOIN secrets AS s ON ts.secret_id = s.id
 
 UNION ALL
 
-SELECT 
-    id, 
-    name, 
-    CASE 
-        WHEN ptype = 'g2' THEN 1 
-        ELSE 0 
-    END AS is_group 
-FROM casbin_names 
-WHERE ptype = 'g2' 
+SELECT
+    id,
+    name,
+    CASE
+        WHEN ptype = 'g2' THEN 1
+        ELSE 0
+    END AS is_group
+FROM casbin_names
+WHERE ptype = 'g2'
    OR ptype = '__internal_object_type';
-        "#,
-        );
+        "#;
 
-        let rows = sqlx::query_as::<_, ObjectGroup>(&query)
+        let rows = sqlx::query_as::<_, ObjectGroup>(query)
             .fetch_all(&self.pool)
             .await?;
 
@@ -1013,21 +1013,19 @@ WHERE ptype = 'g2'
     }
 
     async fn list_action_group(&self) -> Result<Vec<ObjectGroup>, Error> {
-        let query = String::from(
-            r#"SELECT 
-    id, 
-    name, 
-    CASE 
-        WHEN ptype = 'g3' THEN 1 
-        ELSE 0 
-    END AS is_group 
-FROM casbin_names 
-WHERE ptype = 'g3' 
+        let query = r#"SELECT
+    id,
+    name,
+    CASE
+        WHEN ptype = 'g3' THEN 1
+        ELSE 0
+    END AS is_group
+FROM casbin_names
+WHERE ptype = 'g3'
    OR ptype = '__internal_action_type';
-"#,
-        );
+"#;
 
-        let rows = sqlx::query_as::<_, ObjectGroup>(&query)
+        let rows = sqlx::query_as::<_, ObjectGroup>(query)
             .fetch_all(&self.pool)
             .await?;
 
@@ -1035,15 +1033,15 @@ WHERE ptype = 'g3'
     }
 
     async fn list_casbin_names(&self, active_only: bool) -> Result<Vec<CasbinName>, Error> {
-        let mut query = String::from(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             "SELECT id, ptype, name, is_active, updated_by, updated_at FROM casbin_names",
         );
-
         if active_only {
-            query.push_str(" WHERE is_active = 1");
+            qb.push(" WHERE is_active = 1");
         }
 
-        let rows = sqlx::query_as::<_, CasbinName>(&query)
+        let rows = qb
+            .build_query_as::<CasbinName>()
             .fetch_all(&self.pool)
             .await?;
 
@@ -1054,15 +1052,15 @@ WHERE ptype = 'g3'
         &self,
         active_only: bool,
     ) -> Result<Vec<CasbinName>, Error> {
-        let mut query = String::from(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             "SELECT id, ptype, name, is_active, updated_by, updated_at FROM casbin_names WHERE ptype NOT IN ('__internal_action_type', '__internal_object_type')",
         );
-
         if active_only {
-            query.push_str(" AND is_active = 1");
+            qb.push(" AND is_active = 1");
         }
 
-        let rows = sqlx::query_as::<_, CasbinName>(&query)
+        let rows = qb
+            .build_query_as::<CasbinName>()
             .fetch_all(&self.pool)
             .await?;
 
@@ -1074,16 +1072,16 @@ WHERE ptype = 'g3'
         ptype: &str,
         active_only: bool,
     ) -> Result<Vec<CasbinName>, Error> {
-        let mut query = String::from(
-            "SELECT id, ptype, name, is_active, updated_by, updated_at FROM casbin_names WHERE ptype = ?",
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
+            "SELECT id, ptype, name, is_active, updated_by, updated_at FROM casbin_names WHERE ptype = ",
         );
-
+        qb.push_bind(ptype);
         if active_only {
-            query.push_str(" AND is_active = 1");
+            qb.push(" AND is_active = 1");
         }
 
-        let rows = sqlx::query_as::<_, CasbinName>(&query)
-            .bind(ptype)
+        let rows = qb
+            .build_query_as::<CasbinName>()
             .fetch_all(&self.pool)
             .await?;
 
@@ -1156,47 +1154,35 @@ WHERE ptype = 'g3'
             return Ok(vec![]);
         }
 
-        // Build “VALUES (?,?,?,?,…), (?,?,?,?,…), …”
-        let rows = casbin_names
-            .iter()
-            .map(|_| "(?,?,?,?,?,?)")
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let query = format!(
-            r"INSERT INTO casbin_names
-              (id, ptype, name, is_active, updated_by, updated_at)
-              VALUES {rows}"
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
+            r#"INSERT INTO casbin_names
+              (id, ptype, name, is_active, updated_by, updated_at) "#,
         );
+        qb.push_values(casbin_names, |mut b, r| {
+            b.push_bind(r.id)
+                .push_bind(&r.ptype)
+                .push_bind(&r.name)
+                .push_bind(r.is_active)
+                .push_bind(r.updated_by)
+                .push_bind(r.updated_at);
+        });
 
-        let mut q = sqlx::query(&query);
-        for r in casbin_names {
-            q = q
-                .bind(r.id)
-                .bind(&r.ptype)
-                .bind(&r.name)
-                .bind(r.is_active)
-                .bind(r.updated_by)
-                .bind(r.updated_at);
-        }
-
-        q.execute(&self.pool).await?;
+        qb.build().execute(&self.pool).await?;
 
         Ok(casbin_names.to_vec())
     }
 
     async fn list_secrets(&self, active_only: bool) -> Result<Vec<Secret>, Error> {
-        let mut query = String::from(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             r#"SELECT id, name, user, password, private_key, public_key,
             is_active, updated_by, updated_at
             FROM secrets"#,
         );
-
         if active_only {
-            query.push_str(" WHERE is_active = 1");
+            qb.push(" WHERE is_active = 1");
         }
 
-        sqlx::query_as::<_, Secret>(&query)
+        qb.build_query_as::<Secret>()
             .fetch_all(&self.pool)
             .await
             .map_err(Error::Sqlx)
@@ -1299,18 +1285,17 @@ WHERE ptype = 'g3'
         target_id: &Uuid,
         active_only: bool,
     ) -> Result<Vec<TargetSecret>, Error> {
-        let mut query = String::from(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             r#"SELECT id, target_id, secret_id, is_active, updated_by, updated_at
            FROM target_secrets ts INNER JOIN targets t ON ts.target_id = t.id
-           WHERE ts.target_id = ?"#,
+           WHERE ts.target_id = "#,
         );
-
+        qb.push_bind(*target_id);
         if active_only {
-            query.push_str(" AND ts.is_active = 1 AND t.is_active = 1");
+            qb.push(" AND ts.is_active = 1 AND t.is_active = 1");
         }
 
-        sqlx::query_as::<_, TargetSecret>(&query)
-            .bind(target_id)
+        qb.build_query_as::<TargetSecret>()
             .fetch_all(&self.pool)
             .await
             .map_err(Error::Sqlx)
@@ -1321,18 +1306,17 @@ WHERE ptype = 'g3'
         id: &Uuid,
         active_only: bool,
     ) -> Result<Option<Target>, Error> {
-        let mut query = r#"SELECT t.id, t.name, t.hostname, t.port, t.server_public_key, t.description, t.proxy,
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
+            r#"SELECT t.id, t.name, t.hostname, t.port, t.server_public_key, t.description, t.proxy,
             t.is_active, t.updated_by, t.updated_at FROM target_secrets ts
             INNER JOIN targets t ON ts.target_id = t.id
-            WHERE ts.id = ?"#
-            .to_string();
+            WHERE ts.id = "#,
+        );
+        qb.push_bind(*id);
         if active_only {
-            query.push_str(" AND ts.is_active = 1 AND t.is_active = 1");
+            qb.push(" AND ts.is_active = 1 AND t.is_active = 1");
         }
-        let row = sqlx::query_as::<_, Target>(&query)
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = qb.build_query_as::<Target>().fetch_optional(&self.pool).await?;
 
         Ok(row)
     }
@@ -1342,18 +1326,17 @@ WHERE ptype = 'g3'
         id: &Uuid,
         active_only: bool,
     ) -> Result<Option<Secret>, Error> {
-        let mut query = r#"SELECT s.id, s.name, s.user, s.password, s.private_key, s.public_key, s.is_active, s.updated_by,
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
+            r#"SELECT s.id, s.name, s.user, s.password, s.private_key, s.public_key, s.is_active, s.updated_by,
             s.updated_at FROM target_secrets ts
             INNER JOIN secrets s ON ts.secret_id = s.id
-            WHERE ts.id = ?"#
-            .to_string();
+            WHERE ts.id = "#,
+        );
+        qb.push_bind(*id);
         if active_only {
-            query.push_str(" AND ts.is_active = 1 AND s.is_active = 1");
+            qb.push(" AND ts.is_active = 1 AND s.is_active = 1");
         }
-        let row = sqlx::query_as::<_, Secret>(&query)
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = qb.build_query_as::<Secret>().fetch_optional(&self.pool).await?;
 
         Ok(row)
     }
@@ -1374,18 +1357,17 @@ WHERE ptype = 'g3'
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        let sql = format!(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             r#"SELECT id, name, user, password, private_key, public_key, is_active, updated_by,
-            updated_at FROM secrets WHERE id IN ({placeholders})"#,
+            updated_at FROM secrets WHERE id IN ("#,
         );
-
-        let mut query = sqlx::query_as::<_, Secret>(&sql);
-
+        let mut sep = qb.separated(", ");
         for id in ids {
-            query = query.bind(id);
+            sep.push_bind(*id);
         }
-        let rows = query.fetch_all(&self.pool).await?;
+        qb.push(")");
+
+        let rows = qb.build_query_as::<Secret>().fetch_all(&self.pool).await?;
 
         Ok(rows)
     }
@@ -1444,35 +1426,24 @@ WHERE ptype = 'g3'
             return Ok(vec![]);
         }
 
-        // Build “VALUES (?,?,?,?,…), (?,?,?,?,…), …”
-        let rows = rules
-            .iter()
-            .map(|_| "(?,?,?,?,?,?,?,?,?,?)")
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let query = format!(
-            r"INSERT INTO casbin_rule
-              (id, ptype, v0, v1, v2, v3, v4, v5, updated_by, updated_at)
-              VALUES {rows}"
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
+            r#"INSERT INTO casbin_rule
+              (id, ptype, v0, v1, v2, v3, v4, v5, updated_by, updated_at) "#,
         );
+        qb.push_values(rules, |mut b, r| {
+            b.push_bind(r.id)
+                .push_bind(&r.ptype)
+                .push_bind(r.v0)
+                .push_bind(r.v1)
+                .push_bind(r.v2)
+                .push_bind(&r.v3)
+                .push_bind(&r.v4)
+                .push_bind(&r.v5)
+                .push_bind(r.updated_by)
+                .push_bind(r.updated_at);
+        });
 
-        let mut q = sqlx::query(&query);
-        for r in rules {
-            q = q
-                .bind(r.id)
-                .bind(&r.ptype)
-                .bind(r.v0)
-                .bind(r.v1)
-                .bind(r.v2)
-                .bind(&r.v3)
-                .bind(&r.v4)
-                .bind(&r.v5)
-                .bind(r.updated_by)
-                .bind(r.updated_at);
-        }
-
-        q.execute(&self.pool).await?;
+        qb.build().execute(&self.pool).await?;
 
         Ok(rules.to_vec())
     }
@@ -1482,33 +1453,24 @@ WHERE ptype = 'g3'
             return Ok(vec![]);
         }
 
-        let rows = (0..users.len())
-            .map(|_| "(?,?,?,?,?,?,?,?,?)")
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let query = format!(
-            r"INSERT INTO users
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
+            r#"INSERT INTO users
           (id, username, email, password_hash, authorized_keys,
-           force_init_pass, is_active, updated_by, updated_at)
-          VALUES {rows}"
+           force_init_pass, is_active, updated_by, updated_at) "#,
         );
-        let mut q = sqlx::query(&query);
+        qb.push_values(users, |mut b, u| {
+            b.push_bind(u.id)
+                .push_bind(&u.username)
+                .push_bind(&u.email)
+                .push_bind(&u.password_hash)
+                .push_bind(&u.authorized_keys)
+                .push_bind(u.force_init_pass)
+                .push_bind(u.is_active)
+                .push_bind(u.updated_by)
+                .push_bind(u.updated_at);
+        });
 
-        for u in users {
-            q = q
-                .bind(u.id)
-                .bind(&u.username)
-                .bind(&u.email)
-                .bind(&u.password_hash)
-                .bind(&u.authorized_keys)
-                .bind(u.force_init_pass)
-                .bind(u.is_active)
-                .bind(u.updated_by)
-                .bind(u.updated_at);
-        }
-
-        q.execute(&self.pool).await?;
+        qb.build().execute(&self.pool).await?;
 
         Ok(users.to_vec())
     }
@@ -1518,48 +1480,39 @@ WHERE ptype = 'g3'
             return Ok(vec![]);
         }
 
-        let rows = (0..targets.len())
-            .map(|_| "(?,?,?,?,?,?,?,?,?,?)")
-            .collect::<Vec<_>>()
-            .join(",");
-        let query = format!(
-            r"INSERT INTO targets
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
+            r#"INSERT INTO targets
           (id, name, hostname, port, server_public_key, description, proxy,
-           is_active, updated_by, updated_at)
-          VALUES {rows}"
+           is_active, updated_by, updated_at) "#,
         );
-        let mut q = sqlx::query(&query);
+        qb.push_values(targets, |mut b, t| {
+            b.push_bind(t.id)
+                .push_bind(&t.name)
+                .push_bind(&t.hostname)
+                .push_bind(t.port as i64)
+                .push_bind(&t.server_public_key)
+                .push_bind(&t.description)
+                .push_bind(&t.proxy)
+                .push_bind(t.is_active)
+                .push_bind(t.updated_by)
+                .push_bind(t.updated_at);
+        });
 
-        for t in targets {
-            q = q
-                .bind(t.id)
-                .bind(&t.name)
-                .bind(&t.hostname)
-                .bind(t.port as i64)
-                .bind(&t.server_public_key)
-                .bind(&t.description)
-                .bind(&t.proxy)
-                .bind(t.is_active)
-                .bind(t.updated_by)
-                .bind(t.updated_at);
-        }
-
-        q.execute(&self.pool).await?;
+        qb.build().execute(&self.pool).await?;
 
         Ok(targets.to_vec())
     }
 
     async fn list_target_secrets(&self, active_only: bool) -> Result<Vec<TargetSecret>, Error> {
-        let mut query = String::from(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             r#"SELECT id, target_id, secret_id, is_active, updated_by, updated_at
            FROM target_secrets"#,
         );
-
         if active_only {
-            query.push_str(" WHERE is_active = 1");
+            qb.push(" WHERE is_active = 1");
         }
 
-        sqlx::query_as::<_, TargetSecret>(&query)
+        qb.build_query_as::<TargetSecret>()
             .fetch_all(&self.pool)
             .await
             .map_err(Error::Sqlx)
@@ -1663,32 +1616,23 @@ WHERE ptype = 'g3'
             return Ok(vec![]);
         }
 
-        let rows = (0..secrets.len())
-            .map(|_| "(?,?,?,?,?,?,?,?,?)")
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let query = format!(
-            r"INSERT INTO secrets
-              (id, name, user, password, private_key, public_key, is_active, updated_by, updated_at)
-              VALUES {rows}"
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
+            r#"INSERT INTO secrets
+              (id, name, user, password, private_key, public_key, is_active, updated_by, updated_at) "#,
         );
-        let mut q = sqlx::query(&query);
+        qb.push_values(secrets, |mut b, s| {
+            b.push_bind(s.id)
+                .push_bind(&s.name)
+                .push_bind(&s.user)
+                .push_bind(&s.password)
+                .push_bind(&s.private_key)
+                .push_bind(&s.public_key)
+                .push_bind(s.is_active)
+                .push_bind(s.updated_by)
+                .push_bind(s.updated_at);
+        });
 
-        for s in secrets {
-            q = q
-                .bind(s.id)
-                .bind(&s.name)
-                .bind(&s.user)
-                .bind(&s.password)
-                .bind(&s.private_key)
-                .bind(&s.public_key)
-                .bind(s.is_active)
-                .bind(s.updated_by)
-                .bind(s.updated_at);
-        }
-
-        q.execute(&self.pool).await?;
+        qb.build().execute(&self.pool).await?;
         Ok(secrets.to_vec())
     }
 
@@ -1700,30 +1644,20 @@ WHERE ptype = 'g3'
             return Ok(vec![]);
         }
 
-        let rows = (0..secrets.len())
-            .map(|_| "(?,?,?,?,?,?)")
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let query = format!(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             r#"INSERT INTO target_secrets
-            (id, target_id, secret_id, is_active, updated_by, updated_at)
-            VALUES  {rows}"#,
+            (id, target_id, secret_id, is_active, updated_by, updated_at) "#,
         );
+        qb.push_values(secrets, |mut b, s| {
+            b.push_bind(s.id)
+                .push_bind(s.target_id)
+                .push_bind(s.secret_id)
+                .push_bind(s.is_active)
+                .push_bind(s.updated_by)
+                .push_bind(s.updated_at);
+        });
 
-        let mut q = sqlx::query(&query);
-
-        for s in secrets {
-            q = q
-                .bind(s.id)
-                .bind(s.target_id)
-                .bind(s.secret_id)
-                .bind(s.is_active)
-                .bind(s.updated_by)
-                .bind(s.updated_at);
-        }
-
-        q.execute(&self.pool).await?;
+        qb.build().execute(&self.pool).await?;
 
         Ok(secrets.to_vec())
     }
@@ -1902,15 +1836,17 @@ WHERE ptype = 'g3'
         &self,
         limit: Option<i64>,
     ) -> Result<Vec<SessionRecording>, Error> {
-        let mut query = String::from(
+        let mut qb: sqlx::QueryBuilder<Sqlite> = sqlx::QueryBuilder::new(
             "SELECT id, user_id, target_id, secret_id, file_path, started_at, ended_at, connection_id, status FROM session_recordings ORDER BY started_at DESC",
         );
 
         if let Some(l) = limit {
-            query.push_str(&format!(" LIMIT {}", l));
+            qb.push(" LIMIT ");
+            qb.push_bind(l);
         }
 
-        let rows = sqlx::query_as::<_, SessionRecording>(&query)
+        let rows = qb
+            .build_query_as::<SessionRecording>()
             .fetch_all(&self.pool)
             .await
             .map_err(Error::Sqlx)?;
