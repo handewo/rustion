@@ -3,7 +3,7 @@ use crate::database::Uuid;
 use crate::database::models::{SessionRecording, Target, TargetSecretName, User};
 use crate::error::Error;
 use crate::server::app::error::AppError;
-use crate::server::{HandlerLog, casbin};
+use crate::server::{HandlerLog, extend_policy};
 use log::{debug, trace};
 use russh::client as ru_client;
 use russh::server as ru_server;
@@ -640,7 +640,7 @@ impl ConnectTarget {
                 user.id,
                 target_sec_id,
                 action_uuid,
-                casbin::ExtendPolicyReq::new(ip),
+                extend_policy::ExtendPolicyReq::new(ip),
             )
             .await?
         {

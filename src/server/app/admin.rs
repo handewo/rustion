@@ -2,7 +2,7 @@ use crate::database::common as db_common;
 use crate::database::models::User;
 use crate::error::Error;
 use crate::server::HandlerLog;
-use crate::server::casbin;
+use crate::server::extend_policy;
 
 use crate::database::Uuid;
 use crossbeam_channel::{Receiver, Sender, unbounded};
@@ -169,7 +169,12 @@ impl Admin {
         };
 
         backend
-            .enforce(user.id, object, action, casbin::ExtendPolicyReq::new(ip))
+            .enforce(
+                user.id,
+                object,
+                action,
+                extend_policy::ExtendPolicyReq::new(ip),
+            )
             .await
     }
 

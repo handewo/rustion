@@ -6,7 +6,7 @@ mod tests {
         target_secret::TargetSecret,
     };
     use crate::database::{DatabaseConfig, common, service::DatabaseService};
-    use crate::server::casbin::{ExtendPolicy, ExtendPolicyReq, IpPolicy, TimeWithOffset};
+    use crate::server::extend_policy::{ExtendPolicy, ExtendPolicyReq, IpPolicy, TimeWithOffset};
     use crate::server::{self, HandlerBackend};
     use chrono::{Datelike, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc};
     use ipnetwork::IpNetwork;

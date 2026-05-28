@@ -1,4 +1,4 @@
-use super::casbin;
+use super::extend_policy;
 use crate::config::Config;
 use crate::database::common::*;
 use crate::database::{models::*, service::DatabaseService};
@@ -189,8 +189,8 @@ pub async fn init_service(config: Config) {
     let ipv4_localhost = "127.0.0.1/32"
         .parse()
         .unwrap_or_else(|e| panic!("Failed to parse IPv4 localhost: {}", e));
-    let ext = casbin::ExtendPolicy {
-        ip_policy: Some(casbin::IpPolicy::Allow(ipv4_localhost)),
+    let ext = extend_policy::ExtendPolicy {
+        ip_policy: Some(extend_policy::IpPolicy::Allow(ipv4_localhost)),
         start_time: None,
         end_time: None,
         expire_date: None,
@@ -236,8 +236,8 @@ pub async fn init_service(config: Config) {
     let ipv6_localhost = "::1/128"
         .parse()
         .unwrap_or_else(|e| panic!("Failed to parse IPv6 localhost: {}", e));
-    let ext = casbin::ExtendPolicy {
-        ip_policy: Some(casbin::IpPolicy::Allow(ipv6_localhost)),
+    let ext = extend_policy::ExtendPolicy {
+        ip_policy: Some(extend_policy::IpPolicy::Allow(ipv6_localhost)),
         start_time: None,
         end_time: None,
         expire_date: None,
@@ -280,7 +280,7 @@ pub async fn init_service(config: Config) {
     }
 
     // Policy: login_group can login (no IP restriction)
-    let ext = casbin::ExtendPolicy {
+    let ext = extend_policy::ExtendPolicy {
         ip_policy: None,
         start_time: None,
         end_time: None,

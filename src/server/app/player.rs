@@ -6,7 +6,7 @@ use crate::server::widgets::{
     common::{DATETIME_LENGTH, MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW},
     render_message_popup,
 };
-use crate::server::{HandlerLog, casbin};
+use crate::server::{HandlerLog, extend_policy};
 use crossterm::event::{
     self, Event, KeyCode, KeyEventKind, KeyModifiers, NoTtyEvent, SenderWriter,
 };
@@ -155,7 +155,12 @@ impl Player {
         };
 
         backend
-            .enforce(user.id, object, action, casbin::ExtendPolicyReq::new(ip))
+            .enforce(
+                user.id,
+                object,
+                action,
+                extend_policy::ExtendPolicyReq::new(ip),
+            )
             .await
     }
 

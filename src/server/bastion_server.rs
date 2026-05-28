@@ -1,4 +1,5 @@
 use super::casbin;
+use super::extend_policy::{ExtendPolicyReq, verify_extend_policy};
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
 use crate::server::HandlerBackend;
@@ -691,7 +692,7 @@ impl super::HandlerBackend for BastionServer {
         sub: Uuid,
         obj: Uuid,
         act: Uuid,
-        ext: casbin::ExtendPolicyReq,
+        ext: ExtendPolicyReq,
     ) -> Result<bool, Error> {
         // match sub
         let policies = self
@@ -727,7 +728,7 @@ impl super::HandlerBackend for BastionServer {
                     )
                 {
                     // match ext
-                    if casbin::verify_extend_policy(&ext, &pol.v3)? {
+                    if verify_extend_policy(&ext, &pol.v3)? {
                         trace!("Accept sub: {}, policy: {:?}", sub, pol);
                         return Ok(true);
                     }

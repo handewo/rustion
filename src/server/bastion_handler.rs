@@ -4,7 +4,7 @@ use super::error::ServerError;
 use crate::database::Uuid;
 use crate::database::models::User;
 use crate::error::Error;
-use crate::server::casbin::ExtendPolicyReq;
+use crate::server::extend_policy::ExtendPolicyReq;
 use futures::future::FutureExt;
 use log::{debug, info, trace, warn};
 use russh::keys::ssh_key::PublicKey;

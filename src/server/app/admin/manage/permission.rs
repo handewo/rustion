@@ -1,8 +1,8 @@
 use crate::database::error::DatabaseError;
 use crate::database::models::{ObjectGroup, PermissionPolicy};
 use crate::error::Error;
-use crate::server::casbin::ExtendPolicy;
 use crate::server::error::ServerError;
+use crate::server::extend_policy::ExtendPolicy;
 use crate::server::widgets::{
     AdminTable, COMMON_HELP, DisplayMode, EditorColors, Message, SingleLineText, centered_area,
     render_cancel_dialog, render_message_popup, render_textarea, table_object_group_len_calculator,

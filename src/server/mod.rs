@@ -4,6 +4,7 @@ pub mod bastion_server;
 mod casbin;
 mod connection_pool;
 pub mod error;
+mod extend_policy;
 pub mod init_service;
 mod test;
 mod widgets;
@@ -116,7 +117,7 @@ pub(super) trait HandlerBackend: Send + Clone {
         sub: Uuid,
         obj: Uuid,
         act: Uuid,
-        ext: casbin::ExtendPolicyReq,
+        ext: extend_policy::ExtendPolicyReq,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
     fn encrypt_plain_text(&self) -> crate::common::EncryptPlainText;
