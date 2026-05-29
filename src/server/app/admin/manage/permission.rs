@@ -132,6 +132,14 @@ impl PermissionEditor {
         }
     }
 
+    pub fn handle_paste_event(&mut self, paste: &str) -> bool {
+        if self.focused_field == InputField::ExtendPolicy && self.editing_mode {
+            self.extend_policy_text.handle_paste(paste)
+        } else {
+            false
+        }
+    }
+
     pub fn handle_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) -> bool {
         // Handle cancel confirmation dialog
         if self.show_cancel_confirmation {

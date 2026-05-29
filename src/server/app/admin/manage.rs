@@ -659,8 +659,10 @@ where
                     Editor::CasbinName(ref mut e) => {
                         let _ = e.as_mut().handle_paste_event(paste);
                     }
+                    Editor::Permission(ref mut e) => {
+                        let _ = e.as_mut().handle_paste_event(paste);
+                    }
                     Editor::GrantRole(_) => {}
-                    Editor::Permission(_) => {}
                     Editor::Bind(_) => unreachable!(),
                     Editor::CasbinGroup(_) => unreachable!(),
                     Editor::None => {}
