@@ -613,6 +613,7 @@ impl ConnectTarget {
         backend: Arc<B>,
         action_uuid: Uuid,
         ip: Option<std::net::IpAddr>,
+        open_direct_tcpip: Option<(String, u16)>,
     ) -> Result<bool, Error>
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
@@ -635,13 +636,10 @@ impl ConnectTarget {
             return Ok(false);
         };
 
+        let mut ext_req = extend_policy::ExtendPolicyReq::new(ip);
+        ext_req.open_direct_tcpip = open_direct_tcpip;
         if !backend
-            .enforce(
-                user.id,
-                target_sec_id,
-                action_uuid,
-                extend_policy::ExtendPolicyReq::new(ip),
-            )
+            .enforce(user.id, target_sec_id, action_uuid, ext_req)
             .await?
         {
             debug!(

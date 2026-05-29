@@ -6,7 +6,9 @@ mod tests {
         target_secret::TargetSecret,
     };
     use crate::database::{DatabaseConfig, common, service::DatabaseService};
-    use crate::server::extend_policy::{ExtendPolicy, ExtendPolicyReq, IpPolicy, TimeWithOffset};
+    use crate::server::extend_policy::{
+        ExtendPolicy, ExtendPolicyReq, HostPolicy, IpPolicy, PortPolicy, TimeWithOffset,
+    };
     use crate::server::{self, HandlerBackend};
     use chrono::{Datelike, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc};
     use ipnetwork::IpNetwork;
@@ -413,6 +415,8 @@ mod tests {
                     )
                     .unwrap(),
             ),
+            open_direct_tcpip_host: Some(HostPolicy::Deny("192.168.1.0/24".into())),
+            open_direct_tcpip_port: Some(PortPolicy::Allow(vec![2222, 22])),
         };
         r.v3 = serde_json::to_string(&ep).unwrap();
         r = db.repository().update_casbin_rule(&r).await.unwrap();
@@ -440,12 +444,50 @@ mod tests {
                             .and_hms_opt(0, 0, 0)
                             .unwrap()
                             .and_utc(),
+                        open_direct_tcpip: Some(("example.com".to_string(), 22)),
                     },
                 )
                 .await
                 .unwrap()
         );
-
+        assert!(
+            !server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq {
+                        ip: None,
+                        now: NaiveDate::from_ymd_opt(1999, 12, 1)
+                            .unwrap()
+                            .and_hms_opt(0, 0, 0)
+                            .unwrap()
+                            .and_utc(),
+                        open_direct_tcpip: Some(("192.168.1.1".to_string(), 22)),
+                    },
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            !server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq {
+                        ip: None,
+                        now: NaiveDate::from_ymd_opt(1999, 12, 1)
+                            .unwrap()
+                            .and_hms_opt(0, 0, 0)
+                            .unwrap()
+                            .and_utc(),
+                        open_direct_tcpip: Some(("example.com".to_string(), 223)),
+                    },
+                )
+                .await
+                .unwrap()
+        );
         assert!(
             !server
                 .enforce(
@@ -459,6 +501,7 @@ mod tests {
                             .and_hms_opt(21, 0, 1)
                             .unwrap()
                             .and_utc(),
+                        open_direct_tcpip: None,
                     },
                 )
                 .await
@@ -476,6 +519,8 @@ mod tests {
                 offset,
             }),
             expire_date: Some(Utc::now().with_timezone(&offset).with_year(3000).unwrap()),
+            open_direct_tcpip_host: Some(HostPolicy::Allow("10.10.10.0/24".to_string())),
+            open_direct_tcpip_port: None,
         };
         r.v3 = serde_json::to_string(&ep).unwrap();
         r = db.repository().update_casbin_rule(&r).await.unwrap();
@@ -489,7 +534,8 @@ mod tests {
                         ip: None,
                         now: Utc::now()
                             .with_time(NaiveTime::from_hms_opt(5, 34, 59).unwrap())
-                            .unwrap()
+                            .unwrap(),
+                        open_direct_tcpip: Some(("10.10.10.10".to_string(), 22)),
                     },
                 )
                 .await
@@ -505,7 +551,42 @@ mod tests {
                         ip: None,
                         now: Utc::now()
                             .with_time(NaiveTime::from_hms_opt(14, 35, 0).unwrap())
-                            .unwrap()
+                            .unwrap(),
+                        open_direct_tcpip: Some(("10.10.10.10".to_string(), 22)),
+                    },
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            !server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq {
+                        ip: None,
+                        now: Utc::now()
+                            .with_time(NaiveTime::from_hms_opt(10, 0, 0).unwrap())
+                            .unwrap(),
+                        open_direct_tcpip: Some(("example.com".to_string(), 22)),
+                    },
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            !server
+                .enforce(
+                    alice.id,
+                    Uuid::from_str("9888ece7-a675-41d9-97e3-81c6d4964b0c").unwrap(),
+                    exec_uuid,
+                    ExtendPolicyReq {
+                        ip: None,
+                        now: Utc::now()
+                            .with_time(NaiveTime::from_hms_opt(10, 0, 0).unwrap())
+                            .unwrap(),
+                        open_direct_tcpip: Some(("10.20.10.10".to_string(), 22)),
                     },
                 )
                 .await
@@ -521,7 +602,8 @@ mod tests {
                         ip: None,
                         now: Utc::now()
                             .with_time(NaiveTime::from_hms_opt(10, 0, 0).unwrap())
-                            .unwrap()
+                            .unwrap(),
+                        open_direct_tcpip: Some(("10.10.10.10".to_string(), 22)),
                     },
                 )
                 .await
@@ -539,6 +621,8 @@ mod tests {
                 offset,
             }),
             expire_date: Some(Utc::now().with_timezone(&offset).with_year(3000).unwrap()),
+            open_direct_tcpip_host: None,
+            open_direct_tcpip_port: None,
         };
         r.v3 = serde_json::to_string(&ep).unwrap();
         db.repository().update_casbin_rule(&r).await.unwrap();
@@ -552,7 +636,8 @@ mod tests {
                         ip: None,
                         now: Utc::now()
                             .with_time(NaiveTime::from_hms_opt(10, 0, 0).unwrap())
-                            .unwrap()
+                            .unwrap(),
+                        open_direct_tcpip: None,
                     },
                 )
                 .await
@@ -568,7 +653,8 @@ mod tests {
                         ip: Some("192.168.1.1".parse().unwrap()),
                         now: Utc::now()
                             .with_time(NaiveTime::from_hms_opt(10, 0, 0).unwrap())
-                            .unwrap()
+                            .unwrap(),
+                        open_direct_tcpip: None,
                     },
                 )
                 .await

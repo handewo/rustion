@@ -14,6 +14,8 @@ pub struct ExtendPolicy {
     pub start_time: Option<TimeWithOffset>,
     pub end_time: Option<TimeWithOffset>,
     pub expire_date: Option<DateTime<FixedOffset>>,
+    pub open_direct_tcpip_host: Option<HostPolicy>,
+    pub open_direct_tcpip_port: Option<PortPolicy>,
 }
 
 impl ExtendPolicy {
@@ -63,12 +65,14 @@ impl<'de> Deserialize<'de> for TimeWithOffset {
 pub struct ExtendPolicyReq {
     pub ip: Option<IpAddr>,
     pub now: DateTime<Utc>,
+    pub open_direct_tcpip: Option<(String, u16)>,
 }
 
 impl Default for ExtendPolicyReq {
     fn default() -> Self {
         ExtendPolicyReq {
             ip: None,
+            open_direct_tcpip: None,
             now: Utc::now(),
         }
     }
@@ -78,15 +82,45 @@ impl ExtendPolicyReq {
     pub fn new(ip: Option<IpAddr>) -> Self {
         ExtendPolicyReq {
             ip,
+            open_direct_tcpip: None,
             now: Utc::now(),
         }
     }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum HostPolicy {
+    Allow(String),
+    Deny(String),
+}
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum PortPolicy {
+    Allow(Vec<u16>),
+    Deny(Vec<u16>),
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum IpPolicy {
     Allow(IpNetwork),
     Deny(IpNetwork),
+}
+
+pub struct HostPolicyNotIpPolicy;
+
+impl TryFrom<HostPolicy> for IpPolicy {
+    type Error = HostPolicyNotIpPolicy;
+    fn try_from(value: HostPolicy) -> Result<Self, Self::Error> {
+        match value {
+            HostPolicy::Allow(p) => {
+                let ip = IpNetwork::from_str(&p).map_err(|_| HostPolicyNotIpPolicy)?;
+                Ok(IpPolicy::Allow(ip))
+            }
+            HostPolicy::Deny(p) => {
+                let ip = IpNetwork::from_str(&p).map_err(|_| HostPolicyNotIpPolicy)?;
+                Ok(IpPolicy::Deny(ip))
+            }
+        }
+    }
 }
 
 pub fn verify_extend_policy(ext_req: &ExtendPolicyReq, ext_str: &str) -> Result<bool, Error> {
@@ -113,6 +147,18 @@ pub fn verify_extend_policy(ext_req: &ExtendPolicyReq, ext_str: &str) -> Result<
     if let Some(ep) = ext.expire_date
         && ext_req.now >= ep
     {
+        return Ok(false);
+    }
+
+    let (dest_host, dest_port) = ext_req
+        .open_direct_tcpip
+        .clone()
+        .map_or((None, None), |f| (Some(f.0), Some(f.1)));
+    // open_direct_tcpip
+    if !is_host_match(dest_host, ext.open_direct_tcpip_host) {
+        return Ok(false);
+    }
+    if !is_port_in_range(dest_port, ext.open_direct_tcpip_port) {
         return Ok(false);
     }
     Ok(true)
@@ -160,6 +206,44 @@ pub fn is_ip_in_cidr(ip: Option<IpAddr>, ip_policy: Option<IpPolicy>) -> bool {
         (Some(ip), Some(policy)) => match policy {
             IpPolicy::Allow(cidr) => cidr.contains(ip),
             IpPolicy::Deny(cidr) => !cidr.contains(ip),
+        },
+    }
+}
+
+pub fn is_host_match(dest: Option<String>, host_policy: Option<HostPolicy>) -> bool {
+    match (dest, host_policy) {
+        (_, None) => true,
+        (None, Some(_)) => false,
+        (Some(host_dest), Some(policy)) => {
+            match (
+                IpAddr::from_str(&host_dest),
+                IpPolicy::try_from(policy.clone()),
+            ) {
+                (Ok(ip_dest), Ok(ip_policy)) => {
+                    return is_ip_in_cidr(Some(ip_dest), Some(ip_policy));
+                }
+                // NOTE: Since rustion cannot resolve the Domain name which resolved by target,
+                // It cannot resolve to IP to match.
+                (Err(_), Ok(IpPolicy::Allow(_))) => return false,
+                (Err(_), Ok(IpPolicy::Deny(_))) => return true,
+
+                (Ok(_), Err(_)) => return false,
+                (Err(_), Err(_)) => (),
+            };
+            match policy {
+                HostPolicy::Allow(h) => host_dest == h,
+                HostPolicy::Deny(h) => host_dest != h,
+            }
+        }
+    }
+}
+pub fn is_port_in_range(port: Option<u16>, port_policy: Option<PortPolicy>) -> bool {
+    match (port, port_policy) {
+        (_, None) => true,
+        (None, Some(_)) => false,
+        (Some(port), Some(policy)) => match policy {
+            PortPolicy::Allow(ports) => ports.iter().any(|p| p == &port),
+            PortPolicy::Deny(ports) => !ports.iter().any(|p| p == &port),
         },
     }
 }
@@ -311,11 +395,13 @@ mod tests {
                     )
                     .unwrap(),
             ),
+            open_direct_tcpip_host: None,
+            open_direct_tcpip_port: None,
         };
         let serialized = serde_json::to_string(&ext).unwrap();
         assert_eq!(
             serialized,
-            r#"{"ip_policy":{"Allow":"10.0.0.0/8"},"start_time":"08:00 +03:00","end_time":"20:00 +03:00","expire_date":"2030-01-01T00:00:00+03:00"}"#
+            r#"{"ip_policy":{"Allow":"10.0.0.0/8"},"start_time":"08:00 +03:00","end_time":"20:00 +03:00","expire_date":"2030-01-01T00:00:00+03:00","open_direct_tcpip_host":null,"open_direct_tcpip_port":null}"#
         );
 
         let ext = ExtendPolicy {
@@ -332,11 +418,13 @@ mod tests {
                     )
                     .unwrap(),
             ),
+            open_direct_tcpip_host: None,
+            open_direct_tcpip_port: None,
         };
         let serialized = serde_json::to_string(&ext).unwrap();
         assert_eq!(
             serialized,
-            r#"{"ip_policy":{"Deny":"10.0.0.0/8"},"start_time":null,"end_time":null,"expire_date":"2030-01-01T00:00:00+03:00"}"#
+            r#"{"ip_policy":{"Deny":"10.0.0.0/8"},"start_time":null,"end_time":null,"expire_date":"2030-01-01T00:00:00+03:00","open_direct_tcpip_host":null,"open_direct_tcpip_port":null}"#
         );
 
         let ext = ExtendPolicy {
@@ -353,11 +441,13 @@ mod tests {
                     )
                     .unwrap(),
             ),
+            open_direct_tcpip_host: None,
+            open_direct_tcpip_port: None,
         };
         let serialized = serde_json::to_string(&ext).unwrap();
         assert_eq!(
             serialized,
-            r#"{"ip_policy":null,"start_time":null,"end_time":null,"expire_date":"2030-01-01T00:00:00+03:00"}"#
+            r#"{"ip_policy":null,"start_time":null,"end_time":null,"expire_date":"2030-01-01T00:00:00+03:00","open_direct_tcpip_host":null,"open_direct_tcpip_port":null}"#
         );
 
         let ext = ExtendPolicy {
@@ -371,11 +461,13 @@ mod tests {
                 offset,
             }),
             expire_date: None,
+            open_direct_tcpip_host: Some(HostPolicy::Allow("10.10.10.0/24".to_string())),
+            open_direct_tcpip_port: None,
         };
         let serialized = serde_json::to_string(&ext).unwrap();
         assert_eq!(
             serialized,
-            r#"{"ip_policy":null,"start_time":"08:00 +03:00","end_time":"08:35 +03:00","expire_date":null}"#
+            r#"{"ip_policy":null,"start_time":"08:00 +03:00","end_time":"08:35 +03:00","expire_date":null,"open_direct_tcpip_host":{"Allow":"10.10.10.0/24"},"open_direct_tcpip_port":null}"#
         );
 
         let ext = ExtendPolicy {
@@ -386,11 +478,13 @@ mod tests {
                 offset,
             }),
             expire_date: None,
+            open_direct_tcpip_host: Some(HostPolicy::Allow("example.com".into())),
+            open_direct_tcpip_port: None,
         };
         let ext_string = serde_json::to_string(&ext).unwrap();
         assert_eq!(
             ext_string,
-            r#"{"ip_policy":null,"start_time":null,"end_time":"08:35 +03:00","expire_date":null}"#
+            r#"{"ip_policy":null,"start_time":null,"end_time":"08:35 +03:00","expire_date":null,"open_direct_tcpip_host":{"Allow":"example.com"},"open_direct_tcpip_port":null}"#
         );
         assert!(ext.validate().is_err());
     }

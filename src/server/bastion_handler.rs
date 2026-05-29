@@ -357,6 +357,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                         self.backend.clone(),
                         crate::database::common::InternalUuids::get().act_exec,
                         self.client_ip.map(|v| v.ip()),
+                        None,
                     )
                     .await?
                 {
@@ -405,6 +406,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                         self.backend.clone(),
                         crate::database::common::InternalUuids::get().act_direct_tcpip,
                         self.client_ip.map(|v| v.ip()),
+                        Some((host_to_connect.to_string(), port_to_connect as u16)),
                     )
                     .await?
                 {
@@ -460,6 +462,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                                 self.backend.clone(),
                                 crate::database::common::InternalUuids::get().act_direct_tcpip,
                                 self.client_ip.map(|v| v.ip()),
+                                Some((host_to_connect.to_string(), port_to_connect as u16)),
                             )
                             .await?
                             && app
@@ -509,6 +512,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                         self.backend.clone(),
                         crate::database::common::InternalUuids::get().act_pty,
                         self.client_ip.map(|v| v.ip()),
+                        None,
                     )
                     .await? =>
             {
@@ -576,6 +580,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                         self.backend.clone(),
                         crate::database::common::InternalUuids::get().act_shell,
                         self.client_ip.map(|v| v.ip()),
+                        None,
                     )
                     .await?
                 {
@@ -636,6 +641,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                         self.backend.clone(),
                         crate::database::common::InternalUuids::get().act_pty,
                         self.client_ip.map(|v| v.ip()),
+                        None,
                     )
                     .await?
                     && app
@@ -643,6 +649,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                             self.backend.clone(),
                             crate::database::common::InternalUuids::get().act_shell,
                             self.client_ip.map(|v| v.ip()),
+                            None,
                         )
                         .await?
                 {

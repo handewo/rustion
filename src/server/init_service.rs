@@ -194,6 +194,8 @@ pub async fn init_service(config: Config) {
         start_time: None,
         end_time: None,
         expire_date: None,
+        open_direct_tcpip_host: None,
+        open_direct_tcpip_port: None,
     };
 
     // Policy: admin can login from localhost (IPv4)
@@ -241,6 +243,8 @@ pub async fn init_service(config: Config) {
         start_time: None,
         end_time: None,
         expire_date: None,
+        open_direct_tcpip_host: None,
+        open_direct_tcpip_port: None,
     };
 
     // Policy: admin can login from localhost (IPv6)
@@ -285,6 +289,8 @@ pub async fn init_service(config: Config) {
         start_time: None,
         end_time: None,
         expire_date: None,
+        open_direct_tcpip_host: None,
+        open_direct_tcpip_port: None,
     };
     let p = CasbinRule::new(
         "p".to_string(),
