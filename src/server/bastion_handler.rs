@@ -1,188 +1,105 @@
 use super::HandlerBackend;
-use super::app::{self, Application};
+use super::app::{self, Application, NextApplication};
 use super::error::ServerError;
+use super::tty;
 use crate::database::Uuid;
 use crate::database::models::User;
 use crate::error::Error;
+use crate::server::app::{AppParams, connect_target::ConnectTarget};
 use crate::server::extend_policy::ExtendPolicyReq;
 use futures::future::FutureExt;
 use log::{debug, info, trace, warn};
 use russh::keys::ssh_key::PublicKey;
 use russh::server as ru_server;
 use russh::{Channel, ChannelId, Pty};
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 static LOG_TYPE: &str = "server";
 
-pub struct BastionHandler<B: HandlerBackend + Send + Clone> {
+pub struct BastionHandler<B: 'static + HandlerBackend + Send + Sync> {
     // Unique ID for each connection.
     id: Uuid,
     pub(super) user: Option<User>,
     login_parse: Option<LoginParse>,
     client_ip: Option<std::net::SocketAddr>,
-    app: Application,
+    channel_session: HashMap<ChannelId, ChannelSession<B>>,
     backend: Arc<B>,
     log: super::HandlerLog,
     auth_attempts_per_conn: u32,
     max_auth_attempts_per_conn: u32,
-    send_app_msg: Sender<(ChannelId, Application)>,
-    recv_app_msg: Receiver<(ChannelId, Application)>,
-    //pty
-    window_size: Option<(u32, u32, u32, u32)>,
-    pty_modes: Option<Vec<(Pty, u32)>>,
-    pty_term: Option<String>,
+    send_app_msg: Sender<(ChannelId, NextApplication)>,
+    recv_app_msg: Receiver<(ChannelId, NextApplication)>,
 }
 
 impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHandler<B> {
     type Error = crate::error::Error;
-    type Data = (ChannelId, Application);
+    type Data = (ChannelId, NextApplication);
 
     async fn channel_open_session(
         &mut self,
         channel: Channel<ru_server::Msg>,
-        session: &mut ru_server::Session,
+        _session: &mut ru_server::Session,
     ) -> Result<bool, Self::Error> {
-        match self.app {
-            Application::None => {
-                if !self.init_session().await? {
-                    return Ok(false);
-                }
-
-                let user = if let Some(u) = self.user.as_ref() {
-                    u
-                } else {
-                    return Ok(false);
-                };
-
-                let login_parse = if let Some(l) = self.login_parse.as_ref() {
-                    l
-                } else {
-                    return Ok(false);
-                };
-
-                if user.force_init_pass {
-                    debug!(
-                        "[{}] User '{}({})' requires password change",
-                        self.id, user.username, user.id
-                    );
-                    let app = Box::new(app::ChangePassword::new(
-                        self.id,
-                        self.user.take(),
-                        self.log.clone(),
-                    ));
-                    self.app = Application::ChangePassword(app);
-                    return Ok(true);
-                }
-                match login_parse.parse_mode() {
-                    LoginMode::TargetSelector => {
-                        debug!(
-                            "[{}] Starting target selector for user '{}({})'",
-                            self.id, user.username, user.id
-                        );
-                        let mut app = Box::new(app::TargetSelector::new(
-                            self.id,
-                            self.user.take(),
-                            self.log.clone(),
-                        ));
-                        let res = app
-                            .channel_open_session(self.backend.clone(), channel, session)
-                            .await?;
-                        self.app = Application::TargetSelector(app);
-                        Ok(res)
-                    }
-                    LoginMode::Password => {
-                        debug!(
-                            "[{}] Starting password change for user '{}({})'",
-                            self.id, user.username, user.id
-                        );
-                        let app = Box::new(app::ChangePassword::new(
-                            self.id,
-                            self.user.take(),
-                            self.log.clone(),
-                        ));
-                        self.app = Application::ChangePassword(app);
-                        Ok(true)
-                    }
-                    LoginMode::Player => {
-                        debug!(
-                            "[{}] Starting player session for user '{}({})'",
-                            self.id, user.username, user.id
-                        );
-                        let mut app = Box::new(app::Player::new(
-                            self.id,
-                            self.user.take(),
-                            self.log.clone(),
-                        ));
-                        let res = app
-                            .channel_open_session(
-                                self.backend.clone(),
-                                channel,
-                                session,
-                                self.client_ip.map(|v| v.ip()),
-                            )
-                            .await?;
-                        self.app = Application::Player(app);
-                        Ok(res)
-                    }
-                    LoginMode::Admin => {
-                        debug!(
-                            "[{}] Starting admin session for user '{}({})'",
-                            self.id, user.username, user.id
-                        );
-                        let mut app =
-                            Box::new(app::Admin::new(self.id, self.user.take(), self.log.clone()));
-                        let res = app
-                            .channel_open_session(
-                                self.backend.clone(),
-                                channel,
-                                session,
-                                self.client_ip.map(|v| v.ip()),
-                            )
-                            .await?;
-                        self.app = Application::Admin(app);
-                        Ok(res)
-                    }
-                    LoginMode::TargetWithUser(target_user, target) => {
-                        info!(
-                            "[{}] Direct connection to '{}@{}' for user '{}({})'",
-                            self.id, target_user, target, user.username, user.id
-                        );
-                        let mut app = Box::new(app::ConnectTarget::new(
-                            self.id,
-                            self.user.take(),
-                            self.log.clone(),
-                        ));
-                        let res = app
-                            .init_target(self.backend.clone(), &target_user, &target)
-                            .await?;
-                        self.app = Application::ConnectTarget(app);
-                        Ok(res)
-                    }
-                    LoginMode::Target(name) => {
-                        let mut app = Box::new(app::TargetSelector::new(
-                            self.id,
-                            self.user.take(),
-                            self.log.clone(),
-                        ));
-                        let res = app
-                            .channel_open_with_target_name(
-                                self.backend.clone(),
-                                name,
-                                channel,
-                                session,
-                            )
-                            .await?;
-                        self.app = Application::TargetSelector(app);
-                        Ok(res)
-                    }
-                }
-            }
-            Application::ConnectTarget(_) => Ok(true),
-            _ => {
-                unreachable!()
-            }
+        let user = self.user.as_ref().ok_or(ServerError::UserNotInit)?;
+        let mut channel_session = ChannelSession::new();
+        if !self.init_session(user).await? {
+            return Ok(false);
         }
+
+        let app = if !user.force_init_pass {
+            match self
+                .login_parse
+                .as_ref()
+                .ok_or(ServerError::InvalidLoginMode)?
+                .parse_mode()
+            {
+                LoginMode::TargetSelector | LoginMode::Target(_) => Application::TargetSelector,
+                LoginMode::TargetWithUser(target_user, target) => {
+                    info!(
+                        "[{}] Direct connection to '{}@{}' for user '{}({})'",
+                        self.id, target_user, target, user.username, user.id
+                    );
+                    let app = Box::new(
+                        app::connect_target::ConnectTarget::new(
+                            self.id,
+                            self.log.clone(),
+                            user,
+                            self.client_ip.map(|v| v.ip()),
+                            self.backend.clone(),
+                            &target_user,
+                            &target,
+                        )
+                        .await?,
+                    );
+                    Application::ConnectTarget(app)
+                }
+                LoginMode::Admin => Application::Admin,
+                LoginMode::Password => Application::Password,
+                LoginMode::Player => Application::Player,
+            }
+        } else {
+            debug!(
+                "[{}] User '{}({})' requires password change",
+                self.id, user.username, user.id
+            );
+            Application::Password
+        };
+        channel_session.app = app;
+        let channel_id = channel.id();
+        match self.channel_session.entry(channel_id) {
+            Entry::Occupied(_) => {
+                return Err(ServerError::DuplicateChannelId.into());
+            }
+            Entry::Vacant(e) => {
+                debug!("[{}] Create new channel: {}", self.id, channel_id);
+                e.insert(channel_session);
+            }
+        };
+        Ok(true)
     }
 
     async fn auth_password(
@@ -192,7 +109,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
     ) -> Result<ru_server::Auth, Self::Error> {
         self.init_login(login_name).await?;
 
-        if self.max_auth_attempts(login_name).await {
+        if self.max_auth_attempts(login_name).await? {
             return Ok(ru_server::Auth::reject());
         }
 
@@ -204,14 +121,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 }
                 if u.verify_password(password) {
                     self.backend
-                        .clear_auth_attempts(
-                            self.client_ip,
-                            self.login_parse
-                                .as_ref()
-                                .unwrap_or_else(|| panic!("[{}] should not be none", self.id))
-                                .0
-                                .clone(),
-                        )
+                        .clear_auth_attempts(self.client_ip, u.username.clone())
                         .await;
                     (self.log)(LOG_TYPE.into(), "login successfully by password".into()).await;
                     return Ok(ru_server::Auth::Accept);
@@ -232,7 +142,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
     ) -> Result<ru_server::Auth, Self::Error> {
         self.init_login(login_name).await?;
 
-        if self.max_auth_attempts(login_name).await {
+        if self.max_auth_attempts(login_name).await? {
             return Ok(ru_server::Auth::reject());
         }
 
@@ -244,14 +154,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 }
                 if u.verify_authorized_keys(public_key) {
                     self.backend
-                        .clear_auth_attempts(
-                            self.client_ip,
-                            self.login_parse
-                                .as_ref()
-                                .unwrap_or_else(|| panic!("[{}] should not be none", self.id))
-                                .0
-                                .clone(),
-                        )
+                        .clear_auth_attempts(self.client_ip, u.username.clone())
                         .await;
                     (self.log)(LOG_TYPE.into(), "login successfully by public key".into()).await;
                     return Ok(ru_server::Auth::Accept);
@@ -270,9 +173,12 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         channel: ChannelId,
         session: &mut ru_server::Session,
     ) -> Result<(), Self::Error> {
-        match self.app {
-            Application::ConnectTarget(ref mut app) => app.channel_eof(channel, session).await,
-            Application::Admin(ref mut app) => app.channel_eof(channel, session).await,
+        let channel_session = self
+            .channel_session
+            .get_mut(&channel)
+            .ok_or(ServerError::ChannelNotExist)?;
+        match channel_session.app {
+            Application::ConnectTarget(ref mut app) => app.channel_eof().await,
             _ => {
                 warn!("[{}] Unsupported eof request", self.id);
                 session.channel_failure(channel)?;
@@ -286,14 +192,25 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         &mut self,
         channel: ChannelId,
         data: &[u8],
-        session: &mut ru_server::Session,
+        _session: &mut ru_server::Session,
     ) -> Result<(), Self::Error> {
-        match self.app {
-            Application::ConnectTarget(ref mut app) => app.data(channel, data, session).await,
-            Application::ChangePassword(ref mut app) => app.data(channel, data, session).await,
-            Application::TargetSelector(ref mut app) => app.data(channel, data, session).await,
-            Application::Admin(ref mut app) => app.data(channel, data, session).await,
-            Application::Player(ref mut app) => app.data(channel, data, session).await,
+        let channel_session = self
+            .channel_session
+            .get_mut(&channel)
+            .ok_or(ServerError::ChannelNotExist)?;
+        match channel_session.app {
+            Application::ConnectTarget(ref mut app) => app.data(data).await,
+            Application::TargetSelector
+            | Application::Admin
+            | Application::Password
+            | Application::Player => channel_session
+                .tty
+                .as_ref()
+                .ok_or(ServerError::TtyNotInit)?
+                .send_to_tty
+                .send(data.into())
+                .map_err(std::io::Error::other)
+                .map_err(Error::IO),
             Application::None => Ok(()),
         }
     }
@@ -308,37 +225,46 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         pix_height: u32,
         session: &mut ru_server::Session,
     ) -> Result<(), Self::Error> {
-        self.window_size = Some((col_width, row_height, pix_width, pix_height));
-        match self.app {
+        let channel_session = self
+            .channel_session
+            .get_mut(&channel)
+            .ok_or(ServerError::ChannelNotExist)?;
+        channel_session.window_size = Some((col_width, row_height, pix_width, pix_height));
+        match channel_session.app {
             Application::ConnectTarget(ref mut app) => {
-                app.window_change_request(
-                    channel, col_width, row_height, pix_width, pix_height, session,
-                )
-                .await
+                if let Err(e) = app
+                    .window_change_request(col_width, row_height, pix_width, pix_height)
+                    .await
+                {
+                    session.channel_failure(channel)?;
+                    Err(e)
+                } else {
+                    session.channel_success(channel)?;
+                    Ok(())
+                }
             }
-            Application::ChangePassword(ref mut app) => {
-                app.window_change_request(
-                    channel, col_width, row_height, pix_width, pix_height, session,
-                )
-                .await
-            }
-            Application::TargetSelector(ref mut app) => {
-                app.window_change_request(
-                    channel, col_width, row_height, pix_width, pix_height, session,
-                )
-                .await
-            }
-            Application::Admin(ref mut app) => {
-                app.window_change_request(
-                    channel, col_width, row_height, pix_width, pix_height, session,
-                )
-                .await
-            }
-            Application::Player(ref mut app) => {
-                app.window_change_request(
-                    channel, col_width, row_height, pix_width, pix_height, session,
-                )
-                .await
+            Application::TargetSelector
+            | Application::Admin
+            | Application::Password
+            | Application::Player => {
+                if let Some(tty) = channel_session.tty.as_mut() {
+                    let win_raw = crate::terminal::window_change(
+                        &mut tty.tty,
+                        col_width,
+                        row_height,
+                        pix_width,
+                        pix_height,
+                    );
+
+                    tty.send_to_tty
+                        .send(win_raw)
+                        .map_err(std::io::Error::other)
+                        .map_err(Error::IO)?;
+                    session.channel_success(channel).map_err(Error::Russh)
+                } else {
+                    session.channel_failure(channel)?;
+                    Err(ServerError::TtyNotInit.into())
+                }
             }
             Application::None => Ok(()),
         }
@@ -350,36 +276,29 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         data: &[u8],
         session: &mut ru_server::Session,
     ) -> Result<(), Self::Error> {
-        match self.app {
+        let channel_session = self
+            .channel_session
+            .get_mut(&channel)
+            .ok_or(ServerError::ChannelNotExist)?;
+        match channel_session.app {
             Application::ConnectTarget(ref mut app) => {
-                if app
-                    .check_permission(
-                        self.backend.clone(),
-                        crate::database::common::InternalUuids::get().act_exec,
-                        self.client_ip.map(|v| v.ip()),
-                        None,
+                if let Err(e) = app
+                    .exec_request(
+                        channel,
+                        data,
+                        session,
+                        channel_session.pty_term.as_ref(),
+                        channel_session.window_size,
+                        channel_session.pty_modes.as_ref(),
                     )
-                    .await?
-                {
-                    return app
-                        .exec_request(
-                            self.backend.clone(),
-                            channel,
-                            data,
-                            session,
-                            self.pty_term.as_ref(),
-                            self.window_size,
-                            self.pty_modes.as_ref(),
-                        )
-                        .await;
-                }
-                session.channel_failure(channel)?;
-                session.close(channel)?;
-                Ok(())
-            }
-            Application::Admin(ref mut app) => {
-                app.exec_request(self.backend.clone(), channel, data, session)
                     .await
+                {
+                    session.channel_failure(channel)?;
+                    Err(e)
+                } else {
+                    session.channel_success(channel)?;
+                    Ok(())
+                }
             }
             _ => {
                 warn!("[{}] Unsupported exec request", self.id);
@@ -399,96 +318,66 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         originator_port: u32,
         session: &mut ru_server::Session,
     ) -> Result<bool, Self::Error> {
-        match self.app {
-            Application::ConnectTarget(ref mut app) => {
-                if app
-                    .check_permission(
-                        self.backend.clone(),
-                        crate::database::common::InternalUuids::get().act_direct_tcpip,
+        let mut channel_session = ChannelSession::new();
+        let user = self.user.as_ref().ok_or(ServerError::UserNotInit)?;
+        let channel_id = channel.id();
+
+        if user.force_init_pass {
+            return Ok(false);
+        }
+
+        if !self.init_session(user).await? {
+            return Ok(false);
+        }
+        match self
+            .login_parse
+            .as_ref()
+            .ok_or(ServerError::InvalidLoginMode)?
+            .parse_mode()
+        {
+            LoginMode::TargetWithUser(target_user, target) => {
+                info!(
+                    "[{}] Direct connection to '{}@{}' for user '{}({})'",
+                    self.id, target_user, target, user.username, user.id
+                );
+                let mut app = Box::new(
+                    app::connect_target::ConnectTarget::new(
+                        self.id,
+                        self.log.clone(),
+                        user,
                         self.client_ip.map(|v| v.ip()),
-                        Some((host_to_connect.to_string(), port_to_connect as u16)),
+                        self.backend.clone(),
+                        &target_user,
+                        &target,
+                    )
+                    .await?,
+                );
+                if !app
+                    .channel_open_direct_tcpip(
+                        channel,
+                        host_to_connect,
+                        port_to_connect,
+                        originator_address,
+                        originator_port,
+                        session,
                     )
                     .await?
                 {
-                    return app
-                        .channel_open_direct_tcpip(
-                            self.backend.clone(),
-                            channel,
-                            host_to_connect,
-                            port_to_connect,
-                            originator_address,
-                            originator_port,
-                            session,
-                        )
-                        .await;
-                }
-                Ok(false)
-            }
-            Application::None => {
-                if !self.init_session().await? {
-                    return Ok(false);
-                }
-
-                let user = if let Some(u) = self.user.as_ref() {
-                    u
-                } else {
                     return Ok(false);
                 };
-
-                if user.force_init_pass {
-                    return Ok(false);
-                }
-
-                let login_parse = if let Some(l) = self.login_parse.as_ref() {
-                    l
-                } else {
-                    return Ok(false);
-                };
-                match login_parse.parse_mode() {
-                    LoginMode::TargetWithUser(user, target) => {
-                        let mut app = Box::new(app::ConnectTarget::new(
-                            self.id,
-                            self.user.take(),
-                            self.log.clone(),
-                        ));
-                        if !app
-                            .init_target(self.backend.clone(), &user, &target)
-                            .await?
-                        {
-                            return Ok(false);
-                        }
-                        if app
-                            .check_permission(
-                                self.backend.clone(),
-                                crate::database::common::InternalUuids::get().act_direct_tcpip,
-                                self.client_ip.map(|v| v.ip()),
-                                Some((host_to_connect.to_string(), port_to_connect as u16)),
-                            )
-                            .await?
-                            && app
-                                .channel_open_direct_tcpip(
-                                    self.backend.clone(),
-                                    channel,
-                                    host_to_connect,
-                                    port_to_connect,
-                                    originator_address,
-                                    originator_port,
-                                    session,
-                                )
-                                .await?
-                        {
-                            self.app = Application::ConnectTarget(app);
-                            return Ok(true);
-                        }
-                        Ok(false)
+                channel_session.app = Application::ConnectTarget(app);
+                match self.channel_session.entry(channel_id) {
+                    Entry::Occupied(_) => {
+                        return Err(ServerError::DuplicateChannelId.into());
                     }
-                    _ => Ok(false),
-                }
+                    Entry::Vacant(e) => {
+                        debug!("[{}] Create new channel: {}", self.id, channel_id);
+                        e.insert(channel_session);
+                    }
+                };
+                Ok(true)
             }
-            _ => {
-                warn!("[{}] Unsupported open_direct_tcpip request", self.id);
-                Ok(false)
-            }
+            _ => Ok(false),
         }
     }
 
@@ -505,44 +394,13 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         modes: &[(Pty, u32)],
         session: &mut ru_server::Session,
     ) -> Result<(), Self::Error> {
-        match self.app {
-            Application::ConnectTarget(ref app)
-                if !app
-                    .check_permission(
-                        self.backend.clone(),
-                        crate::database::common::InternalUuids::get().act_pty,
-                        self.client_ip.map(|v| v.ip()),
-                        None,
-                    )
-                    .await? =>
-            {
-                session.channel_failure(channel)?;
-                session.close(channel)?;
-                return Ok(());
-            }
-            Application::Admin(ref mut app) => {
-                app.pty_request(
-                    channel, term, col_width, row_height, pix_width, pix_height, modes, session,
-                )
-                .await?;
-            }
-            Application::ChangePassword(ref mut app) => {
-                app.pty_request(
-                    channel, term, col_width, row_height, pix_width, pix_height, modes, session,
-                )
-                .await?;
-            }
-            Application::Player(ref mut app) => {
-                app.pty_request(
-                    channel, term, col_width, row_height, pix_width, pix_height, modes, session,
-                )
-                .await?;
-            }
-            _ => {}
-        }
-        self.pty_modes = Some(Vec::from(modes));
-        self.pty_term = Some(term.to_string());
-        self.window_size = Some((col_width, row_height, pix_width, pix_height));
+        let channel_session = self
+            .channel_session
+            .get_mut(&channel)
+            .ok_or(ServerError::ChannelNotExist)?;
+        channel_session.pty_modes = Some(Vec::from(modes));
+        channel_session.pty_term = Some(term.to_string());
+        channel_session.window_size = Some((col_width, row_height, pix_width, pix_height));
         session.channel_success(channel)?;
         Ok(())
     }
@@ -552,78 +410,107 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         channel: ChannelId,
         session: &mut ru_server::Session,
     ) -> Result<(), Self::Error> {
-        if self.pty_term.is_none() || self.pty_modes.is_none() || self.window_size.is_none() {
-            warn!(
-                "[{}] user doesn't request pty before request shell",
-                self.id
-            );
-            session.channel_failure(channel)?;
-            session.close(channel)?;
-            return Ok(());
-        }
-
-        match self.app {
-            Application::TargetSelector(ref mut app) => {
-                app.shell_request(
-                    self.backend.clone(),
-                    channel,
-                    session,
-                    self.send_app_msg.clone(),
-                    self.window_size
-                        .unwrap_or_else(|| panic!("[{}] window_size should not be none", self.id)),
-                )
-                .await
-            }
-            Application::ConnectTarget(ref mut app) => {
-                if app
-                    .check_permission(
-                        self.backend.clone(),
-                        crate::database::common::InternalUuids::get().act_shell,
-                        self.client_ip.map(|v| v.ip()),
-                        None,
-                    )
-                    .await?
+        let channel_session = self
+            .channel_session
+            .get_mut(&channel)
+            .ok_or(ServerError::ChannelNotExist)?;
+        match channel_session.app {
+            Application::TargetSelector => {
+                let tty = channel_session.new_tty()?;
+                let app_params = self.new_app(tty)?;
+                let target_name = if let LoginMode::Target(t) = self
+                    .login_parse
+                    .as_ref()
+                    .ok_or(ServerError::InvalidLoginMode)?
+                    .parse_mode()
                 {
-                    return app
-                        .shell_request(
-                            self.backend.clone(),
-                            channel,
-                            session,
-                            self.pty_term.as_ref().unwrap_or_else(|| {
-                                panic!("[{}] pty_term should not be none", self.id)
-                            }),
-                            self.window_size.unwrap_or_else(|| {
-                                panic!("[{}] window_size should not be none", self.id)
-                            }),
-                            self.pty_modes.as_ref().unwrap_or_else(|| {
-                                panic!("[{}] pty_modes should not be none", self.id)
-                            }),
-                        )
-                        .await;
-                }
-                session.channel_failure(channel)?;
-                session.close(channel)?;
+                    Some(t.clone())
+                } else {
+                    None
+                };
+
+                app::target_selector::shell_request(target_name, app_params, channel, session)
+                    .await?;
+
+                session.channel_success(channel)?;
                 Ok(())
             }
-            Application::ChangePassword(ref mut app) => {
-                app.shell_request(self.backend.clone(), channel, session)
-                    .await
+            Application::Admin => {
+                let tty = channel_session.new_tty()?;
+                let app_params = self.new_app(tty)?;
+                app::admin::shell_request(app_params, channel, session).await?;
+                session.channel_success(channel)?;
+                Ok(())
             }
-            Application::Admin(ref mut app) => {
-                app.shell_request(self.backend.clone(), channel, session)
-                    .await
+            Application::Password => {
+                let tty = channel_session.new_tty()?;
+                let app_params = self.new_app(tty)?;
+                app::change_password::shell_request(
+                    self.user.as_ref().ok_or(ServerError::UserNotInit)?.clone(),
+                    app_params,
+                    channel,
+                    session,
+                )
+                .await?;
+                session.channel_success(channel)?;
+                Ok(())
             }
-            Application::Player(ref mut app) => {
-                app.shell_request(self.backend.clone(), channel, session)
-                    .await
+            Application::Player => {
+                let tty = channel_session.new_tty()?;
+                let app_params = self.new_app(tty)?;
+                app::player::shell_request(app_params, channel, session).await?;
+                session.channel_success(channel)?;
+                Ok(())
             }
-            Application::None => Ok(()),
+            Application::ConnectTarget(ref mut app) => {
+                if let Err(e) = app
+                    .shell_request(
+                        channel,
+                        session,
+                        channel_session
+                            .pty_term
+                            .as_ref()
+                            .ok_or(ServerError::PtyTermNotExist)?,
+                        channel_session
+                            .window_size
+                            .ok_or(ServerError::WindowSizeNotExist)?,
+                        channel_session
+                            .pty_modes
+                            .as_ref()
+                            .ok_or(ServerError::PtyModesNotExist)?,
+                    )
+                    .await
+                {
+                    session.channel_failure(channel)?;
+                    Err(e)
+                } else {
+                    session.channel_success(channel)?;
+                    Ok(())
+                }
+            }
+            Application::None => {
+                session.channel_failure(channel)?;
+                Ok(())
+            }
         }
+    }
+
+    fn channel_close(
+        &mut self,
+        channel: ChannelId,
+        _session: &mut ru_server::Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        debug!("[{}] Channel: {} is closed", self.id, channel);
+        self.channel_session.remove(&channel);
+        async { Ok(()) }
     }
 
     async fn trigger(&mut self) -> Result<Self::Data, Self::Error> {
         match self.recv_app_msg.recv().await {
-            Some(d) => Ok(d),
+            Some(d) => {
+                trace!("[{}] Receive app message", self.id);
+                Ok(d)
+            }
             None => std::future::pending().await,
         }
     }
@@ -633,48 +520,43 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         data: Self::Data,
         session: &mut ru_server::Session,
     ) -> Result<(), Self::Error> {
-        self.app = data.1;
-        match self.app {
-            Application::ConnectTarget(ref mut app) => {
-                if app
-                    .check_permission(
-                        self.backend.clone(),
-                        crate::database::common::InternalUuids::get().act_pty,
-                        self.client_ip.map(|v| v.ip()),
-                        None,
-                    )
-                    .await?
-                    && app
-                        .check_permission(
-                            self.backend.clone(),
-                            crate::database::common::InternalUuids::get().act_shell,
-                            self.client_ip.map(|v| v.ip()),
-                            None,
-                        )
-                        .await?
-                {
-                    app.shell_request(
-                        self.backend.clone(),
+        let channel_session = self
+            .channel_session
+            .get_mut(&data.0)
+            .ok_or(ServerError::ChannelNotExist)?;
+        match data.1 {
+            NextApplication::ConnectTargetShell(boxed) => {
+                let (target, target_secret_name) = *boxed;
+                trace!("[{}] Process connect_target message", self.id);
+                let mut connect_target = Box::new(ConnectTarget::new_with_target(
+                    self.id,
+                    self.user.as_ref().ok_or(ServerError::UserNotInit)?.id,
+                    self.backend.clone(),
+                    self.client_ip.map(|v| v.ip()),
+                    self.log.clone(),
+                    target,
+                    target_secret_name,
+                )?);
+                connect_target
+                    .shell_request(
                         data.0,
                         session,
-                        self.pty_term
+                        channel_session
+                            .pty_term
                             .as_ref()
-                            .unwrap_or_else(|| panic!("[{}] pty_term should not be none", self.id)),
-                        self.window_size.unwrap_or_else(|| {
-                            panic!("[{}] window_size should not be none", self.id)
-                        }),
-                        self.pty_modes.as_ref().unwrap_or_else(|| {
-                            panic!("[{}] pty_modes should not be none", self.id)
-                        }),
+                            .ok_or(ServerError::PtyTermNotExist)?,
+                        channel_session
+                            .window_size
+                            .ok_or(ServerError::WindowSizeNotExist)?,
+                        channel_session
+                            .pty_modes
+                            .as_ref()
+                            .ok_or(ServerError::PtyModesNotExist)?,
                     )
                     .await?;
-                } else {
-                    session.close(data.0)?
-                }
+                channel_session.app = Application::ConnectTarget(connect_target);
             }
-            Application::None => {}
-            Application::TargetSelector(_) => {}
-            _ => {}
+            _ => todo!(),
         }
         Ok(())
     }
@@ -700,16 +582,13 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
             user: None,
             login_parse: None,
             client_ip,
-            app: Application::None,
+            channel_session: HashMap::with_capacity(1),
             backend,
             log,
             auth_attempts_per_conn: 0,
             max_auth_attempts_per_conn,
             send_app_msg,
             recv_app_msg,
-            pty_modes: None,
-            pty_term: None,
-            window_size: None,
         }
     }
 
@@ -736,17 +615,11 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
                 let user = l.0.clone();
                 self.get_user(&user).await
             }
-            None => Err(Error::Server(ServerError::InvalidLoginName)),
+            None => Err(Error::Server(ServerError::InvalidLoginMode)),
         }
     }
 
-    async fn init_session(&self) -> Result<bool, Error> {
-        let user = if let Some(u) = self.user.as_ref() {
-            u
-        } else {
-            return Ok(false);
-        };
-
+    async fn init_session(&self, user: &User) -> Result<bool, Error> {
         let uuids = crate::database::common::InternalUuids::get();
         if !self
             .backend
@@ -767,6 +640,18 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
         Ok(true)
     }
 
+    fn new_app(&self, tty: tty::Tty) -> Result<AppParams<B>, Error> {
+        Ok(AppParams {
+            handler_id: self.id,
+            user_id: self.user.as_ref().ok_or(ServerError::UserNotInit)?.id,
+            client_ip: self.client_ip.map(|v| v.ip()),
+            backend: self.backend.clone(),
+            tty,
+            log: self.log.clone(),
+            app_sender: self.send_app_msg.clone(),
+        })
+    }
+
     async fn get_user(&mut self, name: &str) -> Result<(), Error> {
         if self.user.is_none() {
             self.user = self.backend.get_user_by_username(name, true).await?
@@ -774,20 +659,20 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
         Ok(())
     }
 
-    async fn max_auth_attempts(&mut self, login_name: &str) -> bool {
+    async fn max_auth_attempts(&mut self, login_name: &str) -> Result<bool, Error> {
         if self
             .backend
             .reject_auth_attempts(
                 self.client_ip,
                 self.login_parse
                     .as_ref()
-                    .unwrap_or_else(|| panic!("[{}] should not be none", self.id))
+                    .ok_or(ServerError::InvalidLoginMode)?
                     .0
                     .clone(),
             )
             .await
         {
-            return true;
+            return Ok(true);
         }
         self.auth_attempts_per_conn += 1;
 
@@ -796,7 +681,7 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
                 "[{}] Client {:?} exceeded max authentication attempts ({})",
                 self.id, self.client_ip, self.max_auth_attempts_per_conn
             );
-            return true;
+            return Ok(true);
         }
 
         debug!(
@@ -804,11 +689,11 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
             self.id, self.auth_attempts_per_conn, login_name, self.client_ip
         );
 
-        false
+        Ok(false)
     }
 }
 
-impl<B: HandlerBackend + Send + Clone> Drop for BastionHandler<B> {
+impl<B: 'static + HandlerBackend + Send + Sync> Drop for BastionHandler<B> {
     fn drop(&mut self) {
         let log = self.log.clone();
         tokio::spawn(async move {
@@ -875,5 +760,37 @@ impl LoginParse {
             }
         }
         LoginMode::TargetSelector
+    }
+}
+
+struct ChannelSession<B: 'static + HandlerBackend + Send + Sync> {
+    pub app: Application<B>,
+    // shell request
+    pub tty: Option<tty::Tty>,
+    //exec request
+    pub sender: Option<mpsc::Sender<Vec<u8>>>,
+    //pty
+    pub window_size: Option<(u32, u32, u32, u32)>,
+    pub pty_modes: Option<Vec<(Pty, u32)>>,
+    pub pty_term: Option<String>,
+}
+
+impl<B: 'static + HandlerBackend + Send + Sync> ChannelSession<B> {
+    pub fn new() -> Self {
+        Self {
+            app: Application::default(),
+            tty: None,
+            sender: None,
+            window_size: None,
+            pty_modes: None,
+            pty_term: None,
+        }
+    }
+
+    fn new_tty(&mut self) -> Result<tty::Tty, Error> {
+        let mut tty = tty::Tty::new();
+        tty.window_size(self.window_size.ok_or(ServerError::WindowSizeNotExist)?);
+        self.tty = Some(tty.clone());
+        Ok(tty)
     }
 }

@@ -2,17 +2,11 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
+    #[error(transparent)]
+    ConnectTarget(#[from] super::connect_target::ConnectTargetError),
+
     #[error("No target available for connection")]
     NoTargetAvailable,
-
-    #[error("Channel record already exists")]
-    ChannelRecordExists,
-
-    #[error("Init record error")]
-    InitRecordError,
-
-    #[error("Channel notify already exists")]
-    ChannelNotifyExists,
 
     // Admin errors
     #[error(transparent)]

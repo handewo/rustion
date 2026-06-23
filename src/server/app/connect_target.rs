@@ -3,15 +3,14 @@ use crate::database::Uuid;
 use crate::database::models::{SessionRecording, Target, TargetSecretName, User};
 use crate::error::Error;
 use crate::server::app::error::AppError;
-use crate::server::{HandlerLog, extend_policy};
+use crate::server::{HandlerLog, error::ServerError, extend_policy};
 use log::{debug, trace};
 use russh::client as ru_client;
 use russh::server as ru_server;
 use russh::{Channel, ChannelId, ChannelMsg, ChannelReadHalf, ChannelWriteHalf, Pty};
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::Mutex;
 
 static LOG_TYPE: &str = "target";
 
@@ -29,87 +28,42 @@ pub enum Request<'a> {
     OpenDirectTcpip((&'a str, u32, &'a str, u32)),
 }
 
-pub(crate) struct ConnectTarget {
+pub(crate) struct ConnectTarget<B>
+where
+    B: 'static + crate::server::HandlerBackend + Send + Sync,
+{
     handler_id: Uuid,
-    user: Option<User>,
+    user_id: Uuid,
+    client_ip: Option<std::net::IpAddr>,
     // selected target
-    target: Option<Target>,
+    target: Target,
 
     // target bridge
-    target_channel: HashMap<ChannelId, TargetChannel>,
+    target_channel: Option<TargetChannel>,
     target_handle: Option<Arc<ru_client::Handle<Target>>>,
-    target_sec_name: Option<TargetSecretName>,
-    notify: HashMap<ChannelId, mpsc::Sender<()>>,
+    target_secret_name: TargetSecretName,
 
-    record_session: HashMap<ChannelId, Arc<Mutex<RecordingSession>>>,
+    record_session: Option<Arc<Mutex<RecordingSession>>>,
+    backend: Arc<B>,
     log: HandlerLog,
 }
 
-impl ConnectTarget {
-    pub(crate) fn new(id: Uuid, user: Option<User>, log: HandlerLog) -> Self {
-        Self {
-            handler_id: id,
-            user,
-            target: None,
-            target_channel: HashMap::with_capacity(3),
-            target_handle: None,
-            target_sec_name: None,
-            notify: HashMap::with_capacity(3),
-            record_session: HashMap::with_capacity(3),
-            log,
-        }
-    }
-
-    pub(crate) fn with_target(mut self, val: Option<Target>) -> Self {
-        self.target = val;
-        self
-    }
-
-    pub(crate) fn with_target_sec_name(mut self, val: Option<TargetSecretName>) -> Self {
-        self.target_sec_name = val;
-        self
-    }
-
-    pub(crate) async fn data(
-        &mut self,
-        channel: ChannelId,
-        data: &[u8],
-        _session: &mut ru_server::Session,
-    ) -> Result<(), Error> {
-        if let Some(w) = self.target_channel.get(&channel) {
-            w.data(data).await?
-        }
-        if let Some(r) = self.record_session.get(&channel) {
-            r.lock().await.session.handle_input(data).await;
-        }
-
-        Ok(())
-    }
-
-    pub(crate) async fn channel_eof(
-        &mut self,
-        channel: ChannelId,
-        _session: &mut ru_server::Session,
-    ) -> Result<(), Error> {
-        if let Some(w) = self.target_channel.get(&channel) {
-            w.eof().await?
-        }
-
-        Ok(())
-    }
-
-    pub(crate) async fn init_target<B: 'static + crate::server::HandlerBackend + Send + Sync>(
-        &mut self,
+impl<B> ConnectTarget<B>
+where
+    B: 'static + crate::server::HandlerBackend + Send + Sync,
+{
+    pub(crate) async fn new(
+        handler_id: Uuid,
+        log: HandlerLog,
+        user: &User,
+        client_ip: Option<std::net::IpAddr>,
         backend: Arc<B>,
         target_user: &str,
         target_name: &str,
-    ) -> Result<bool, Error> {
-        let user = if let Some(u) = self.user.as_ref() {
-            u
-        } else {
-            return Ok(false);
-        };
-
+    ) -> Result<ConnectTarget<B>, Error>
+    where
+        B: 'static + crate::server::HandlerBackend + Send + Sync,
+    {
         let target_secret_name = match backend
             .list_targets_for_user(&user.id, true)
             .await?
@@ -120,47 +74,120 @@ impl ConnectTarget {
             None => {
                 debug!(
                     "[{}] No target with secret user found for user: '{}({})', target: '{}@{}'",
-                    self.handler_id, &user.username, user.id, target_user, target_name
+                    handler_id, &user.username, user.id, target_user, target_name
                 );
-                return Ok(false);
+                return Err(AppError::ConnectTarget(
+                    ConnectTargetError::TargetSecretNotFoundByUser,
+                )
+                .into());
             }
         };
 
-        self.target = if let Some(t) = backend
+        let target = if let Some(t) = backend
             .get_target_by_id(&target_secret_name.target_id, true)
             .await?
         {
-            Some(t)
+            t
         } else {
-            return Ok(false);
+            return Err(AppError::ConnectTarget(ConnectTargetError::TargetNotFoundById).into());
         };
 
-        self.target_sec_name = Some(target_secret_name);
         debug!(
             "[{}] Target initialized: user='{}({})' target: '{}@{}'",
-            self.handler_id, user.username, user.id, target_user, target_name,
+            handler_id, user.username, user.id, target_user, target_name,
         );
 
-        Ok(true)
+        Ok(Self {
+            handler_id,
+            backend,
+            user_id: user.id,
+            client_ip,
+            target,
+            target_channel: None,
+            target_handle: None,
+            target_secret_name,
+            record_session: None,
+            log,
+        })
+    }
+
+    pub(crate) fn new_with_target(
+        handler_id: Uuid,
+        user_id: Uuid,
+        backend: Arc<B>,
+        client_ip: Option<std::net::IpAddr>,
+        log: HandlerLog,
+        target: Target,
+        target_secret_name: TargetSecretName,
+    ) -> Result<ConnectTarget<B>, Error> {
+        if target.id != target_secret_name.target_id {
+            return Err(
+                AppError::ConnectTarget(ConnectTargetError::NotMatchTargetAndTargetSecret).into(),
+            );
+        }
+        Ok(Self {
+            handler_id,
+            backend,
+            user_id,
+            client_ip,
+            target,
+            target_channel: None,
+            target_handle: None,
+            target_secret_name,
+            record_session: None,
+            log,
+        })
+    }
+
+    pub(crate) async fn data(&mut self, data: &[u8]) -> Result<(), Error> {
+        self.target_channel
+            .as_ref()
+            .ok_or(AppError::ConnectTarget(
+                ConnectTargetError::TargetChannelNotExist,
+            ))?
+            .data(data)
+            .await?;
+
+        if let Some(r) = self.record_session.as_ref() {
+            r.lock().await.session.handle_input(data).await;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn channel_eof(&mut self) -> Result<(), Error> {
+        self.target_channel
+            .as_ref()
+            .ok_or(AppError::ConnectTarget(
+                ConnectTargetError::TargetChannelNotExist,
+            ))?
+            .eof()
+            .await?;
+
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn channel_open_direct_tcpip<B>(
+    pub(crate) async fn channel_open_direct_tcpip(
         &mut self,
-        backend: Arc<B>,
         channel: Channel<ru_server::Msg>,
         host_to_connect: &str,
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
         session: &mut ru_server::Session,
-    ) -> Result<bool, Error>
-    where
-        B: 'static + crate::server::HandlerBackend + Send + Sync,
-    {
+    ) -> Result<bool, Error> {
+        if !self
+            .check_permission(
+                crate::database::common::InternalUuids::get().act_direct_tcpip,
+                Some((host_to_connect.to_string(), port_to_connect as u16)),
+            )
+            .await?
+        {
+            return Err(ServerError::PermissionDeny.into());
+        };
         match self
             .do_channel_open_direct_tcpip(
-                backend,
                 channel,
                 host_to_connect,
                 port_to_connect,
@@ -176,83 +203,54 @@ impl ConnectTarget {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn exec_request<B>(
+    pub(crate) async fn exec_request(
         &mut self,
-        backend: Arc<B>,
         channel: ChannelId,
         data: &[u8],
         session: &mut ru_server::Session,
         term: Option<&String>,
         window_size: Option<(u32, u32, u32, u32)>,
         modes: Option<&Vec<(Pty, u32)>>,
-    ) -> Result<(), Error>
-    where
-        B: 'static + crate::server::HandlerBackend + Send + Sync,
-    {
-        match self
-            .do_exec_request(backend, data, term, window_size, modes, channel, session)
-            .await
+    ) -> Result<(), Error> {
+        if !self
+            .check_permission(crate::database::common::InternalUuids::get().act_exec, None)
+            .await?
         {
-            Ok(_) => {
-                session.channel_success(channel)?;
-                Ok(())
-            }
-            Err(e) => {
-                session.channel_failure(channel)?;
-                Err(e)
-            }
-        }
+            return Err(ServerError::PermissionDeny.into());
+        };
+        self.do_exec_request(data, term, window_size, modes, channel, session)
+            .await
     }
 
-    pub(crate) async fn shell_request<B>(
+    pub(crate) async fn shell_request(
         &mut self,
-        backend: Arc<B>,
         channel: ChannelId,
         session: &mut ru_server::Session,
         term: &str,
         window_size: (u32, u32, u32, u32),
         modes: &[(Pty, u32)],
-    ) -> Result<(), Error>
-    where
-        B: 'static + crate::server::HandlerBackend + Send + Sync,
-    {
-        match self
-            .connect_to_target_with_shell(
-                backend.clone(),
-                term,
-                window_size,
-                modes,
-                channel,
-                session,
+    ) -> Result<(), Error> {
+        if !self
+            .check_permission(
+                crate::database::common::InternalUuids::get().act_shell,
+                None,
             )
-            .await
+            .await?
         {
-            Ok(_) => {
-                session.channel_success(channel)?;
-                Ok(())
-            }
-            Err(e) => {
-                session.channel_failure(channel)?;
-                Err(e)
-            }
-        }
+            return Err(ServerError::PermissionDeny.into());
+        };
+        self.connect_to_target_with_shell(term, window_size, modes, channel, session)
+            .await
     }
 
-    async fn connect_to_target_without_pty<'a, B>(
+    async fn connect_to_target_without_pty<'a>(
         &mut self,
-        backend: Arc<B>,
         channel: ChannelId,
         session: &mut ru_server::Session,
         request: &Request<'a>,
-    ) -> Result<bool, Error>
-    where
-        B: 'static + crate::server::HandlerBackend + Send + Sync,
-    {
+    ) -> Result<bool, Error> {
         // TODO: print some info to client
-        if !self
-            .request_target_channel(channel, backend, request)
-            .await?
-        {
+        if !self.request_target_channel(request).await? {
             session.close(channel)?;
             return Ok(false);
         }
@@ -261,19 +259,15 @@ impl ConnectTarget {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn do_channel_open_direct_tcpip<B>(
+    async fn do_channel_open_direct_tcpip(
         &mut self,
-        backend: Arc<B>,
         channel: Channel<ru_server::Msg>,
         host_to_connect: &str,
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
         session: &mut ru_server::Session,
-    ) -> Result<bool, Error>
-    where
-        B: 'static + crate::server::HandlerBackend + Send + Sync,
-    {
+    ) -> Result<bool, Error> {
         let request = Request::OpenDirectTcpip((
             host_to_connect,
             port_to_connect,
@@ -281,11 +275,10 @@ impl ConnectTarget {
             originator_port,
         ));
         if self
-            .connect_to_target_without_pty(backend.clone(), channel.id(), session, &request)
+            .connect_to_target_without_pty(channel.id(), session, &request)
             .await?
         {
-            self.bridge(session.handle(), channel.id(), request, backend)
-                .await?;
+            self.bridge(session.handle(), channel.id(), request).await?;
             Ok(true)
         } else {
             Ok(false)
@@ -293,32 +286,31 @@ impl ConnectTarget {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn connect_to_target_with_pty<'a, B>(
+    async fn connect_to_target_with_pty<'a>(
         &mut self,
-        backend: Arc<B>,
         term: &str,
         window_size: (u32, u32, u32, u32),
         modes: &[(Pty, u32)],
         channel: ChannelId,
         session: &mut ru_server::Session,
         request: &Request<'a>,
-    ) -> Result<bool, Error>
-    where
-        B: 'static + crate::server::HandlerBackend + Send + Sync,
-    {
-        // TODO: print some info to client
+    ) -> Result<bool, Error> {
         if !self
-            .request_target_channel(channel, backend.clone(), request)
+            .check_permission(crate::database::common::InternalUuids::get().act_pty, None)
             .await?
         {
+            return Err(ServerError::PermissionDeny.into());
+        };
+
+        // TODO: print some info to client
+        if !self.request_target_channel(request).await? {
             session.close(channel)?;
             return Ok(false);
         }
 
-        let target_channel = self
-            .target_channel
-            .get(&channel)
-            .unwrap_or_else(|| panic!("[{}] target_channel should not be none", self.handler_id));
+        let target_channel = self.target_channel.as_ref().ok_or(AppError::ConnectTarget(
+            ConnectTargetError::TargetChannelNotExist,
+        ))?;
 
         target_channel
             .request_pty(
@@ -332,53 +324,49 @@ impl ConnectTarget {
             )
             .await?;
 
-        if backend.enable_record() {
-            let target_sec_name = self.target_sec_name.as_ref().unwrap_or_else(|| {
-                panic!("[{}] target_sec_name should not be none", self.handler_id)
-            });
+        if self.backend.enable_record() {
             let recording = SessionRecording::new(
-                self.user.as_ref().unwrap().id,
-                target_sec_name.target_id,
-                target_sec_name.secret_id,
+                self.user_id,
+                self.target_secret_name.target_id,
+                self.target_secret_name.secret_id,
                 self.handler_id,
             );
 
             // Create the asciinema recorder
-            let session = asciinema::new_recorder(
-                Some(term.to_string()),
-                std::path::PathBuf::from(backend.record_path()).join(&recording.file_path),
-                (window_size.0 as u16, window_size.1 as u16),
-                None,
-                backend.record_input(),
-            )
-            .await?;
+            if self.record_session.is_none() {
+                let session = asciinema::new_recorder(
+                    Some(term.to_string()),
+                    std::path::PathBuf::from(self.backend.record_path()).join(&recording.file_path),
+                    (window_size.0 as u16, window_size.1 as u16),
+                    None,
+                    self.backend.record_input(),
+                )
+                .await?;
 
-            // Wrap session with recording metadata
-            let recording_session = RecordingSession {
-                session,
-                recording_id: recording.id,
-            };
+                // Wrap session with recording metadata
+                let recording_session = RecordingSession {
+                    session,
+                    recording_id: recording.id,
+                };
 
-            // Save to database
-            if let Err(e) = backend
-                .db_repository()
-                .create_session_recording(&recording)
-                .await
-            {
-                log::error!(
-                    "[{}] Failed to create session recording: {}",
-                    self.handler_id,
-                    e
-                );
-                return Err(Error::App(AppError::InitRecordError));
-            }
+                // Save to database
+                if let Err(e) = self
+                    .backend
+                    .db_repository()
+                    .create_session_recording(&recording)
+                    .await
+                {
+                    log::error!(
+                        "[{}] Failed to create session recording: {}",
+                        self.handler_id,
+                        e
+                    );
+                    return Err(AppError::ConnectTarget(ConnectTargetError::InitRecordError).into());
+                }
 
-            if self
-                .record_session
-                .insert(channel, Arc::new(Mutex::new(recording_session)))
-                .is_some()
-            {
-                return Err(Error::App(AppError::ChannelRecordExists));
+                self.record_session = Some(Arc::new(Mutex::new(recording_session)));
+            } else {
+                return Err(AppError::ConnectTarget(ConnectTargetError::ReInitRecord).into());
             }
         }
 
@@ -386,71 +374,46 @@ impl ConnectTarget {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn do_exec_request<B>(
+    async fn do_exec_request(
         &mut self,
-        backend: Arc<B>,
         data: &[u8],
         term: Option<&String>,
         window_size: Option<(u32, u32, u32, u32)>,
         modes: Option<&Vec<(Pty, u32)>>,
         channel: ChannelId,
         session: &mut ru_server::Session,
-    ) -> Result<(), Error>
-    where
-        B: 'static + crate::server::HandlerBackend + Send + Sync,
-    {
+    ) -> Result<(), Error> {
         let request = Request::Exec(data);
         let res = match (term, window_size, modes) {
             (Some(t), Some(w), Some(m)) => {
-                self.connect_to_target_with_pty(
-                    backend.clone(),
-                    t,
-                    w,
-                    m,
-                    channel,
-                    session,
-                    &request,
-                )
-                .await?
+                self.connect_to_target_with_pty(t, w, m, channel, session, &request)
+                    .await?
             }
             _ => {
-                self.connect_to_target_without_pty(backend.clone(), channel, session, &request)
+                self.connect_to_target_without_pty(channel, session, &request)
                     .await?
             }
         };
 
         if res {
-            self.bridge(session.handle(), channel, request, backend)
-                .await?;
+            self.bridge(session.handle(), channel, request).await?;
         }
         Ok(())
     }
 
-    async fn connect_to_target_with_shell<B>(
+    async fn connect_to_target_with_shell(
         &mut self,
-        backend: Arc<B>,
         term: &str,
         window_size: (u32, u32, u32, u32),
         modes: &[(Pty, u32)],
         channel: ChannelId,
         session: &mut ru_server::Session,
-    ) -> Result<(), Error>
-    where
-        B: 'static + crate::server::HandlerBackend + Send + Sync,
-    {
+    ) -> Result<(), Error> {
         if self
-            .connect_to_target_with_pty(
-                backend.clone(),
-                term,
-                window_size,
-                modes,
-                channel,
-                session,
-                &Request::Shell,
-            )
+            .connect_to_target_with_pty(term, window_size, modes, channel, session, &Request::Shell)
             .await?
         {
-            self.bridge(session.handle(), channel, Request::Shell, backend)
+            self.bridge(session.handle(), channel, Request::Shell)
                 .await?;
         }
 
@@ -459,57 +422,41 @@ impl ConnectTarget {
 
     pub(crate) async fn window_change_request(
         &mut self,
-        channel: ChannelId,
         col_width: u32,
         row_height: u32,
         pix_width: u32,
         pix_height: u32,
-        session: &mut ru_server::Session,
     ) -> Result<(), Error> {
-        if let Some(ch) = self.target_channel.get(&channel) {
-            ch.window_change(col_width, row_height, pix_width, pix_height)
-                .await?;
-            session.channel_success(channel)?;
-        }
+        self.target_channel
+            .as_ref()
+            .ok_or(AppError::ConnectTarget(
+                ConnectTargetError::TargetChannelNotExist,
+            ))?
+            .window_change(col_width, row_height, pix_width, pix_height)
+            .await?;
 
-        if let Some(r) = self.record_session.get(&channel) {
+        if let Some(r) = self.record_session.as_ref() {
             let mut rec = r.lock().await;
             rec.session.handle_marker("window change".to_string()).await;
             rec.session
                 .handle_resize(asciinema::TtySize(col_width as u16, row_height as u16))
                 .await;
         }
-
-        session.channel_failure(channel)?;
         Ok(())
     }
 
-    async fn bridge<'a, B>(
+    async fn bridge<'a>(
         &mut self,
         handle: ru_server::Handle,
         channel: ChannelId,
         request: Request<'a>,
-        backend: Arc<B>,
-    ) -> Result<(), Error>
-    where
-        B: 'static + crate::server::HandlerBackend + Send + Sync,
-    {
-        let target_channel = self
-            .target_channel
-            .remove(&channel)
-            .unwrap_or_else(|| panic!("[{}] target_channel should not be none", self.handler_id));
+    ) -> Result<(), Error> {
+        let target_channel = self.target_channel.take().ok_or(AppError::ConnectTarget(
+            ConnectTargetError::TargetChannelNotExist,
+        ))?;
         let (mut read_half, write_half) = target_channel.split();
-        self.target_channel.insert(channel, write_half);
-        let write_half = self
-            .target_channel
-            .get(&channel)
-            .unwrap_or_else(|| panic!("[{}] target_channel should not be none", self.handler_id));
 
-        let target = self
-            .target
-            .as_ref()
-            .unwrap_or_else(|| panic!("[{}] target should be assigned", self.handler_id));
-        let move_target = target.clone();
+        let move_target = self.target.clone();
 
         let request_str = request.to_string();
         match request {
@@ -517,16 +464,12 @@ impl ConnectTarget {
             Request::Exec(data) => write_half.exec(false, data).await?,
             Request::OpenDirectTcpip(_) => {}
         }
+        self.target_channel = Some(write_half);
         let log = self.log.clone();
 
-        let (send, mut recv) = mpsc::channel::<()>(1);
-        if self.notify.insert(channel, send).is_some() {
-            return Err(Error::App(AppError::ChannelNotifyExists));
-        };
+        let record = self.record_session.clone();
 
-        let record = self.record_session.get(&channel).cloned();
-
-        let backend_for_task = backend.clone();
+        let backend_for_task = self.backend.clone();
         let handler_id = self.handler_id;
         tokio::spawn(async move {
             loop {
@@ -561,9 +504,6 @@ impl ConnectTarget {
                         } else {
                             break;
                         }
-                    }
-                    _ = recv.recv() => {
-                        break;
                     }
                 }
             }
@@ -600,7 +540,7 @@ impl ConnectTarget {
             LOG_TYPE.into(),
             format!(
                 "target request: {} succeed on {}({})",
-                request, target.name, target.id
+                request, self.target.name, self.target.id
             ),
         )
         .await;
@@ -608,92 +548,53 @@ impl ConnectTarget {
         Ok(())
     }
 
-    pub async fn check_permission<B>(
+    async fn check_permission(
         &self,
-        backend: Arc<B>,
         action_uuid: Uuid,
-        ip: Option<std::net::IpAddr>,
         open_direct_tcpip: Option<(String, u16)>,
-    ) -> Result<bool, Error>
-    where
-        B: 'static + crate::server::HandlerBackend + Send + Sync,
-    {
-        let user = if let Some(u) = self.user.as_ref() {
-            u
-        } else {
-            return Ok(false);
-        };
-
-        let target_sec_id = if let Some(tsn) = self.target_sec_name.as_ref() {
-            tsn.id
-        } else {
-            return Ok(false);
-        };
-
-        let target = if let Some(t) = self.target.as_ref() {
-            t
-        } else {
-            return Ok(false);
-        };
-
-        let mut ext_req = extend_policy::ExtendPolicyReq::new(ip);
+    ) -> Result<bool, Error> {
+        let mut ext_req = extend_policy::ExtendPolicyReq::new(self.client_ip);
         ext_req.open_direct_tcpip = open_direct_tcpip;
-        if !backend
-            .enforce(user.id, target_sec_id, action_uuid, ext_req)
+        if !self
+            .backend
+            .enforce(
+                self.user_id,
+                self.target_secret_name.id,
+                action_uuid,
+                ext_req,
+            )
             .await?
         {
-            debug!(
-                "[{}] User: {} doesn't have permission to access target: {}, action_uuid: {}",
-                self.handler_id, &user.username, &target.name, action_uuid
-            );
             return Ok(false);
         }
         Ok(true)
     }
 
-    async fn do_connect_to_target<B>(
-        &mut self,
-        backend: Arc<B>,
-        force_build_connect: bool,
-    ) -> Result<(), Error>
-    where
-        B: 'static + crate::server::HandlerBackend + Send + Sync,
-    {
-        let target = if let Some(t) = self.target.as_ref() {
-            t
-        } else {
-            return Ok(());
-        };
-
-        let target_sec_id = if let Some(tsn) = self.target_sec_name.as_ref() {
-            tsn.id
-        } else {
-            return Ok(());
-        };
-
+    async fn do_connect_to_target(&mut self, force_build_connect: bool) -> Result<(), Error> {
         // NOTE: target_handle could be re-assigned.
-        self.target_handle = backend
-            .connect_to_target(target.clone(), target_sec_id, force_build_connect)
+        self.target_handle = self
+            .backend
+            .connect_to_target(
+                self.target.clone(),
+                self.target_secret_name.id,
+                force_build_connect,
+            )
             .await?;
 
         debug!(
             "[{}] Connected to target '{}({})' ({}:{})",
-            self.handler_id, target.name, target.id, target.hostname, target.port
+            self.handler_id,
+            self.target.name,
+            self.target.id,
+            self.target.hostname,
+            self.target.port
         );
 
         Ok(())
     }
 
-    async fn request_target_channel<'a, B>(
-        &mut self,
-        channel_id: ChannelId,
-        backend: Arc<B>,
-        request: &Request<'a>,
-    ) -> Result<bool, Error>
-    where
-        B: 'static + crate::server::HandlerBackend + Send + Sync,
-    {
-        self.do_connect_to_target(backend.clone(), false).await?;
+    async fn request_target_channel<'a>(&mut self, request: &Request<'a>) -> Result<bool, Error> {
+        self.do_connect_to_target(false).await?;
         let handle = if let Some(h) = self.target_handle.as_ref() {
             h
         } else {
@@ -711,7 +612,7 @@ impl ConnectTarget {
                         | russh::Error::SendError,
                     ) => {
                         // Try again if the cache of target connection is unavailable
-                        self.do_connect_to_target(backend, true).await?;
+                        self.do_connect_to_target(true).await?;
                         let handle = if let Some(h) = self.target_handle.as_ref() {
                             h
                         } else {
@@ -732,7 +633,7 @@ impl ConnectTarget {
                         | russh::Error::SendError,
                     ) => {
                         // Try again if the cache of target connection is unavailable
-                        self.do_connect_to_target(backend, true).await?;
+                        self.do_connect_to_target(true).await?;
                         let handle = if let Some(h) = self.target_handle.as_ref() {
                             h
                         } else {
@@ -745,9 +646,12 @@ impl ConnectTarget {
             }
         };
 
-        self.target_channel
-            .insert(channel_id, TargetChannel::ChannelFull(channel));
-        Ok(true)
+        if self.target_channel.is_none() {
+            self.target_channel = Some(TargetChannel::ChannelFull(channel));
+            Ok(true)
+        } else {
+            Err(AppError::ConnectTarget(ConnectTargetError::ReInitTargetChannel).into())
+        }
     }
 }
 
@@ -883,18 +787,42 @@ impl TargetChannel {
     }
 }
 
-impl Drop for ConnectTarget {
+impl<B> Drop for ConnectTarget<B>
+where
+    B: 'static + crate::server::HandlerBackend + Send + Sync,
+{
     fn drop(&mut self) {
-        for (_, send) in self.notify.drain() {
-            tokio::spawn(async move {
-                let _ = send.send(()).await;
-            });
-        }
-        for (_, ch) in self.target_channel.drain() {
-            tokio::spawn(async move {
-                let _ = ch.close().await;
-            });
-        }
         trace!("[{}] drop ConnectTarget", self.handler_id);
+        let target_channel = self.target_channel.take();
+        tokio::spawn(async move {
+            if let Some(ch) = target_channel {
+                let _ = ch.close().await;
+            }
+        });
     }
+}
+
+use thiserror::Error;
+#[derive(Debug, Error)]
+pub enum ConnectTargetError {
+    #[error("Init record error")]
+    InitRecordError,
+
+    #[error("Re-initialize target_channel")]
+    ReInitTargetChannel,
+
+    #[error("Re-initialize record")]
+    ReInitRecord,
+
+    #[error("Target and TargetSecret doens't match")]
+    NotMatchTargetAndTargetSecret,
+
+    #[error("No target with secret user found for user")]
+    TargetSecretNotFoundByUser,
+
+    #[error("Target not found by ID")]
+    TargetNotFoundById,
+
+    #[error("Target channel not exist")]
+    TargetChannelNotExist,
 }

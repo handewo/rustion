@@ -7,6 +7,7 @@ pub mod error;
 mod extend_policy;
 pub mod init_service;
 mod test;
+mod tty;
 mod widgets;
 
 pub use bastion_server::BastionServer;

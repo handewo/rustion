@@ -174,6 +174,10 @@ pub async fn init_service(config: Config) {
         .iter()
         .find(|o| o.name == ACT_LOGIN)
         .unwrap_or_else(|| panic!("Failed to find ACT_LOGIN in casbin_names"));
+    let action_shell = casbin_names_rows
+        .iter()
+        .find(|o| o.name == ACT_SHELL)
+        .unwrap_or_else(|| panic!("Failed to find ACT_SHELL in casbin_names"));
 
     // Create login_group UUID and store in casbin_names
     let login_group = CasbinName::new("g1".to_string(), "login_group".to_string(), true, u.id);
@@ -221,7 +225,7 @@ pub async fn init_service(config: Config) {
         "p".to_string(),
         u.id,
         obj_admin_id,
-        action_login.id,
+        action_shell.id,
         serde_json::to_string(&ext).unwrap(),
         String::new(),
         String::new(),
@@ -270,7 +274,7 @@ pub async fn init_service(config: Config) {
         "p".to_string(),
         u.id,
         obj_admin_id,
-        action_login.id,
+        action_shell.id,
         serde_json::to_string(&ext).unwrap(),
         String::new(),
         String::new(),

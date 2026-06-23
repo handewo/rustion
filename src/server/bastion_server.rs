@@ -731,6 +731,11 @@ impl super::HandlerBackend for BastionServer {
                     if verify_extend_policy(&ext, &pol.v3)? {
                         trace!("Accept sub: {}, policy: {:?}", sub, pol);
                         return Ok(true);
+                    } else {
+                        trace!(
+                            "Reject by extend policy, sub: {}, ext: {:?}, policy: {:?}",
+                            sub, ext, pol
+                        );
                     }
                 } else {
                     trace!(

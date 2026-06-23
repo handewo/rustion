@@ -217,7 +217,7 @@ impl std::fmt::Display for ValidateError {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct TargetSecretName {
     // policy id in casbin_rule
     pub pid: Uuid,

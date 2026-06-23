@@ -38,6 +38,9 @@ pub enum ServerError {
         source: DecodeError,
     },
 
+    #[error("Permission deny")]
+    PermissionDeny,
+
     #[error("Failed to decrypt secret: {reason}")]
     DecryptionFailed { reason: String },
 
@@ -67,7 +70,7 @@ pub enum ServerError {
 
     // Handler errors
     #[error("Invalid login name format")]
-    InvalidLoginName,
+    InvalidLoginMode,
 
     #[error(transparent)]
     Russh(#[from] russh::Error),
@@ -78,6 +81,27 @@ pub enum ServerError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
+    #[error("User doesn't init")]
+    UserNotInit,
+
+    #[error("Pty term not exist")]
+    PtyTermNotExist,
+
+    #[error("Pty modes not exist")]
+    PtyModesNotExist,
+
+    #[error("Window size not exist")]
+    WindowSizeNotExist,
+
+    #[error("Tty not init")]
+    TtyNotInit,
+
     #[error("Invalid proxy URL")]
     InvalidProxyUrl,
+
+    #[error("Duplicate channel ID")]
+    DuplicateChannelId,
+
+    #[error("Channel not exist")]
+    ChannelNotExist,
 }
