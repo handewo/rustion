@@ -5,17 +5,16 @@ use crate::database::common::{
 use crate::database::models::*;
 use crate::error::Error;
 use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData as TD};
-use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent};
+use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent, SenderWriter};
+use ratatui::Frame;
 use ratatui::backend::NottyBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{self, Color, Style, Stylize};
 use ratatui::text::Text;
 use ratatui::widgets::{Block, BorderType, Paragraph, Tabs};
-use ratatui::{Frame, Terminal};
-use std::io::Write;
+use ratatui_core::terminal::AsyncTerminal;
 use std::sync::Arc;
 use style::palette::tailwind;
-use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
 
 const INFO_TEXT: [&str; 2] = [
@@ -26,20 +25,19 @@ const INFO_TEXT: [&str; 2] = [
 const LENGTH_UUID: u16 = 36;
 const LENGTH_TIMSTAMP: u16 = 14;
 
-pub(super) fn query_table<B, W: Write>(
+pub(super) async fn query_table<B>(
     tty: NoTtyEvent,
-    w: W,
+    writer: SenderWriter,
     backend: Arc<B>,
-    t_handle: Handle,
 ) -> Result<(), Error>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    let tty_backend = NottyBackend::new(tty.clone(), w);
-    let mut terminal = Terminal::new(tty_backend)?;
-    terminal.hide_cursor()?;
-    terminal.flush()?;
-    App::new(backend, t_handle).run(tty, &mut terminal)?;
+    let tty_backend = NottyBackend::new(tty.clone(), writer);
+    let mut terminal = AsyncTerminal::new(tty_backend)?;
+    terminal.hide_cursor().await?;
+    terminal.flush().await?;
+    App::new(backend).await.run(tty, &mut terminal).await?;
     Ok(())
 }
 
@@ -53,51 +51,59 @@ where
     selected_tab: usize,
     last_selected_tab: usize,
     backend: Arc<B>,
-    t_handle: Handle,
 }
 
 impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    fn new(backend: Arc<B>, t_handle: Handle) -> Self {
+    async fn new(backend: Arc<B>) -> Self {
         let data = TableData::Users(
-            t_handle
-                .block_on(backend.db_repository().list_users(false))
+            backend
+                .db_repository()
+                .list_users(false)
+                .await
                 .unwrap_or_default(),
         );
         Self {
             table: AdminTable::new(&data, &tailwind::BLUE),
             longest_item_lens: data.constraint_len_calculator(),
             selected_tab: 0,
-            last_selected_tab: 1,
+            last_selected_tab: 0,
             backend,
-            t_handle,
             items: data,
         }
     }
 
-    pub fn next_tab(&mut self) {
+    pub async fn next_tab(&mut self) {
         self.selected_tab = (self.selected_tab + 1) % TABLE_LIST.len();
+        if self.selected_tab != self.last_selected_tab {
+            self.refresh_data().await;
+            self.last_selected_tab = self.selected_tab
+        }
     }
 
-    pub fn previous_tab(&mut self) {
+    pub async fn previous_tab(&mut self) {
         if self.selected_tab == 0 {
             self.selected_tab = TABLE_LIST.len() - 1;
         } else {
             self.selected_tab = (self.selected_tab - 1) % TABLE_LIST.len();
         }
+        if self.selected_tab != self.last_selected_tab {
+            self.refresh_data().await;
+            self.last_selected_tab = self.selected_tab
+        }
     }
 
-    fn run<W: Write>(
+    async fn run(
         mut self,
         tty: NoTtyEvent,
-        terminal: &mut Terminal<NottyBackend<W>>,
+        terminal: &mut AsyncTerminal<NottyBackend>,
     ) -> Result<(), Error> {
         loop {
-            terminal.draw(|frame| self.render(frame))?;
+            terminal.draw(|frame| self.render(frame)).await?;
 
-            if let Some(key) = event::read(&tty)?.as_key_press_event() {
+            if let Some(key) = event::read(&tty).await?.as_key_press_event() {
                 let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
                 let items_len = self.items.len();
                 match key.code {
@@ -107,8 +113,8 @@ where
                     KeyCode::Char('b') if ctrl_pressed => self.table.previous_page(),
                     KeyCode::Char('+') => self.table.zoom_in(),
                     KeyCode::Char('-') => self.table.zoom_out(),
-                    KeyCode::Tab => self.next_tab(),
-                    KeyCode::BackTab => self.previous_tab(),
+                    KeyCode::Tab => self.next_tab().await,
+                    KeyCode::BackTab => self.previous_tab().await,
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                     KeyCode::Char('j') | KeyCode::Down => self.table.next_row(items_len),
                     KeyCode::Char('k') | KeyCode::Up => self.table.previous_row(items_len),
@@ -141,61 +147,77 @@ where
         self.render_footer(frame, footer_area);
     }
 
-    fn refresh_data(&mut self) {
+    async fn refresh_data(&mut self) {
         match TABLE_LIST[self.selected_tab] {
             TABLE_USERS => {
                 self.items = TableData::Users(
-                    self.t_handle
-                        .block_on(self.backend.db_repository().list_users(false))
+                    self.backend
+                        .db_repository()
+                        .list_users(false)
+                        .await
                         .unwrap_or_default(),
                 );
             }
             TABLE_TARGETS => {
                 self.items = TableData::Targets(
-                    self.t_handle
-                        .block_on(self.backend.db_repository().list_targets(false))
+                    self.backend
+                        .db_repository()
+                        .list_targets(false)
+                        .await
                         .unwrap_or_default(),
                 );
             }
             TABLE_TARGET_SECRETS => {
                 self.items = TableData::TargetSecrets(
-                    self.t_handle
-                        .block_on(self.backend.db_repository().list_target_secrets(false))
+                    self.backend
+                        .db_repository()
+                        .list_target_secrets(false)
+                        .await
                         .unwrap_or_default(),
                 );
             }
             TABLE_SECRETS => {
                 self.items = TableData::Secrets(
-                    self.t_handle
-                        .block_on(self.backend.db_repository().list_secrets(false))
+                    self.backend
+                        .db_repository()
+                        .list_secrets(false)
+                        .await
                         .unwrap_or_default(),
                 );
             }
             TABLE_CASBIN_NAMES => {
                 self.items = TableData::CasbinNames(
-                    self.t_handle
-                        .block_on(self.backend.db_repository().list_casbin_names(false))
+                    self.backend
+                        .db_repository()
+                        .list_casbin_names(false)
+                        .await
                         .unwrap_or_default(),
                 );
             }
             TABLE_CASBIN_RULE => {
                 self.items = TableData::CasbinRule(
-                    self.t_handle
-                        .block_on(self.backend.db_repository().list_casbin_rules())
+                    self.backend
+                        .db_repository()
+                        .list_casbin_rules()
+                        .await
                         .unwrap_or_default(),
                 );
             }
             TABLE_LOGS => {
                 self.items = TableData::Logs(
-                    self.t_handle
-                        .block_on(self.backend.db_repository().list_logs())
+                    self.backend
+                        .db_repository()
+                        .list_logs()
+                        .await
                         .unwrap_or_default(),
                 );
             }
             TABLE_SESSION_RECORDINGS => {
                 self.items = TableData::SessionRecordings(
-                    self.t_handle
-                        .block_on(self.backend.db_repository().list_session_recordings(None))
+                    self.backend
+                        .db_repository()
+                        .list_session_recordings(None)
+                        .await
                         .unwrap_or_default(),
                 );
             }
@@ -208,11 +230,6 @@ where
     }
 
     fn render_tabs(&mut self, frame: &mut Frame, area: Rect) {
-        if self.selected_tab != self.last_selected_tab {
-            self.refresh_data();
-            self.last_selected_tab = self.selected_tab
-        }
-
         let tabs = Tabs::new(
             TABLE_LIST
                 .iter()

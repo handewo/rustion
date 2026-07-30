@@ -9,18 +9,17 @@ use crate::server::widgets::{
     common::*, render_confirm_dialog, render_message_popup,
 };
 use ::log::{error, info, warn};
-use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent};
+use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent, SenderWriter};
+use ratatui::Frame;
 use ratatui::backend::NottyBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{self, Color, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Widget};
-use ratatui::{Frame, Terminal};
+use ratatui_core::terminal::AsyncTerminal;
 use std::fmt;
-use std::io::Write;
 use std::sync::Arc;
 use style::palette::tailwind;
-use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
 
 mod bind;
@@ -43,24 +42,25 @@ const USER_HELP_TEXT: [&str; 2] = [
     "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
 ];
 
-pub(super) fn manage<B, W: Write>(
+pub(super) async fn manage<B>(
     tty: NoTtyEvent,
-    w: W,
+    writer: SenderWriter,
     user_id: Uuid,
     handler_id: Uuid,
     backend: Arc<B>,
-    t_handle: Handle,
     log: HandlerLog,
 ) -> Result<(), Error>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    let tty_backend = NottyBackend::new(tty.clone(), w);
-    let mut terminal = Terminal::new(tty_backend)?;
-    terminal.hide_cursor()?;
-    terminal.flush()?;
-    App::new(backend, t_handle, user_id, handler_id, log).run(tty, &mut terminal)?;
-    Ok(())
+    let tty_backend = NottyBackend::new(tty.clone(), writer);
+    let mut terminal = AsyncTerminal::new(tty_backend)?;
+    terminal.hide_cursor().await?;
+    terminal.flush().await?;
+    App::new(backend, user_id, handler_id, log)
+        .await
+        .run(tty, &mut terminal)
+        .await
 }
 
 struct EditorColors {
@@ -163,7 +163,6 @@ where
     popup: Popup,
     editor_colors: EditorColors,
     backend: Arc<B>,
-    t_handle: Handle,
     handler_id: Uuid,
     admin_id: Uuid,
     editor: Editor<B>,
@@ -176,15 +175,9 @@ impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    fn new(
-        backend: Arc<B>,
-        t_handle: Handle,
-        admin_id: Uuid,
-        handler_id: Uuid,
-        log: HandlerLog,
-    ) -> Self {
+    async fn new(backend: Arc<B>, admin_id: Uuid, handler_id: Uuid, log: HandlerLog) -> Self {
         let data = TableData::Users(
-            match t_handle.block_on(backend.db_repository().list_users_with_role(false)) {
+            match backend.db_repository().list_users_with_role(false).await {
                 Ok(d) => d,
                 Err(e) => {
                     error!("[{}] Failed to list users: {}", handler_id, e);
@@ -198,10 +191,9 @@ where
             longest_item_lens: data.constraint_len_calculator(),
             editor_colors: EditorColors::new(&tailwind::BLUE),
             selected_tab: SelectedTab::Users,
-            last_selected_tab: SelectedTab::Users.next(),
+            last_selected_tab: SelectedTab::Users,
             popup: Popup::None,
             backend,
-            t_handle,
             handler_id,
             items: data,
             admin_id,
@@ -212,15 +204,25 @@ where
         }
     }
 
-    fn next_tab(&mut self) {
+    async fn next_tab(&mut self) {
         self.selected_tab = self.selected_tab.next();
+        if self.selected_tab != self.last_selected_tab {
+            self.refresh_data().await;
+            self.table.state.select(Some(0));
+            self.last_selected_tab = self.selected_tab
+        }
     }
 
-    fn previous_tab(&mut self) {
+    async fn previous_tab(&mut self) {
         self.selected_tab = self.selected_tab.previous();
+        if self.selected_tab != self.last_selected_tab {
+            self.refresh_data().await;
+            self.table.state.select(Some(0));
+            self.last_selected_tab = self.selected_tab
+        }
     }
 
-    fn add_form(&mut self) {
+    async fn add_form(&mut self) {
         self.popup = Popup::Add;
 
         match self.selected_tab {
@@ -241,11 +243,9 @@ where
             SelectedTab::Permissions => {
                 let mut perm = PermissionPolicy::new(self.admin_id);
                 perm.rule.ptype = "p".to_string();
-                self.editor = Editor::Permission(Box::new(permission::PermissionEditor::new(
-                    perm,
-                    self.backend.clone(),
-                    self.t_handle.clone(),
-                )))
+                self.editor = Editor::Permission(Box::new(
+                    permission::PermissionEditor::new(perm, self.backend.clone()).await,
+                ))
             }
             SelectedTab::CasbinNames => {
                 self.editor = Editor::CasbinName(Box::new(casbin_name::CasbinNameEditor::new(
@@ -259,7 +259,7 @@ where
         }
     }
 
-    fn grant_role_form(&mut self) -> bool {
+    async fn grant_role_form(&mut self) -> bool {
         self.popup = Popup::Edit;
         let idx = self.table.state.selected().unwrap();
         let user = match self.items.get_user(idx) {
@@ -268,18 +268,20 @@ where
                 return false;
             }
         };
-        self.editor = Editor::GrantRole(Box::new(grant_role::GrantRoleEditor::new(
-            user.id,
-            self.backend.clone(),
-            self.t_handle.clone(),
-            self.handler_id,
-            self.admin_id,
-            self.log.clone(),
-        )));
+        self.editor = Editor::GrantRole(Box::new(
+            grant_role::GrantRoleEditor::new(
+                user.id,
+                self.backend.clone(),
+                self.handler_id,
+                self.admin_id,
+                self.log.clone(),
+            )
+            .await,
+        ));
         true
     }
 
-    fn edit_form(&mut self) -> bool {
+    async fn edit_form(&mut self) -> bool {
         self.popup = Popup::Edit;
 
         match self.selected_tab {
@@ -321,11 +323,9 @@ where
                         return false;
                     }
                 };
-                self.editor = Editor::Permission(Box::new(permission::PermissionEditor::new(
-                    permission,
-                    self.backend.clone(),
-                    self.t_handle.clone(),
-                )));
+                self.editor = Editor::Permission(Box::new(
+                    permission::PermissionEditor::new(permission, self.backend.clone()).await,
+                ));
             }
             SelectedTab::CasbinNames => {
                 let idx = self.table.state.selected().unwrap();
@@ -347,14 +347,12 @@ where
         true
     }
 
-    fn do_delete(&mut self, idx: usize) {
+    async fn do_delete(&mut self, idx: usize) {
         self.popup = Popup::None;
         match self.selected_tab {
             SelectedTab::Users => {
                 if let Some(u) = self.items.get_user(idx) {
-                    let result = self
-                        .t_handle
-                        .block_on(self.backend.db_repository().delete_user(&u.id));
+                    let result = self.backend.db_repository().delete_user(&u.id).await;
 
                     if let Err(e) = result {
                         self.message = Some(Message::Error(vec!["Internal error".into()]));
@@ -369,19 +367,18 @@ where
                         "[{}] User '{}({})' deleted by admin_id={}",
                         self.handler_id, u.username, u.id, self.admin_id
                     );
-                    self.t_handle.block_on((self.log)(
+                    (self.log)(
                         LOG_TYPE.into(),
                         format!("User '{}({})' deleted", u.username, u.id),
-                    ));
+                    )
+                    .await;
                     self.message = Some(Message::Success(vec!["User deleted".into()]));
-                    self.refresh_data();
+                    self.refresh_data().await;
                 }
             }
             SelectedTab::Targets => {
                 if let Some(t) = self.items.get_target(idx) {
-                    let result = self
-                        .t_handle
-                        .block_on(self.backend.db_repository().delete_target(&t.id));
+                    let result = self.backend.db_repository().delete_target(&t.id).await;
 
                     if let Err(e) = result {
                         self.message = Some(Message::Error(vec!["Internal error".into()]));
@@ -396,19 +393,18 @@ where
                         "[{}] Target '{}({})' deleted by admin_id={}",
                         self.handler_id, t.name, t.id, self.admin_id
                     );
-                    self.t_handle.block_on((self.log)(
+                    (self.log)(
                         LOG_TYPE.into(),
                         format!("Target '{}({})' deleted", t.name, t.id),
-                    ));
+                    )
+                    .await;
                     self.message = Some(Message::Success(vec!["Target deleted".into()]));
-                    self.refresh_data();
+                    self.refresh_data().await;
                 }
             }
             SelectedTab::Secrets => {
                 if let Some(s) = self.items.get_secret(idx) {
-                    let result = self
-                        .t_handle
-                        .block_on(self.backend.db_repository().delete_secret(&s.id));
+                    let result = self.backend.db_repository().delete_secret(&s.id).await;
 
                     if let Err(e) = result {
                         self.message = Some(Message::Error(vec!["Internal error".into()]));
@@ -423,19 +419,22 @@ where
                         "[{}] Secret '{}({})' deleted by admin_id={}",
                         self.handler_id, s.name, s.id, self.admin_id
                     );
-                    self.t_handle.block_on((self.log)(
+                    (self.log)(
                         LOG_TYPE.into(),
                         format!("Secret '{}({})' deleted", s.name, s.id),
-                    ));
+                    )
+                    .await;
                     self.message = Some(Message::Success(vec!["Secret deleted".into()]));
-                    self.refresh_data();
+                    self.refresh_data().await;
                 }
             }
             SelectedTab::Permissions => {
                 if let Some(p) = self.items.get_permission(idx) {
                     let result = self
-                        .t_handle
-                        .block_on(self.backend.db_repository().delete_casbin_rule(&p.rule.id));
+                        .backend
+                        .db_repository()
+                        .delete_casbin_rule(&p.rule.id)
+                        .await;
 
                     if let Err(e) = result {
                         self.message = Some(Message::Error(vec!["Internal error".into()]));
@@ -450,19 +449,18 @@ where
                         "[{}] Permission '({})' deleted by admin_id={}",
                         self.handler_id, p.rule.id, self.admin_id
                     );
-                    self.t_handle.block_on((self.log)(
+                    (self.log)(
                         LOG_TYPE.into(),
                         format!("Permission '({})' deleted", p.rule.id),
-                    ));
+                    )
+                    .await;
                     self.message = Some(Message::Success(vec!["Permission deleted".into()]));
-                    self.refresh_data();
+                    self.refresh_data().await;
                 }
             }
             SelectedTab::CasbinNames => {
                 if let Some(c) = self.items.get_casbin_name(idx) {
-                    let result = self
-                        .t_handle
-                        .block_on(self.backend.db_repository().delete_casbin_name(&c.id));
+                    let result = self.backend.db_repository().delete_casbin_name(&c.id).await;
 
                     if let Err(e) = result {
                         self.message = Some(Message::Error(vec!["Internal error".into()]));
@@ -477,12 +475,13 @@ where
                         "[{}] Casbin name '{}({})' deleted by admin_id={}",
                         self.handler_id, c.name, c.id, self.admin_id
                     );
-                    self.t_handle.block_on((self.log)(
+                    (self.log)(
                         LOG_TYPE.into(),
                         format!("Casbin name '{}({})' deleted", c.name, c.id),
-                    ));
+                    )
+                    .await;
                     self.message = Some(Message::Success(vec!["Group deleted".into()]));
-                    self.refresh_data();
+                    self.refresh_data().await;
                 }
             }
             SelectedTab::Bind => unreachable!(),
@@ -537,14 +536,14 @@ where
         self.table.colors = Colors::new(&tailwind::BLUE);
     }
 
-    fn run<W: Write>(
+    async fn run(
         mut self,
         tty: NoTtyEvent,
-        terminal: &mut Terminal<NottyBackend<W>>,
+        terminal: &mut AsyncTerminal<NottyBackend>,
     ) -> Result<(), Error> {
         loop {
-            terminal.draw(|frame| self.render(frame))?;
-            let event = event::read(&tty)?;
+            terminal.draw(|frame| self.render(frame)).await?;
+            let event = event::read(&tty).await?;
 
             if let Some(key) = event.as_key_press_event() {
                 if self.message.is_some() {
@@ -562,14 +561,14 @@ where
 
                 match self.editor {
                     Editor::Bind(ref mut e) => {
-                        if e.handle_key_event(key.code, key.modifiers) {
+                        if e.handle_key_event(key.code, key.modifiers).await {
                             self.editor = Editor::None;
                         } else {
                             continue;
                         }
                     }
                     Editor::CasbinGroup(ref mut e) => {
-                        if e.handle_key_event(key.code, key.modifiers) {
+                        if e.handle_key_event(key.code, key.modifiers).await {
                             self.editor = Editor::None;
                         } else {
                             continue;
@@ -589,8 +588,8 @@ where
                             KeyCode::Char('b') if ctrl_pressed => self.table.previous_page(),
                             KeyCode::Char('+') => self.table.zoom_in(),
                             KeyCode::Char('-') => self.table.zoom_out(),
-                            KeyCode::Tab => self.next_tab(),
-                            KeyCode::BackTab => self.previous_tab(),
+                            KeyCode::Tab => self.next_tab().await,
+                            KeyCode::BackTab => self.previous_tab().await,
                             KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                             KeyCode::Char('c') if ctrl_pressed => return Ok(()),
                             KeyCode::Char('j') | KeyCode::Down => self.table.next_row(items_len),
@@ -609,17 +608,17 @@ where
                             }
                             KeyCode::Char('a') => {
                                 self.table.colors.gray();
-                                self.add_form()
+                                self.add_form().await
                             }
                             KeyCode::Char('e') => {
                                 self.table.colors.gray();
-                                if !self.edit_form() {
+                                if !self.edit_form().await {
                                     self.clear_form();
                                 }
                             }
                             KeyCode::Char('r') => {
                                 self.table.colors.gray();
-                                if !self.grant_role_form() {
+                                if !self.grant_role_form().await {
                                     self.clear_form();
                                 }
                             }
@@ -627,14 +626,14 @@ where
                         }
                     }
                     Popup::Add | Popup::Edit => {
-                        if let Err(e) = self.do_edit(key) {
+                        if let Err(e) = self.do_edit(key).await {
                             self.message = Some(Message::Error(vec!["Internal error".into()]));
                             warn!("[{}] Failed to edit: {}", self.handler_id, e);
                         }
                     }
                     Popup::Delete(i) => match key.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') => {
-                            self.do_delete(i);
+                            self.do_delete(i).await;
                         }
                         KeyCode::Char('n') | KeyCode::Char('N') => {
                             self.popup = Popup::None;
@@ -671,7 +670,7 @@ where
         }
     }
 
-    fn do_edit(&mut self, key: KeyEvent) -> Result<(), Error> {
+    async fn do_edit(&mut self, key: KeyEvent) -> Result<(), Error> {
         match self.editor {
             Editor::User(ref mut e) => {
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
@@ -687,13 +686,11 @@ where
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
-                                self.t_handle
-                                    .block_on(self.backend.db_repository().create_user(&user)),
+                                self.backend.db_repository().create_user(&user).await,
                             ),
                             Popup::Edit => (
                                 "updated",
-                                self.t_handle
-                                    .block_on(self.backend.db_repository().update_user(&user)),
+                                self.backend.db_repository().update_user(&user).await,
                             ),
                             _ => unreachable!(),
                         };
@@ -719,10 +716,11 @@ where
                             "[{}] User '{}({})' {} by admin_id={}",
                             self.handler_id, user.username, user.id, action, self.admin_id
                         );
-                        self.t_handle.block_on((self.log)(
+                        (self.log)(
                             LOG_TYPE.into(),
                             format!("User '{}({})' {}", user.username, user.id, action),
-                        ));
+                        )
+                        .await;
                         let mut msg = vec![format!("User {}", action)];
                         if !password.is_empty() {
                             msg.push(format!("New password: {}", password));
@@ -731,7 +729,7 @@ where
                     }
 
                     self.clear_form();
-                    self.refresh_data();
+                    self.refresh_data().await;
                     self.restore_color();
                 }
             }
@@ -743,13 +741,11 @@ where
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
-                                self.t_handle
-                                    .block_on(self.backend.db_repository().create_target(&target)),
+                                self.backend.db_repository().create_target(&target).await,
                             ),
                             Popup::Edit => (
                                 "updated",
-                                self.t_handle
-                                    .block_on(self.backend.db_repository().update_target(&target)),
+                                self.backend.db_repository().update_target(&target).await,
                             ),
                             _ => unreachable!(),
                         };
@@ -775,16 +771,17 @@ where
                             "[{}] Target '{}({})' {} by admin_id={}",
                             self.handler_id, target.name, target.id, action, self.admin_id
                         );
-                        self.t_handle.block_on((self.log)(
+                        (self.log)(
                             LOG_TYPE.into(),
                             format!("Target '{}({})' {}", target.name, target.id, action),
-                        ));
+                        )
+                        .await;
                         let msg = vec![format!("Target {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
 
                     self.clear_form();
-                    self.refresh_data();
+                    self.refresh_data().await;
                     self.restore_color();
                 }
             }
@@ -801,13 +798,11 @@ where
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
-                                self.t_handle
-                                    .block_on(self.backend.db_repository().create_secret(&secret)),
+                                self.backend.db_repository().create_secret(&secret).await,
                             ),
                             Popup::Edit => (
                                 "updated",
-                                self.t_handle
-                                    .block_on(self.backend.db_repository().update_secret(&secret)),
+                                self.backend.db_repository().update_secret(&secret).await,
                             ),
                             _ => unreachable!(),
                         };
@@ -831,15 +826,16 @@ where
                             "[{}] Secret '{}({})' {} by admin_id={}",
                             self.handler_id, secret.name, secret.id, action, self.admin_id
                         );
-                        self.t_handle.block_on((self.log)(
+                        (self.log)(
                             LOG_TYPE.into(),
                             format!("Secret '{}({})' {}", secret.name, secret.id, action),
-                        ));
+                        )
+                        .await;
                         let msg = vec![format!("Secret {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
                     self.clear_form();
-                    self.refresh_data();
+                    self.refresh_data().await;
                     self.restore_color();
                 }
             }
@@ -851,15 +847,17 @@ where
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
-                                self.t_handle.block_on(
-                                    self.backend.db_repository().create_casbin_rule(&perm.rule),
-                                ),
+                                self.backend
+                                    .db_repository()
+                                    .create_casbin_rule(&perm.rule)
+                                    .await,
                             ),
                             Popup::Edit => (
                                 "updated",
-                                self.t_handle.block_on(
-                                    self.backend.db_repository().update_casbin_rule(&perm.rule),
-                                ),
+                                self.backend
+                                    .db_repository()
+                                    .update_casbin_rule(&perm.rule)
+                                    .await,
                             ),
                             _ => unreachable!(),
                         };
@@ -883,22 +881,23 @@ where
                             "[{}] Permission '({})' {} by admin_id={}",
                             self.handler_id, perm.rule.id, action, self.admin_id
                         );
-                        self.t_handle.block_on((self.log)(
+                        (self.log)(
                             LOG_TYPE.into(),
                             format!("Permission '({})' {}", perm.rule.id, action),
-                        ));
+                        )
+                        .await;
                         let msg = vec![format!("Permission {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
                     self.clear_form();
-                    self.refresh_data();
+                    self.refresh_data().await;
                     self.restore_color();
                 }
             }
             Editor::GrantRole(ref mut e) => {
-                if e.as_mut().handle_key_event(key.code, key.modifiers) {
+                if e.as_mut().handle_key_event(key.code, key.modifiers).await {
                     self.clear_form();
-                    self.refresh_data();
+                    self.refresh_data().await;
                     self.restore_color();
                 }
             }
@@ -910,19 +909,17 @@ where
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
-                                self.t_handle.block_on(
-                                    self.backend
-                                        .db_repository()
-                                        .create_casbin_name(&casbin_name),
-                                ),
+                                self.backend
+                                    .db_repository()
+                                    .create_casbin_name(&casbin_name)
+                                    .await,
                             ),
                             Popup::Edit => (
                                 "updated",
-                                self.t_handle.block_on(
-                                    self.backend
-                                        .db_repository()
-                                        .update_casbin_name(&casbin_name),
-                                ),
+                                self.backend
+                                    .db_repository()
+                                    .update_casbin_name(&casbin_name)
+                                    .await,
                             ),
                             _ => unreachable!(),
                         };
@@ -952,18 +949,19 @@ where
                             action,
                             self.admin_id
                         );
-                        self.t_handle.block_on((self.log)(
+                        (self.log)(
                             LOG_TYPE.into(),
                             format!(
                                 "Casbin name '{}({})' {}",
                                 casbin_name.name, casbin_name.id, action
                             ),
-                        ));
+                        )
+                        .await;
                         let msg = vec![format!("Group {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
                     self.clear_form();
-                    self.refresh_data();
+                    self.refresh_data().await;
                     self.restore_color();
                 }
             }
@@ -1042,43 +1040,50 @@ where
         self.render_footer(frame, footer_area);
     }
 
-    fn refresh_data(&mut self) {
+    async fn refresh_data(&mut self) {
         match self.selected_tab {
             SelectedTab::Users => {
                 self.items = TableData::Users(
-                    self.t_handle
-                        .block_on(self.backend.db_repository().list_users_with_role(false))
+                    self.backend
+                        .db_repository()
+                        .list_users_with_role(false)
+                        .await
                         .unwrap_or_default(),
                 );
             }
             SelectedTab::Targets => {
                 self.items = TableData::Targets(
-                    self.t_handle
-                        .block_on(self.backend.db_repository().list_targets(false))
+                    self.backend
+                        .db_repository()
+                        .list_targets(false)
+                        .await
                         .unwrap_or_default(),
                 );
             }
             SelectedTab::Secrets => {
                 self.items = TableData::Secrets(
-                    self.t_handle
-                        .block_on(self.backend.db_repository().list_secrets(false))
+                    self.backend
+                        .db_repository()
+                        .list_secrets(false)
+                        .await
                         .unwrap_or_default(),
                 );
             }
             SelectedTab::Bind => {
                 // For Bind tab, we need to load targets and secrets
                 let targets = self
-                    .t_handle
-                    .block_on(self.backend.db_repository().list_targets_info())
+                    .backend
+                    .db_repository()
+                    .list_targets_info()
+                    .await
                     .unwrap_or_default();
                 let secrets = if !targets.is_empty() {
                     // Get secrets for the first target as default
-                    self.t_handle
-                        .block_on(
-                            self.backend
-                                .db_repository()
-                                .list_secrets_for_target(&targets[0].id),
-                        )
+
+                    self.backend
+                        .db_repository()
+                        .list_secrets_for_target(&targets[0].id)
+                        .await
                         .unwrap_or_default()
                 } else {
                     Vec::new()
@@ -1087,7 +1092,6 @@ where
                     targets,
                     secrets,
                     self.backend.clone(),
-                    self.t_handle.clone(),
                     self.handler_id,
                     self.admin_id,
                     self.log.clone(),
@@ -1095,51 +1099,57 @@ where
             }
             SelectedTab::Permissions => {
                 self.items = TableData::Permissions(
-                    self.t_handle
-                        .block_on(self.backend.db_repository().list_permission_polices())
+                    self.backend
+                        .db_repository()
+                        .list_permission_polices()
+                        .await
                         .unwrap_or_default(),
                 );
             }
             SelectedTab::CasbinNames => {
                 self.items = TableData::CasbinNames(
-                    self.t_handle
-                        .block_on(
-                            self.backend
-                                .db_repository()
-                                .list_casbin_names_user_visible(false),
-                        )
+                    self.backend
+                        .db_repository()
+                        .list_casbin_names_user_visible(false)
+                        .await
                         .unwrap_or_default(),
                 );
             }
             SelectedTab::RoleHierarchy => {
-                self.editor = Editor::CasbinGroup(Box::new(casbin_group::CasbinGroupEditor::new(
-                    self.backend.clone(),
-                    self.t_handle.clone(),
-                    self.handler_id,
-                    self.admin_id,
-                    GroupType::Subject,
-                    self.log.clone(),
-                )));
+                self.editor = Editor::CasbinGroup(Box::new(
+                    casbin_group::CasbinGroupEditor::new(
+                        self.backend.clone(),
+                        self.handler_id,
+                        self.admin_id,
+                        GroupType::Subject,
+                        self.log.clone(),
+                    )
+                    .await,
+                ));
             }
             SelectedTab::TargetGroup => {
-                self.editor = Editor::CasbinGroup(Box::new(casbin_group::CasbinGroupEditor::new(
-                    self.backend.clone(),
-                    self.t_handle.clone(),
-                    self.handler_id,
-                    self.admin_id,
-                    GroupType::Object,
-                    self.log.clone(),
-                )));
+                self.editor = Editor::CasbinGroup(Box::new(
+                    casbin_group::CasbinGroupEditor::new(
+                        self.backend.clone(),
+                        self.handler_id,
+                        self.admin_id,
+                        GroupType::Object,
+                        self.log.clone(),
+                    )
+                    .await,
+                ));
             }
             SelectedTab::ActionGroup => {
-                self.editor = Editor::CasbinGroup(Box::new(casbin_group::CasbinGroupEditor::new(
-                    self.backend.clone(),
-                    self.t_handle.clone(),
-                    self.handler_id,
-                    self.admin_id,
-                    GroupType::Action,
-                    self.log.clone(),
-                )));
+                self.editor = Editor::CasbinGroup(Box::new(
+                    casbin_group::CasbinGroupEditor::new(
+                        self.backend.clone(),
+                        self.handler_id,
+                        self.admin_id,
+                        GroupType::Action,
+                        self.log.clone(),
+                    )
+                    .await,
+                ));
             }
         };
 
@@ -1185,12 +1195,6 @@ where
     }
 
     fn render_tabs(&mut self, frame: &mut Frame, area: Rect) {
-        if self.selected_tab != self.last_selected_tab {
-            self.refresh_data();
-            self.table.state.select(Some(0));
-            self.last_selected_tab = self.selected_tab
-        }
-
         let width = area.width as usize;
         let selected = self.selected_tab as usize;
         let tab_count = MANAGE_LIST.len();

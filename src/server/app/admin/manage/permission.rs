@@ -16,7 +16,6 @@ use ratatui::{
     widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
 use std::sync::Arc;
-use tokio::runtime::Handle;
 
 pub const HELP_TABLE: [&str; 2] = [
     "(Space/Enter) select",
@@ -76,12 +75,12 @@ pub(super) struct PermissionEditor {
 }
 
 impl PermissionEditor {
-    pub fn new<B>(perm: PermissionPolicy, backend: Arc<B>, t_handle: Handle) -> Self
+    pub async fn new<B>(perm: PermissionPolicy, backend: Arc<B>) -> Self
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
         let mut save_error = None;
-        let user_items = match t_handle.block_on(backend.db_repository().list_user_group()) {
+        let user_items = match backend.db_repository().list_user_group().await {
             Ok(items) => items,
             Err(e) => {
                 save_error = Some(e);
@@ -89,7 +88,7 @@ impl PermissionEditor {
             }
         };
 
-        let target_items = match t_handle.block_on(backend.db_repository().list_target_group()) {
+        let target_items = match backend.db_repository().list_target_group().await {
             Ok(items) => items,
             Err(e) => {
                 save_error = Some(e);
@@ -97,7 +96,7 @@ impl PermissionEditor {
             }
         };
 
-        let action_items = match t_handle.block_on(backend.db_repository().list_action_group()) {
+        let action_items = match backend.db_repository().list_action_group().await {
             Ok(items) => items,
             Err(e) => {
                 save_error = Some(e);

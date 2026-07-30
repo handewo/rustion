@@ -1,6 +1,7 @@
 pub(super) mod admin;
 pub(super) mod change_password;
 pub(super) mod connect_target;
+use bytes::Bytes;
 pub mod error;
 pub(super) mod player;
 pub(super) mod target_selector;
@@ -19,6 +20,7 @@ pub struct AppParams<B: 'static + crate::server::HandlerBackend + Send + Sync> {
     pub client_ip: Option<std::net::IpAddr>,
     pub backend: Arc<B>,
     pub tty: Tty,
+    pub recv_from_tty: mpsc::Receiver<Bytes>,
     pub log: HandlerLog,
     pub app_sender: mpsc::Sender<(ChannelId, NextApplication)>,
 }
@@ -29,6 +31,7 @@ type Params<B> = (
     Option<std::net::IpAddr>,
     Arc<B>,
     Tty,
+    mpsc::Receiver<Bytes>,
     HandlerLog,
     mpsc::Sender<(ChannelId, NextApplication)>,
 );
@@ -41,6 +44,7 @@ impl<B: 'static + crate::server::HandlerBackend + Send + Sync> AppParams<B> {
             self.client_ip,
             self.backend,
             self.tty,
+            self.recv_from_tty,
             self.log,
             self.app_sender,
         )

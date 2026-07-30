@@ -3,6 +3,7 @@ use crate::database::common as db_common;
 use crate::error::Error;
 use crate::server::error::ServerError;
 use crate::server::extend_policy;
+use bytes::Bytes;
 
 use crate::database::Uuid;
 use log::{debug, warn};
@@ -47,7 +48,8 @@ pub(crate) async fn shell_request<B>(
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    let (handler_id, user_id, client_ip, backend, tty, log, _) = app_params.split();
+    let (handler_id, user_id, client_ip, backend, tty, mut recv_from_tty, log, _) =
+        app_params.split();
     let uuids = db_common::InternalUuids::get();
     if !check_permission(
         user_id,
@@ -61,14 +63,14 @@ where
         return Err(ServerError::PermissionDeny.into());
     }
     let handle_session = session.handle();
-    let (send_to_session, mut recv_from_shell) = mpsc::channel::<Vec<u8>>(1);
+    let (send_to_session, mut recv_from_shell) = mpsc::channel::<Bytes>(1);
     let (send_status, mut recv_status) = mpsc::channel(1);
     let send_to_session_from_tty = send_to_session.clone();
-    let (tty, _, recv_from_tty) = tty.split();
+    let (tty, _) = tty.split();
 
-    tokio::task::spawn_blocking(move || {
-        while let Ok(data) = recv_from_tty.recv() {
-            if send_to_session_from_tty.blocking_send(data).is_err() {
+    tokio::spawn(async move {
+        while let Some(data) = recv_from_tty.recv().await {
+            if send_to_session_from_tty.send(data).await.is_err() {
                 debug!("[{}] Fail to send data to session from tty", handler_id);
                 break;
             }
@@ -95,9 +97,8 @@ where
         }
     });
 
-    let tokio_handle = tokio::runtime::Handle::current();
     let shell_log = log.clone();
-    tokio::task::spawn_blocking(move || {
+    tokio::spawn(async move {
         shell::shell(
             tty,
             send_to_session,
@@ -105,9 +106,9 @@ where
             user_id,
             handler_id,
             backend,
-            tokio_handle,
             shell_log,
         )
+        .await
     });
 
     (log)(LOG_TYPE.into(), "User login to admin system".to_string()).await;

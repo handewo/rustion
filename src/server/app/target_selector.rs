@@ -4,6 +4,7 @@ use crate::database::models::TargetSecretName;
 use crate::error::Error;
 use crate::server::app::NextApplication;
 use crate::server::app::error::AppError;
+use bytes::Bytes;
 use crossterm::event::SenderWriter;
 use log::{debug, trace, warn};
 use reedline::{
@@ -32,7 +33,8 @@ pub(crate) async fn shell_request<B>(
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    let (handler_id, user_id, _, backend, tty, _, app_sender) = app_params.split();
+    let (handler_id, user_id, _, backend, tty, mut recv_from_tty, _, app_sender) =
+        app_params.split();
 
     let mut allowed_targets = backend.list_targets_for_user(&user_id, true).await?;
     trace!(
@@ -53,10 +55,10 @@ where
     let handle_prompt = session.handle();
     let handle_status = session.handle();
 
-    let (send_to_session, mut recv_from_prompt) = mpsc::channel::<Vec<u8>>(16);
+    let (send_to_session, mut recv_from_prompt) = mpsc::channel::<Bytes>(16);
     let send_to_session_from_tty = send_to_session.clone();
 
-    let (tty, _, recv_from_tty) = tty.split();
+    let (tty, _) = tty.split();
 
     tokio::spawn(async move {
         while let Some(d) = recv_from_prompt.recv().await {
@@ -95,18 +97,16 @@ where
         }
     });
 
-    tokio::task::spawn_blocking(move || {
-        while let Ok(data) = recv_from_tty.recv() {
-            if send_to_session_from_tty.blocking_send(data).is_err() {
+    tokio::spawn(async move {
+        while let Some(data) = recv_from_tty.recv().await {
+            if send_to_session_from_tty.send(data).await.is_err() {
                 debug!("[{}] Fail to send data to session from tty", handler_id);
                 break;
             }
         }
     });
 
-    let tokio_handle = tokio::runtime::Handle::current();
-
-    tokio::task::spawn_blocking(move || {
+    tokio::spawn(async move {
         // TODO: Classify different target type in future
         let server_prompt = "Select server";
         let user_prompt = "Select system user";
@@ -166,7 +166,7 @@ where
                         .with_highlighter(Box::new(ExampleHighlighter::new(
                             target_commands.clone(),
                         )));
-                    let sig = line_editor.read_line(&prompt);
+                    let sig = line_editor.read_line(&prompt).await;
 
                     match sig {
                         Ok(Signal::Success(p)) => {
@@ -180,7 +180,8 @@ where
                             if !target_commands.iter().any(|v| v == &p) {
                                 status = TerminalStatus::SelectTarget;
                                 if let Err(e) = send_to_session
-                                    .blocking_send(format!("Server: {} doesn't exist", p).into())
+                                    .send(format!("Server: {} doesn't exist", p).into())
+                                    .await
                                 {
                                     warn!(
                                         "[{}] Fail to send data to channel from prompt: {}",
@@ -241,7 +242,7 @@ where
                         .with_completer(completer)
                         .with_highlighter(Box::new(ExampleHighlighter::new(user_commands.clone())));
 
-                    let sig = line_editor.read_line(&prompt);
+                    let sig = line_editor.read_line(&prompt).await;
 
                     match sig {
                         Ok(Signal::Success(p)) => {
@@ -254,9 +255,10 @@ where
                             }
                             if !user_commands.iter().any(|v| v == &p) {
                                 status = TerminalStatus::SelectUser;
-                                if let Err(e) = send_to_session.blocking_send(
-                                    format!("System user: {} doesn't exist", p).into(),
-                                ) {
+                                if let Err(e) = send_to_session
+                                    .send(format!("System user: {} doesn't exist", p).into())
+                                    .await
+                                {
                                     warn!(
                                         "[{}] Fail to send data to channel from prompt: {}",
                                         handler_id, e
@@ -299,7 +301,7 @@ where
                     }
                 }
                 TerminalStatus::Terminate => {
-                    if let Err(e) = send_status.blocking_send(status) {
+                    if let Err(e) = send_status.send(status).await {
                         warn!("[{}] Fail to send status: {}", handler_id, e);
                     };
                     return;
@@ -318,12 +320,12 @@ where
         } else {
             Uuid::default()
         };
-        let target = match tokio_handle.block_on(backend.get_target_by_id(&target_id, true)) {
+        let target = match backend.get_target_by_id(&target_id, true).await {
             Ok(t) => t,
             Err(e) => {
                 warn!("[{}] Fail to get target: {}", handler_id, e);
                 status = TerminalStatus::Terminate;
-                if let Err(e) = send_status.blocking_send(status) {
+                if let Err(e) = send_status.send(status).await {
                     warn!("[{}] Fail to send status: {}", handler_id, e);
                 };
                 return;
@@ -336,10 +338,10 @@ where
             warn!("[{}] Target: [{}] not found", handler_id, target_id);
             NextApplication::None
         };
-        if app_sender.blocking_send((channel, next_app)).is_err() {
+        if app_sender.send((channel, next_app)).await.is_err() {
             status = TerminalStatus::Terminate;
         }
-        if let Err(e) = send_status.blocking_send(status) {
+        if let Err(e) = send_status.send(status).await {
             warn!("[{}] Fail to send status: {}", handler_id, e);
         };
     });

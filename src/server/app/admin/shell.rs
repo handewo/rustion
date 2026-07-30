@@ -11,17 +11,17 @@ use tokio::sync::mpsc;
 
 use super::common::*;
 use super::{Status, database, manage};
+use bytes::Bytes;
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste, NoTtyEvent, SenderWriter};
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn shell<B>(
+pub(super) async fn shell<B>(
     tty: NoTtyEvent,
-    send_to_session: mpsc::Sender<Vec<u8>>,
+    send_to_session: mpsc::Sender<Bytes>,
     send_status: mpsc::Sender<Status>,
     user_id: Uuid,
     handler_id: Uuid,
     backend: Arc<B>,
-    t_handle: tokio::runtime::Handle,
     log: HandlerLog,
 ) where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
@@ -57,7 +57,7 @@ pub(super) fn shell<B>(
         .with_highlighter(Box::new(ExampleHighlighter::new(command_list.clone())));
 
     loop {
-        let sig = line_editor.read_line(&prompt);
+        let sig = line_editor.read_line(&prompt).await;
         match sig {
             Ok(Signal::Success(p)) => {
                 if p.trim().is_empty() {
@@ -65,7 +65,7 @@ pub(super) fn shell<B>(
                 }
                 match p.trim() {
                     CMD_QUIT | CMD_EXIT => {
-                        let _ = send_status.blocking_send(Status::Terminate(0));
+                        let _ = send_status.send(Status::Terminate(0)).await;
                         break;
                     }
                     CMD_DATABASE => {
@@ -73,36 +73,39 @@ pub(super) fn shell<B>(
                             tty.clone(),
                             SenderWriter::new(send_to_session.clone()),
                             backend.clone(),
-                            t_handle.clone(),
-                        );
+                        )
+                        .await;
                     }
                     CMD_MANAGE => {
-                        let mut w = SenderWriter::new(send_to_session.clone());
-                        let _ = crossterm::execute!(w, EnableBracketedPaste);
+                        let w = SenderWriter::new(send_to_session.clone());
+                        let _ = crossterm::async_execute!(&w, EnableBracketedPaste).await;
                         if let Err(e) = manage::manage(
                             tty.clone(),
                             SenderWriter::new(send_to_session.clone()),
                             user_id,
                             handler_id,
                             backend.clone(),
-                            t_handle.clone(),
                             log.clone(),
-                        ) {
+                        )
+                        .await
+                        {
                             warn!("[{}] Manage error: {}", handler_id, e);
                         };
-                        let _ = crossterm::execute!(w, DisableBracketedPaste);
+                        let _ = crossterm::async_execute!(&w, DisableBracketedPaste).await;
                     }
                     CMD_FLUSH_PRIVILEGES => {
-                        if let Err(e) = t_handle.block_on(backend.load_role_manager()) {
+                        if let Err(e) = backend.load_role_manager().await {
                             let _ = send_to_session
-                                .blocking_send(format!("flush previleges error: {}", e).into());
+                                .send(format!("flush previleges error: {}", e).into())
+                                .await;
                         } else {
-                            let _ = send_to_session.blocking_send("flushed successfully".into());
+                            let _ = send_to_session.send("flushed successfully".into()).await;
                         }
                     }
                     _ => {
-                        let _ =
-                            send_to_session.blocking_send(format!("Unknown command: {}", p).into());
+                        let _ = send_to_session
+                            .send(format!("Unknown command: {}", p).into())
+                            .await;
                     }
                 }
             }
@@ -110,12 +113,12 @@ pub(super) fn shell<B>(
                 continue;
             }
             Ok(Signal::CtrlD) => {
-                let _ = send_status.blocking_send(Status::Terminate(0));
+                let _ = send_status.send(Status::Terminate(0)).await;
                 break;
             }
             Ok(_) => unreachable!(),
             Err(e) => {
-                let _ = send_status.blocking_send(Status::Terminate(1));
+                let _ = send_status.send(Status::Terminate(1)).await;
                 warn!("[{}] Fail to get signal from prompt: {}", handler_id, e);
                 break;
             }

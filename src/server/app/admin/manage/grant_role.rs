@@ -1,9 +1,11 @@
-use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData, centered_area, render_message_popup, Message};
-use crate::database::models::{CasbinRule, Role};
 use crate::database::Uuid;
+use crate::database::models::{CasbinRule, Role};
 use crate::error::Error;
-use crate::server::error::ServerError;
 use crate::server::HandlerLog;
+use crate::server::error::ServerError;
+use crate::server::widgets::{
+    AdminTable, DisplayMode, FieldsToArray, Message, TableData, centered_area, render_message_popup,
+};
 use ::log::info;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
@@ -13,7 +15,6 @@ use ratatui::{
     widgets::Widget,
 };
 use std::sync::Arc;
-use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
 
 use super::LOG_TYPE;
@@ -32,7 +33,6 @@ where
     longest_role_lens: Vec<Constraint>,
     role_table: AdminTable,
     backend: Arc<B>,
-    t_handle: Handle,
     handler_id: Uuid,
     admin_id: Uuid,
     save_error: Option<Error>,
@@ -44,20 +44,19 @@ impl<B> GrantRoleEditor<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    pub fn new(
+    pub async fn new(
         selected_user_id: Uuid,
         backend: Arc<B>,
-        t_handle: Handle,
         handler_id: Uuid,
         admin_id: Uuid,
         log: HandlerLog,
     ) -> Self {
         let mut save_error = None;
-        let items = match t_handle.block_on(
-            backend
-                .db_repository()
-                .list_roles_by_user_id(&selected_user_id),
-        ) {
+        let items = match backend
+            .db_repository()
+            .list_roles_by_user_id(&selected_user_id)
+            .await
+        {
             Ok(items) => items,
             Err(e) => {
                 save_error = Some(e);
@@ -70,7 +69,6 @@ where
             longest_role_lens: table_len_calculator(&items),
             role_table: AdminTable::new(&items, &tailwind::BLUE),
             backend,
-            t_handle,
             handler_id,
             admin_id,
             save_error,
@@ -79,7 +77,7 @@ where
         }
     }
 
-    pub fn handle_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) -> bool {
+    pub async fn handle_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) -> bool {
         if self.save_error.is_some() {
             if key == KeyCode::Enter {
                 self.save_error = None;
@@ -118,7 +116,7 @@ where
                 table.previous_row(items_len);
             }
             KeyCode::Char(' ') | KeyCode::Enter => {
-                if let Err(e) = self.save_bindings() {
+                if let Err(e) = self.save_bindings().await {
                     self.save_error = Some(e);
                 }
             }
@@ -128,7 +126,7 @@ where
         false
     }
 
-    fn save_bindings(&mut self) -> Result<(), Error> {
+    async fn save_bindings(&mut self) -> Result<(), Error> {
         let idx = self.role_table.state.selected().unwrap();
         let t = self.items.get_mut(idx).unwrap();
         if t.is_bound {
@@ -136,16 +134,19 @@ where
                 .rule_id
                 .as_ref()
                 .ok_or(Error::Server(ServerError::MissingRuleId))?;
-            self.t_handle
-                .block_on(self.backend.db_repository().delete_casbin_rule(id))?;
+            self.backend.db_repository().delete_casbin_rule(id).await?;
             info!(
                 "[{}] Role '{}({})' revoked from user_id={} by admin_id={}",
                 self.handler_id, t.role, t.rid, self.selected_user_id, self.admin_id
             );
-            self.t_handle.block_on((self.log)(
+            (self.log)(
                 LOG_TYPE.into(),
-                format!("Role '{}({})' revoked from user_id={}", t.role, t.rid, self.selected_user_id),
-            ));
+                format!(
+                    "Role '{}({})' revoked from user_id={}",
+                    t.role, t.rid, self.selected_user_id
+                ),
+            )
+            .await;
         } else {
             let cr = CasbinRule::new(
                 "g1".to_string(),
@@ -157,19 +158,22 @@ where
                 String::new(),
                 self.admin_id,
             );
-            self.t_handle
-                .block_on(self.backend.db_repository().create_casbin_rule(&cr))?;
+            self.backend.db_repository().create_casbin_rule(&cr).await?;
             info!(
                 "[{}] Role '{}({})' granted to user_id={} by admin_id={}",
                 self.handler_id, t.role, t.rid, self.selected_user_id, self.admin_id
             );
-            self.t_handle.block_on((self.log)(
+            (self.log)(
                 LOG_TYPE.into(),
-                format!("Role '{}({})' granted to user_id={}", t.role, t.rid, self.selected_user_id),
-            ));
+                format!(
+                    "Role '{}({})' granted to user_id={}",
+                    t.role, t.rid, self.selected_user_id
+                ),
+            )
+            .await;
         }
         t.is_bound = !t.is_bound;
-        self.t_handle.block_on(self.backend.load_role_manager())?;
+        self.backend.load_role_manager().await?;
         Ok(())
     }
 

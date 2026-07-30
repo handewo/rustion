@@ -19,7 +19,6 @@ use ratatui::{
     widgets::{Block, BorderType, Clear, Scrollbar, ScrollbarOrientation},
 };
 use std::sync::Arc;
-use tokio::runtime::Handle;
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 
 pub const HELP_TEXT: [&str; 2] = [
@@ -44,7 +43,6 @@ where
     selector_table: AdminTable,
     longest_item_lens: Vec<Constraint>,
     backend: Arc<B>,
-    t_handle: Handle,
     handler_id: Uuid,
     admin_id: Uuid,
     log: HandlerLog,
@@ -65,9 +63,8 @@ impl<B> CasbinGroupEditor<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    pub fn new(
+    pub async fn new(
         backend: Arc<B>,
-        t_handle: Handle,
         handler_id: Uuid,
         admin_id: Uuid,
         group_type: GroupType,
@@ -75,7 +72,7 @@ where
     ) -> Self {
         let mut message = None;
         let (state, items, selector_items) =
-            match CasbinGroupEditor::build_tree(handler_id, &backend, &t_handle, group_type) {
+            match CasbinGroupEditor::build_tree(handler_id, &backend, group_type).await {
                 Ok(res) => res,
                 Err(_) => {
                     message = Some(Message::Error(vec!["Internal error".into()]));
@@ -92,7 +89,6 @@ where
             selector_items,
             longest_item_lens,
             backend,
-            t_handle,
             handler_id,
             admin_id,
             log,
@@ -104,44 +100,37 @@ where
         }
     }
 
-    fn build_tree(
+    async fn build_tree(
         handler_id: Uuid,
         backend: &Arc<B>,
-        t_handle: &Handle,
         group_type: GroupType,
     ) -> Result<BuildTreeResult, Error>
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
-        let graph = t_handle.block_on(backend.get_graph(group_type));
+        let graph = backend.get_graph(group_type).await;
         let mut selector_items = match group_type {
-            GroupType::Subject => {
-                match t_handle.block_on(backend.db_repository().list_user_group()) {
-                    Ok(i) => i,
-                    Err(e) => {
-                        error!("[{}] Failed to list 'user role': {}", handler_id, e);
-                        return Err(e);
-                    }
+            GroupType::Subject => match backend.db_repository().list_user_group().await {
+                Ok(i) => i,
+                Err(e) => {
+                    error!("[{}] Failed to list 'user role': {}", handler_id, e);
+                    return Err(e);
                 }
-            }
-            GroupType::Object => {
-                match t_handle.block_on(backend.db_repository().list_target_group()) {
-                    Ok(i) => i,
-                    Err(e) => {
-                        error!("[{}] Failed to list 'target group': {}", handler_id, e);
-                        return Err(e);
-                    }
+            },
+            GroupType::Object => match backend.db_repository().list_target_group().await {
+                Ok(i) => i,
+                Err(e) => {
+                    error!("[{}] Failed to list 'target group': {}", handler_id, e);
+                    return Err(e);
                 }
-            }
-            GroupType::Action => {
-                match t_handle.block_on(backend.db_repository().list_action_group()) {
-                    Ok(i) => i,
-                    Err(e) => {
-                        error!("[{}] Failed to list 'action group': {}", handler_id, e);
-                        return Err(e);
-                    }
+            },
+            GroupType::Action => match backend.db_repository().list_action_group().await {
+                Ok(i) => i,
+                Err(e) => {
+                    error!("[{}] Failed to list 'action group': {}", handler_id, e);
+                    return Err(e);
                 }
-            }
+            },
         };
         let mut items = match tree::build_tree(
             &graph,
@@ -165,7 +154,7 @@ where
         Ok((state, items, selector_items))
     }
 
-    pub fn handle_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) -> bool {
+    pub async fn handle_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) -> bool {
         if self.message.is_some() {
             match key {
                 KeyCode::Enter => {
@@ -181,7 +170,7 @@ where
         if self.is_deleting {
             match key {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    self.do_delete();
+                    self.do_delete().await;
                     self.is_deleting = false
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') => self.is_deleting = false,
@@ -224,7 +213,7 @@ where
                     self.is_editing = false;
                     self.help_text = HELP_TEXT;
 
-                    self.insert_group()
+                    self.insert_group().await
                 }
                 _ => {}
             }
@@ -337,44 +326,45 @@ where
         let _ = self.state.scroll_up(height);
     }
 
-    fn refreash_data(&mut self) {
-        if let Err(e) = self.t_handle.block_on(self.backend.load_role_manager()) {
+    async fn refreash_data(&mut self) {
+        if let Err(e) = self.backend.load_role_manager().await {
             error!("[{}] Load role manager error: {}", self.handler_id, e);
             self.message = Some(Message::Error(vec!["Internal error".into()]));
         }
-        let (state, items, selector_items) = match CasbinGroupEditor::build_tree(
-            self.handler_id,
-            &self.backend,
-            &self.t_handle,
-            self.group_type,
-        ) {
-            Ok(res) => res,
-            Err(_) => {
-                self.message = Some(Message::Error(vec!["Internal error".into()]));
-                (TreeState::default(), Vec::new(), Vec::new())
-            }
-        };
+        let (state, items, selector_items) =
+            match CasbinGroupEditor::build_tree(self.handler_id, &self.backend, self.group_type)
+                .await
+            {
+                Ok(res) => res,
+                Err(_) => {
+                    self.message = Some(Message::Error(vec!["Internal error".into()]));
+                    (TreeState::default(), Vec::new(), Vec::new())
+                }
+            };
 
         self.state = state;
         self.items = items;
         self.selector_items = selector_items;
     }
 
-    fn do_delete(&mut self) {
+    async fn do_delete(&mut self) {
         let iden_list = self.state.selected();
         if iden_list.len() > 1 {
             let group_iden = self.state.selected().first().unwrap();
             let item_iden = self.state.selected().get(1).unwrap();
             match self
-                .t_handle
-                .block_on(self.backend.db_repository().delete_casbin_rule_by_v0_v1(
+                .backend
+                .db_repository()
+                .delete_casbin_rule_by_v0_v1(
                     &self.group_type.to_string(),
                     &item_iden.rid,
                     &group_iden.rid,
-                )) {
+                )
+                .await
+            {
                 Ok(res) => {
                     if res {
-                        self.t_handle.block_on((self.log)(
+                        (self.log)(
                             LOG_TYPE.into(),
                             format!(
                                 "Deleted {} '{}' from group '{}' (ptype={}, v0={}, v1={})",
@@ -385,13 +375,14 @@ where
                                 item_iden.rid,
                                 group_iden.rid
                             ),
-                        ));
+                        )
+                        .await;
                         info!(
                             "[{}] Deleted casbin_rule successfully: ptype={}, v0={}, v1={}",
                             self.handler_id, self.group_type, item_iden.rid, group_iden.rid
                         );
                         self.message = Some(Message::Success(vec!["Deleted successfully".into()]));
-                        self.refreash_data();
+                        self.refreash_data().await;
                     } else {
                         warn!(
                             "[{}] Delete casbin_rule not effect, ptype={}, v0={}, v1={}",
@@ -411,7 +402,7 @@ where
         }
     }
 
-    fn insert_group(&mut self) {
+    async fn insert_group(&mut self) {
         let idx = self.selector_table.state.selected().unwrap();
         let obj = self.selector_items.get(idx).unwrap();
         let iden = match self.state.selected().first() {
@@ -461,9 +452,7 @@ where
                 ]));
                 return;
             }
-            let graph = self
-                .t_handle
-                .block_on(self.backend.get_graph(self.group_type));
+            let graph = self.backend.get_graph(self.group_type).await;
             // Find NodeIndex for both UUIDs
             let obj_node = graph
                 .node_indices()
@@ -493,18 +482,16 @@ where
             }
         }
 
-        match self
-            .t_handle
-            .block_on(self.backend.db_repository().create_casbin_rule(&cr))
-        {
+        match self.backend.db_repository().create_casbin_rule(&cr).await {
             Ok(_) => {
-                self.t_handle.block_on((self.log)(
+                (self.log)(
                     LOG_TYPE.into(),
                     format!(
                         "{} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
                         t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1
                     ),
-                ));
+                )
+                .await;
                 info!(
                     "[{}] {} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
                     self.handler_id, t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1
@@ -513,7 +500,7 @@ where
                     "{}: {} added in {}",
                     t_type, obj.name, g_name
                 )]));
-                self.refreash_data();
+                self.refreash_data().await;
             }
             Err(ref err) => {
                 let msg = match err {

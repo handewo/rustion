@@ -1,11 +1,11 @@
-use crossbeam_channel::{Receiver, Sender, unbounded};
+use bytes::Bytes;
 use crossterm::event::NoTtyEvent;
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 #[derive(Clone)]
 pub struct Tty {
     pub tty: NoTtyEvent,
-    pub send_to_tty: Sender<Vec<u8>>,
-    pub recv_from_tty: Receiver<Vec<u8>>,
+    pub send_to_tty: Sender<Bytes>,
 }
 
 impl Tty {
@@ -18,18 +18,14 @@ impl Tty {
             window_size.3,
         );
     }
-    pub fn new() -> Self {
-        let (send_to_tty, recv_from_session) = unbounded();
+    pub fn new() -> (Self, Receiver<Bytes>) {
+        let (send_to_tty, recv_from_session) = channel(16);
         let (tty, recv_from_tty) = NoTtyEvent::new(recv_from_session);
 
-        Self {
-            tty,
-            send_to_tty,
-            recv_from_tty,
-        }
+        (Self { tty, send_to_tty }, recv_from_tty)
     }
 
-    pub fn split(self) -> (NoTtyEvent, Sender<Vec<u8>>, Receiver<Vec<u8>>) {
-        (self.tty, self.send_to_tty, self.recv_from_tty)
+    pub fn split(self) -> (NoTtyEvent, Sender<Bytes>) {
+        (self.tty, self.send_to_tty)
     }
 }

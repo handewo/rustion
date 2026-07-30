@@ -41,7 +41,6 @@ aes-gcm = "0.10.3"
 futures = "0.3"
 russh-util = "0.52"
 argon2 = "0.5.3"
-crossbeam-channel = "0.5"
 moka = { version = "0.12", features = ["future"] }
 humantime = "2"
 humantime-serde = "1"
@@ -55,6 +54,7 @@ inquire = { git = "https://github.com/handewo/inquire.git", features = [
   "no-tty",
   "date",
 ] }
+ratatui-core = { git = "https://github.com/handewo/ratatui.git", package = "ratatui-core", default-features = false }
 ratatui = { git = "https://github.com/handewo/ratatui.git", default-features = false, features = [
   "no-tty",
   "underline-color",

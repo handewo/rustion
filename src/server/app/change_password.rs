@@ -1,6 +1,7 @@
 use super::AppParams;
 use crate::database::models::User;
 use crate::error::Error;
+use bytes::Bytes;
 use crossterm::event::SenderWriter;
 use inquire::{
     Password, PasswordDisplayMode, min_length,
@@ -97,12 +98,12 @@ pub(crate) async fn shell_request<B>(
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    let (handler_id, _, _, backend, tty, log, _) = app_params.split();
+    let (handler_id, _, _, backend, tty, mut recv_from_tty, log, _) = app_params.split();
     let handle_prompt = session.handle();
     let (send_status, mut recv_status) = mpsc::channel(1);
-    let (tty, _, recv_from_tty) = tty.split();
+    let (tty, _) = tty.split();
 
-    let (send_to_session, mut recv_from_prompt) = mpsc::channel::<Vec<u8>>(1);
+    let (send_to_session, mut recv_from_prompt) = mpsc::channel::<Bytes>(4);
     let send_to_session_from_tty = send_to_session.clone();
     let user_for_prompt = user.clone();
     let username = user.username.clone();
@@ -164,7 +165,6 @@ where
                                     break;
                                 }
                             }
-
                         }
                         None => {
                             if recv_status.is_closed() {
@@ -180,7 +180,7 @@ where
         }
     });
 
-    tokio::task::spawn_blocking(move || {
+    tokio::spawn(async move {
         let validators: &[Box<dyn StringValidator>] = &[
             Box::new(min_length!(8)),
             Box::new(HasDigitValidator),
@@ -197,33 +197,34 @@ where
             .with_formatter(&|_| String::new())
             .with_help_message("Please change your password")
             .with_custom_confirmation_error_message("Passwords don't match.")
-            .prompt(tty, SenderWriter::new(send_to_session));
+            .prompt(tty, SenderWriter::new(send_to_session))
+            .await;
 
         let status = match res {
             Ok(password) => Status::Finish(password),
             Err(e) => {
-                debug!("[{}] Change password error: {}", e, handler_id);
+                debug!("[{}] Change password error: {}", handler_id, e);
                 Status::Terminate
             }
         };
 
         match status {
             Status::Terminate => {
-                if let Err(e) = send_status.blocking_send(status) {
-                    warn!("[{}] Fail to send status: {}", e, handler_id);
+                if let Err(e) = send_status.send(status).await {
+                    warn!("[{}] Fail to send status: {}", handler_id, e);
                 };
             }
             Status::Finish(_) => {
-                if let Err(e) = send_status.blocking_send(status) {
-                    warn!("[{}] Fail to send status: {}", e, handler_id);
+                if let Err(e) = send_status.send(status).await {
+                    warn!("[{}] Fail to send status: {}", handler_id, e);
                 };
             }
         }
     });
 
-    tokio::task::spawn_blocking(move || {
-        while let Ok(data) = recv_from_tty.recv() {
-            if send_to_session_from_tty.blocking_send(data).is_err() {
+    tokio::spawn(async move {
+        while let Some(data) = recv_from_tty.recv().await {
+            if send_to_session_from_tty.send(data).await.is_err() {
                 debug!("[{}] Fail to send data to session from tty", handler_id);
                 break;
             }

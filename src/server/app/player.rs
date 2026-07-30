@@ -8,6 +8,7 @@ use crate::server::widgets::{
     common::{DATETIME_LENGTH, MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW},
     render_message_popup,
 };
+use bytes::Bytes;
 use crossterm::event::{
     self, Event, KeyCode, KeyEventKind, KeyModifiers, NoTtyEvent, SenderWriter,
 };
@@ -15,6 +16,7 @@ use ratatui::backend::NottyBackend;
 use ratatui::buffer::Buffer;
 use tui_term::widget::PseudoTerminal;
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect, Size};
 use ratatui::style::{Modifier, Style, palette::tailwind};
 use ratatui::text::{Line, Text};
@@ -22,9 +24,7 @@ use ratatui::widgets::{
     Block, BorderType, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
     Widget,
 };
-use ratatui::{Frame, Terminal};
-use std::io::Write;
-use tokio::runtime::Handle;
+use ratatui_core::terminal::AsyncTerminal;
 use unicode_width::UnicodeWidthStr;
 use vt100::Screen;
 
@@ -78,7 +78,8 @@ pub(crate) async fn shell_request<B>(
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    let (handler_id, user_id, client_ip, backend, tty, log, _) = app_params.split();
+    let (handler_id, user_id, client_ip, backend, tty, mut recv_from_tty, log, _) =
+        app_params.split();
     let uuids = db_common::InternalUuids::get();
     if !check_permission(
         user_id,
@@ -92,15 +93,15 @@ where
         return Err(ServerError::PermissionDeny.into());
     }
     let handle_session = session.handle();
-    let (send_to_session, mut recv_from_shell) = mpsc::channel::<Vec<u8>>(1);
+    let (send_to_session, mut recv_from_shell) = mpsc::channel::<Bytes>(1);
     let (send_status, mut recv_status) = mpsc::channel(1);
     let send_to_session_from_tty = send_to_session.clone();
 
-    let (tty, _, recv_from_tty) = tty.split();
+    let (tty, _) = tty.split();
 
-    tokio::task::spawn_blocking(move || {
-        while let Ok(data) = recv_from_tty.recv() {
-            if send_to_session_from_tty.blocking_send(data).is_err() {
+    tokio::spawn(async move {
+        while let Some(data) = recv_from_tty.recv().await {
+            if send_to_session_from_tty.send(data).await.is_err() {
                 debug!("[{}] Fail to send data to session from tty", handler_id);
                 break;
             }
@@ -127,15 +128,14 @@ where
         }
     });
 
-    let tokio_handle = tokio::runtime::Handle::current();
-    let app = App::new(backend.clone(), tokio_handle, handler_id, user_id).await;
+    let app = App::new(backend.clone(), handler_id, user_id).await;
     let w = SenderWriter::new(send_to_session.clone());
     let tty_backend = NottyBackend::new(tty.clone(), w);
-    tokio::task::spawn_blocking(move || {
-        let mut terminal = Terminal::new(tty_backend)?;
-        terminal.hide_cursor()?;
-        terminal.flush()?;
-        app.run(tty, &mut terminal, send_status)
+    let mut terminal = AsyncTerminal::new(tty_backend)?;
+    terminal.hide_cursor().await?;
+    terminal.flush().await?;
+    tokio::spawn(async move {
+        let _ = app.run(tty, &mut terminal, send_status).await;
     });
 
     (log)(LOG_TYPE.into(), "User login to player".to_string()).await;
@@ -154,7 +154,6 @@ where
     items: Vec<RecordingView>,
     longest_item_lens: Vec<Constraint>,
     backend: Arc<B>,
-    t_handle: Handle,
     handler_id: Uuid,
     user_id: Uuid,
     message: Option<Message>,
@@ -178,7 +177,7 @@ impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    async fn new(backend: Arc<B>, t_handle: Handle, handler_id: Uuid, user_id: Uuid) -> Self {
+    async fn new(backend: Arc<B>, handler_id: Uuid, user_id: Uuid) -> Self {
         let mut message = None;
         let items = match backend
             .db_repository()
@@ -203,7 +202,6 @@ where
             items,
             longest_item_lens,
             backend,
-            t_handle,
             handler_id,
             user_id,
             message,
@@ -249,12 +247,13 @@ where
         ]
     }
 
-    fn refresh_data(&mut self) {
-        let items = match self.t_handle.block_on(
-            self.backend
-                .db_repository()
-                .list_recording_view_for_user(&self.user_id),
-        ) {
+    async fn refresh_data(&mut self) {
+        let items = match self
+            .backend
+            .db_repository()
+            .list_recording_view_for_user(&self.user_id)
+            .await
+        {
             Ok(items) => items,
             Err(e) => {
                 warn!(
@@ -270,10 +269,10 @@ where
         self.table = AdminTable::new(&self.items, &tailwind::BLUE);
     }
 
-    fn do_play<W: Write>(
+    async fn do_play(
         &mut self,
         tty: &NoTtyEvent,
-        terminal: &mut Terminal<NottyBackend<W>>,
+        terminal: &mut AsyncTerminal<NottyBackend>,
     ) -> Result<(), Error> {
         let idx = self.table.state.selected().unwrap();
         let file_path = std::path::PathBuf::from(self.backend.record_path())
@@ -300,14 +299,14 @@ where
         )));
 
         let mut epoch = Instant::now();
-        let mut next_event = self.t_handle.block_on(events.recv()).transpose()?;
+        let mut next_event = events.recv().await.transpose()?;
         let mut processed_buf = Vec::new();
         let pause_on_markers = self.setting.pause_on_markers;
         let mut pause_elapsed_time: Option<u64> = None;
 
         while let Some(asciicast::Event { time, data }) = &next_event {
             if let Some(pet) = pause_elapsed_time {
-                if let Event::Key(key) = event::read(tty)?
+                if let Event::Key(key) = event::read(tty).await?
                     && key.kind == KeyEventKind::Press
                 {
                     let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -336,18 +335,20 @@ where
 
                                 _ => {}
                             }
-                            terminal.draw(|f| {
-                                self.player_ui(f, parser.read().unwrap().screen(), size)
-                            })?;
+                            terminal
+                                .draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))
+                                .await?;
 
-                            next_event = self.t_handle.block_on(events.recv()).transpose()?;
+                            next_event = events.recv().await.transpose()?;
                         }
                         KeyCode::Char(']') => {
                             while let Some(asciicast::Event { time, data }) = next_event {
-                                terminal.draw(|f| {
-                                    self.player_ui(f, parser.read().unwrap().screen(), size)
-                                })?;
-                                next_event = self.t_handle.block_on(events.recv()).transpose()?;
+                                terminal
+                                    .draw(|f| {
+                                        self.player_ui(f, parser.read().unwrap().screen(), size)
+                                    })
+                                    .await?;
+                                next_event = events.recv().await.transpose()?;
 
                                 match data {
                                     EventData::Output(data) => {
@@ -416,7 +417,9 @@ where
                         }
                         _ => continue,
                     }
-                    terminal.draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))?;
+                    terminal
+                        .draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))
+                        .await?;
                 }
             } else {
                 parser.write().unwrap().screen_mut().set_scrollback(0);
@@ -424,10 +427,10 @@ where
                 while let Some(asciicast::Event { time, data }) = &next_event {
                     let delay = time.as_micros() as i64 - epoch.elapsed().as_micros() as i64;
 
-                    if delay > 0 && event::poll(tty, Duration::from_micros(delay as u64))? {
+                    if delay > 0 && event::poll(tty, Duration::from_micros(delay as u64)).await? {
                         // It's guaranteed that the `read()` won't block when the `poll()`
                         // function returns `true`
-                        if let Event::Key(key) = event::read(tty)?
+                        if let Event::Key(key) = event::read(tty).await?
                             && key.kind == KeyEventKind::Press
                         {
                             let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -436,9 +439,11 @@ where
                                 KeyCode::Char('c') if ctrl_pressed => return Ok(()),
                                 KeyCode::Char(' ') => {
                                     self.pause = true;
-                                    terminal.draw(|f| {
-                                        self.player_ui(f, parser.read().unwrap().screen(), size)
-                                    })?;
+                                    terminal
+                                        .draw(|f| {
+                                            self.player_ui(f, parser.read().unwrap().screen(), size)
+                                        })
+                                        .await?;
                                     pause_elapsed_time = Some(epoch.elapsed().as_micros() as u64);
                                     break;
                                 }
@@ -503,23 +508,27 @@ where
 
                         EventData::Marker(_) if pause_on_markers => {
                             pause_elapsed_time = Some(time.as_micros() as u64);
-                            next_event = self.t_handle.block_on(events.recv()).transpose()?;
+                            next_event = events.recv().await.transpose()?;
                             break;
                         }
 
                         _ => (),
                     }
 
-                    terminal.draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))?;
-                    next_event = self.t_handle.block_on(events.recv()).transpose()?;
+                    terminal
+                        .draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))
+                        .await?;
+                    next_event = events.recv().await.transpose()?;
                 }
             }
         }
         self.is_finished = true;
         if !self.setting.auto_exit {
             loop {
-                terminal.draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))?;
-                if let Event::Key(key) = event::read(tty)?
+                terminal
+                    .draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))
+                    .await?;
+                if let Event::Key(key) = event::read(tty).await?
                     && key.kind == KeyEventKind::Press
                 {
                     let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -576,22 +585,22 @@ where
         Ok(())
     }
 
-    fn run<W: Write>(
+    async fn run(
         mut self,
         tty: NoTtyEvent,
-        terminal: &mut Terminal<NottyBackend<W>>,
+        terminal: &mut AsyncTerminal<NottyBackend>,
         send_status: mpsc::Sender<Status>,
     ) -> Result<(), Error> {
         loop {
             if self.is_playing {
-                if let Err(e) = self.do_play(&tty, terminal) {
+                if let Err(e) = self.do_play(&tty, terminal).await {
                     warn!("[{}] Play record cast error: {}", self.handler_id, e);
                     self.message = Some(Message::Error(vec!["Internal error".into()]));
                 };
                 self.is_playing = false;
             }
-            terminal.draw(|frame| self.render(frame))?;
-            let event = event::read(&tty)?;
+            terminal.draw(|frame| self.render(frame)).await?;
+            let event = event::read(&tty).await?;
 
             if let Some(key) = event.as_key_press_event() {
                 if self.message.is_some() {
@@ -636,7 +645,7 @@ where
                     KeyCode::Char('+') => self.table.zoom_in(),
                     KeyCode::Char('-') => self.table.zoom_out(),
                     KeyCode::Char('r') => {
-                        self.refresh_data();
+                        self.refresh_data().await;
                     }
                     KeyCode::Char('s') => {
                         self.setting.editing_mode = true;
@@ -653,8 +662,8 @@ where
                 }
             }
         }
-        let _ = terminal.show_cursor();
-        let _ = send_status.blocking_send(Status::Terminate(0));
+        let _ = terminal.show_cursor().await;
+        let _ = send_status.send(Status::Terminate(0)).await;
         Ok(())
     }
 

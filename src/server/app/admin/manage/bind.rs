@@ -1,10 +1,10 @@
-use crate::database::models::{SecretInfo, TargetInfo};
 use crate::database::Uuid;
+use crate::database::models::{SecretInfo, TargetInfo};
 use crate::error::Error;
-use crate::server::app::admin::error::AdminError;
-use crate::server::widgets::{centered_area, render_message_popup, Message};
-use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData};
 use crate::server::HandlerLog;
+use crate::server::app::admin::error::AdminError;
+use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData};
+use crate::server::widgets::{Message, centered_area, render_message_popup};
 use ::log::info;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
@@ -15,7 +15,6 @@ use ratatui::{
     widgets::{Block, BorderType, Widget},
 };
 use std::sync::Arc;
-use tokio::runtime::Handle;
 use unicode_width::UnicodeWidthStr;
 
 use super::LOG_TYPE;
@@ -53,7 +52,6 @@ where
     focused_table: FocusedTable,
     editor_colors: EditorColors,
     backend: Arc<B>,
-    t_handle: Handle,
     handler_id: Uuid,
     admin_id: Uuid,
     save_error: Option<Error>,
@@ -69,7 +67,6 @@ where
         targets: Vec<TargetInfo>,
         secrets: Vec<SecretInfo>,
         backend: Arc<B>,
-        t_handle: Handle,
         handler_id: Uuid,
         admin_id: Uuid,
         log: HandlerLog,
@@ -84,7 +81,6 @@ where
             focused_table: FocusedTable::Left,
             editor_colors: EditorColors::new(&tailwind::BLUE),
             backend,
-            t_handle,
             handler_id,
             admin_id,
             save_error: None,
@@ -93,7 +89,7 @@ where
         }
     }
 
-    pub fn handle_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) -> bool {
+    pub async fn handle_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) -> bool {
         if self.save_error.is_some() {
             if key == KeyCode::Enter {
                 self.save_error = None;
@@ -125,25 +121,25 @@ where
             KeyCode::PageDown => {
                 table.next_page(items_len);
                 if self.focused_table == FocusedTable::Left {
-                    self.refresh_secrets();
+                    self.refresh_secrets().await;
                 }
             }
             KeyCode::PageUp => {
                 table.previous_page();
                 if self.focused_table == FocusedTable::Left {
-                    self.refresh_secrets();
+                    self.refresh_secrets().await;
                 }
             }
             KeyCode::Char('f') if ctrl_pressed => {
                 table.next_page(items_len);
                 if self.focused_table == FocusedTable::Left {
-                    self.refresh_secrets();
+                    self.refresh_secrets().await;
                 }
             }
             KeyCode::Char('b') if ctrl_pressed => {
                 table.previous_page();
                 if self.focused_table == FocusedTable::Left {
-                    self.refresh_secrets();
+                    self.refresh_secrets().await;
                 }
             }
             KeyCode::Right | KeyCode::Char('l') => {
@@ -155,20 +151,20 @@ where
             KeyCode::Down | KeyCode::Char('j') => {
                 table.next_row(items_len);
                 if self.focused_table == FocusedTable::Left {
-                    self.refresh_secrets();
+                    self.refresh_secrets().await;
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 table.previous_row(items_len);
                 if self.focused_table == FocusedTable::Left {
-                    self.refresh_secrets();
+                    self.refresh_secrets().await;
                 }
             }
             KeyCode::Char(' ') | KeyCode::Enter => {
-                if let Err(e) = self.save_bindings() {
+                if let Err(e) = self.save_bindings().await {
                     self.save_error = Some(e);
                 }
-                self.refresh_secrets();
+                self.refresh_secrets().await;
             }
             _ => {}
         }
@@ -176,7 +172,7 @@ where
         false
     }
 
-    fn save_bindings(&mut self) -> Result<(), Error> {
+    async fn save_bindings(&mut self) -> Result<(), Error> {
         let t_idx = self.target_table.state.selected().unwrap();
         let s_idx = self.secret_table.state.selected().unwrap();
         let t = self.targets.get(t_idx).unwrap();
@@ -204,33 +200,33 @@ where
         } else {
             "bound to"
         };
-        self.t_handle
-            .block_on(self.backend.db_repository().upsert_target_secret(
-                &t.id,
-                &s.id,
-                !s.is_bound,
-                &self.admin_id,
-            ))?;
+        self.backend
+            .db_repository()
+            .upsert_target_secret(&t.id, &s.id, !s.is_bound, &self.admin_id)
+            .await?;
         info!(
             "[{}] Secret '{}({})' {} target '{}({})' by admin_id={}",
             self.handler_id, s.name, s.id, action, t.name, t.id, self.admin_id
         );
-        self.t_handle.block_on((self.log)(
+        (self.log)(
             LOG_TYPE.into(),
             format!(
                 "Secret '{}({})' {} target '{}({})'",
                 s.name, s.id, action, t.name, t.id
             ),
-        ));
+        )
+        .await;
         Ok(())
     }
 
-    fn refresh_secrets(&mut self) {
+    async fn refresh_secrets(&mut self) {
         let idx = self.target_table.state.selected().unwrap();
         if let Some(t) = self.targets.get(idx).as_ref() {
             let result = self
-                .t_handle
-                .block_on(self.backend.db_repository().list_secrets_for_target(&t.id));
+                .backend
+                .db_repository()
+                .list_secrets_for_target(&t.id)
+                .await;
             match result {
                 Ok(res) => self.secrets = res,
                 Err(e) => self.save_error = Some(e),
