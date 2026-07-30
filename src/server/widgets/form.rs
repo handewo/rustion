@@ -218,9 +218,11 @@ impl FormEditor {
                 KeyCode::Esc | KeyCode::Enter | KeyCode::Char(_) => return FormEvent::None,
                 _ => {}
             }
-            // For Radio fields, also consume Up/Down in editing mode
-            if matches!(&self.fields[self.focused].widget, FormFieldWidget::Radio(_))
-                && matches!(key, KeyCode::Up | KeyCode::Down)
+            // For Radio or MultiLine fields, also consume Up/Down in editing mode
+            if matches!(
+                &self.fields[self.focused].widget,
+                FormFieldWidget::Radio(_) | FormFieldWidget::MultiLine(_)
+            ) && matches!(key, KeyCode::Up | KeyCode::Down)
             {
                 return FormEvent::None;
             }
@@ -301,6 +303,9 @@ impl FormEditor {
             }
             FormFieldWidget::Text(t) => {
                 self.editing_mode = true;
+                if t.textarea.mask_char().is_some() {
+                    t.clear_line()
+                }
                 text_editing_style(self.colors.input_cursor, &mut t.textarea);
                 text_input_position(key, &mut t.textarea);
             }

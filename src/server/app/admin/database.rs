@@ -6,6 +6,7 @@ use crate::database::models::*;
 use crate::error::Error;
 use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData as TD};
 use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent, SenderWriter};
+use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::Frame;
 use ratatui::backend::NottyBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -33,11 +34,11 @@ pub(super) async fn query_table<B>(
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    let tty_backend = NottyBackend::new(tty.clone(), writer);
+    let tty_backend = NottyBackend::new(tty.clone(), writer.clone());
     let mut terminal = AsyncTerminal::new(tty_backend)?;
-    terminal.hide_cursor().await?;
-    terminal.flush().await?;
+    crossterm::async_execute!(&writer, EnterAlternateScreen).await?;
     App::new(backend).await.run(tty, &mut terminal).await?;
+    crossterm::async_execute!(&writer, LeaveAlternateScreen).await?;
     Ok(())
 }
 
