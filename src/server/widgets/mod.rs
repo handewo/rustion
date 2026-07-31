@@ -10,7 +10,7 @@ use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Flex, Layout, Rect},
-    style::{palette::tailwind, Color, Modifier, Style},
+    style::{Color, Modifier, Style, palette::tailwind},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
@@ -190,6 +190,10 @@ pub const MULTILINES_EDIT_HELP: [&str; 2] = [
     "(Esc) cancel | (Up) next line | (Down) previous line",
 ];
 pub const MULTILINES_INPUT_HELP: [&str; 2] = ["(Enter) newline", "(Esc) quit edit"];
+pub const READONLY_HELP: [&str; 2] = [
+    "(Read-only)",
+    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
+];
 
 pub fn text_editing_style(color: Color, textarea: &mut TextArea) {
     textarea.set_cursor_line_style(Style::default().add_modifier(Modifier::UNDERLINED));
@@ -662,4 +666,3 @@ pub fn render_message_popup(area: Rect, buf: &mut Buffer, message: &Message) {
 
     render_message_dialog(popup_area, buf, message);
 }
-

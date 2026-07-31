@@ -24,9 +24,13 @@ pub struct CasbinNameEditor {
 }
 
 impl CasbinNameEditor {
-    pub fn new(casbin_name: CasbinName) -> Self {
+    pub fn new(casbin_name: CasbinName, add_new: bool) -> Self {
+        let mut type_radio = FormField::radio("*Type*", &PTYPE_OPTIONS, &casbin_name.ptype, 5);
+        if !add_new {
+            type_radio = type_radio.readonly()
+        }
         let form = FormEditor::new(vec![
-            FormField::radio("*Type*", &PTYPE_OPTIONS, &casbin_name.ptype, 5),
+            type_radio,
             FormField::text("*Name*", Some(casbin_name.name.clone())),
             FormField::checkbox("Is Active", casbin_name.is_active),
         ]);

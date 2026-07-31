@@ -252,6 +252,7 @@ where
             SelectedTab::CasbinNames => {
                 self.editor = Editor::CasbinName(Box::new(casbin_name::CasbinNameEditor::new(
                     CasbinName::new(String::new(), String::new(), true, self.admin_id),
+                    true,
                 )))
             }
             SelectedTab::Bind => unreachable!(),
@@ -337,8 +338,10 @@ where
                         return false;
                     }
                 };
-                self.editor =
-                    Editor::CasbinName(Box::new(casbin_name::CasbinNameEditor::new(casbin_name)));
+                self.editor = Editor::CasbinName(Box::new(casbin_name::CasbinNameEditor::new(
+                    casbin_name,
+                    false,
+                )));
             }
             SelectedTab::Bind => unreachable!(),
             SelectedTab::RoleHierarchy => unreachable!(),

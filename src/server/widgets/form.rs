@@ -22,6 +22,9 @@ pub struct FormField {
     pub label: &'static str,
     pub height: u16,
     pub widget: FormFieldWidget,
+    /// Whether the user can edit this field. Read-only fields can still be
+    /// focused and scrolled to, but reject edit/insert/clear/toggle actions.
+    pub editable: bool,
 }
 
 impl FormField {
@@ -30,6 +33,7 @@ impl FormField {
             label,
             height: 3,
             widget: FormFieldWidget::Text(SingleLineText::new(initial)),
+            editable: true,
         }
     }
 
@@ -40,6 +44,7 @@ impl FormField {
             label,
             height: 3,
             widget: FormFieldWidget::Text(text),
+            editable: true,
         }
     }
 
@@ -48,6 +53,7 @@ impl FormField {
             label,
             height,
             widget: FormFieldWidget::MultiLine(MultiLineText::new(lines)),
+            editable: true,
         }
     }
 
@@ -56,6 +62,7 @@ impl FormField {
             label,
             height: 3,
             widget: FormFieldWidget::Checkbox(checked),
+            editable: true,
         }
     }
 
@@ -69,7 +76,24 @@ impl FormField {
             label,
             height,
             widget: FormFieldWidget::Radio(RadioButtons::new(options, initial)),
+            editable: true,
         }
+    }
+
+    /// Builder: mark this field as read-only.
+    ///
+    /// ```ignore
+    /// FormField::text("*ID*", Some(id)).readonly()
+    /// ```
+    pub fn readonly(mut self) -> Self {
+        self.editable = false;
+        self
+    }
+
+    /// Builder: set whether this field is editable.
+    pub fn editable(mut self, editable: bool) -> Self {
+        self.editable = editable;
+        self
     }
 }
 
@@ -103,11 +127,14 @@ pub struct FormEditor {
 
 impl FormEditor {
     pub fn new(fields: Vec<FormField>) -> Self {
-        let help_text = match fields.first().map(|f| &f.widget) {
-            Some(FormFieldWidget::Text(_)) => COMMON_HELP,
-            Some(FormFieldWidget::MultiLine(_)) => MULTILINES_HELP,
-            Some(FormFieldWidget::Checkbox(_)) => CHECKBOX_HELP,
-            Some(FormFieldWidget::Radio(_)) => RADIO_HELP,
+        let help_text = match fields.first() {
+            Some(f) if !f.editable => READONLY_HELP,
+            Some(f) => match &f.widget {
+                FormFieldWidget::Text(_) => COMMON_HELP,
+                FormFieldWidget::MultiLine(_) => MULTILINES_HELP,
+                FormFieldWidget::Checkbox(_) => CHECKBOX_HELP,
+                FormFieldWidget::Radio(_) => RADIO_HELP,
+            },
             None => COMMON_HELP,
         };
         Self {
@@ -168,7 +195,7 @@ impl FormEditor {
     }
 
     pub fn handle_paste_event(&mut self, paste: &str) -> bool {
-        if !self.editing_mode {
+        if !self.editing_mode || !self.fields[self.focused].editable {
             return false;
         }
         match &mut self.fields[self.focused].widget {
@@ -251,13 +278,15 @@ impl FormEditor {
                     self.scroll_offset.saturating_sub(1)
                 };
             }
-            KeyCode::Enter | KeyCode::Char('i') | KeyCode::Char('a') => {
+            KeyCode::Enter | KeyCode::Char('i') | KeyCode::Char('a')
+                if self.fields[self.focused].editable =>
+            {
                 self.enter_edit_mode(key);
             }
-            KeyCode::Char('d') if !self.editing_mode => {
+            KeyCode::Char('d') if !self.editing_mode && self.fields[self.focused].editable => {
                 self.clear_focused_field();
             }
-            KeyCode::Char(' ') => {
+            KeyCode::Char(' ') if self.fields[self.focused].editable => {
                 if let FormFieldWidget::Checkbox(ref mut v) = self.fields[self.focused].widget {
                     *v = !*v;
                 }
@@ -347,12 +376,31 @@ impl FormEditor {
     }
 
     fn update_help_text(&mut self) {
-        self.help_text = match &self.fields[self.focused].widget {
-            FormFieldWidget::Text(_) => COMMON_HELP,
-            FormFieldWidget::MultiLine(_) => MULTILINES_HELP,
-            FormFieldWidget::Checkbox(_) => CHECKBOX_HELP,
-            FormFieldWidget::Radio(_) => RADIO_HELP,
+        let field = &self.fields[self.focused];
+        self.help_text = if !field.editable {
+            READONLY_HELP
+        } else {
+            match &field.widget {
+                FormFieldWidget::Text(_) => COMMON_HELP,
+                FormFieldWidget::MultiLine(_) => MULTILINES_HELP,
+                FormFieldWidget::Checkbox(_) => CHECKBOX_HELP,
+                FormFieldWidget::Radio(_) => RADIO_HELP,
+            }
         };
+    }
+
+    /// Set whether the field at `index` is editable at runtime.
+    pub fn set_field_editable(&mut self, index: usize, editable: bool) {
+        self.fields[index].editable = editable;
+        if index == self.focused {
+            self.editing_mode = false;
+            self.update_help_text();
+        }
+    }
+
+    /// Whether the field at `index` is currently editable.
+    pub fn is_field_editable(&self, index: usize) -> bool {
+        self.fields[index].editable
     }
 
     fn window_height(&self) -> u16 {
@@ -393,14 +441,21 @@ impl FormEditor {
         // Render each field
         for (i, field) in self.fields.iter().enumerate() {
             let is_focused = i == self.focused;
+            // Read-only fields never show the "editing" border and get a lock marker.
+            let editing = self.editing_mode && field.editable;
+            let label = if field.editable {
+                field.label.to_string()
+            } else {
+                format!("{} (Read-only)", field.label)
+            };
             match &field.widget {
                 FormFieldWidget::Text(t) => {
                     render_textarea(
                         chunks[i],
                         &mut editor_buf,
-                        field.label,
+                        &label,
                         t,
-                        self.editing_mode,
+                        editing,
                         &self.colors,
                         is_focused,
                     );
@@ -409,9 +464,9 @@ impl FormEditor {
                     render_textarea(
                         chunks[i],
                         &mut editor_buf,
-                        field.label,
+                        &label,
                         t,
-                        self.editing_mode,
+                        editing,
                         &self.colors,
                         is_focused,
                     );
@@ -420,7 +475,7 @@ impl FormEditor {
                     render_checkbox(
                         chunks[i],
                         &mut editor_buf,
-                        field.label,
+                        &label,
                         *checked,
                         &self.colors,
                         is_focused,
@@ -430,9 +485,9 @@ impl FormEditor {
                     render_radio_buttons(
                         chunks[i],
                         &mut editor_buf,
-                        field.label,
+                        &label,
                         r,
-                        self.editing_mode,
+                        editing,
                         &self.colors,
                         is_focused,
                     );
