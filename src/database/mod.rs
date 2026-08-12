@@ -156,25 +156,25 @@ pub trait DatabaseRepository: Send + Sync {
 
     /// User operations
     async fn create_user(&self, user: User) -> Result<User, Error>;
-    async fn get_user_by_id(&self, id: &Uuid) -> Result<Option<User>, Error>;
+    async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>, Error>;
     async fn get_user_by_username(
         &self,
         username: &str,
         active_only: bool,
     ) -> Result<Option<User>, Error>;
     async fn update_user(&self, user: &User) -> Result<User, Error>;
-    async fn delete_user(&self, id: &Uuid) -> Result<bool, Error>;
+    async fn delete_user(&self, id: Uuid) -> Result<bool, Error>;
     async fn list_users(&self, active_only: bool) -> Result<Vec<User>, Error>;
     async fn list_users_with_role(&self, active_only: bool) -> Result<Vec<UserWithRole>, Error>;
 
     /// Target operations
     async fn create_target(&self, target: &Target) -> Result<Target, Error>;
-    async fn get_target_by_id(&self, id: &Uuid, active_only: bool)
+    async fn get_target_by_id(&self, id: Uuid, active_only: bool)
     -> Result<Option<Target>, Error>;
     async fn get_targets_by_ids(&self, ids: &[&Uuid]) -> Result<Vec<Target>, Error>;
     async fn get_target_by_target_secret_id(
         &self,
-        id: &Uuid,
+        id: Uuid,
         active_only: bool,
     ) -> Result<Option<Target>, Error>;
     async fn get_targets_by_target_secret_ids(
@@ -185,7 +185,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, Error>;
     async fn get_target_by_hostname(&self, hostname: &str) -> Result<Option<Target>, Error>;
     async fn update_target(&self, target: &Target) -> Result<Target, Error>;
-    async fn delete_target(&self, id: &Uuid) -> Result<bool, Error>;
+    async fn delete_target(&self, id: Uuid) -> Result<bool, Error>;
     async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, Error>;
     async fn list_targets_info(&self) -> Result<Vec<TargetInfo>, Error>;
 
@@ -193,21 +193,21 @@ pub trait DatabaseRepository: Send + Sync {
     async fn create_secret(&self, secret: &Secret) -> Result<Secret, Error>;
     async fn update_secret(&self, target: &Secret) -> Result<Secret, Error>;
     async fn list_secrets(&self, active_only: bool) -> Result<Vec<Secret>, Error>;
-    async fn get_secret_by_id(&self, id: &Uuid) -> Result<Option<Secret>, Error>;
+    async fn get_secret_by_id(&self, id: Uuid) -> Result<Option<Secret>, Error>;
     async fn get_secret_by_target_secret_id(
         &self,
-        id: &Uuid,
+        id: Uuid,
         active_only: bool,
     ) -> Result<Option<Secret>, Error>;
     async fn get_secrets_by_ids(&self, ids: &[&Uuid]) -> Result<Vec<Secret>, Error>;
-    async fn delete_secret(&self, id: &Uuid) -> Result<bool, Error>;
-    async fn list_secrets_for_target(&self, target_id: &Uuid) -> Result<Vec<SecretInfo>, Error>;
+    async fn delete_secret(&self, id: Uuid) -> Result<bool, Error>;
+    async fn list_secrets_for_target(&self, target_id: Uuid) -> Result<Vec<SecretInfo>, Error>;
 
     /// TargetSecret operations
     async fn list_target_secrets(&self, active_only: bool) -> Result<Vec<TargetSecret>, Error>;
     async fn list_target_secrets_by_target_id(
         &self,
-        target_id: &Uuid,
+        target_id: Uuid,
         active_only: bool,
     ) -> Result<Vec<TargetSecret>, Error>;
     async fn create_target_secret(
@@ -215,13 +215,13 @@ pub trait DatabaseRepository: Send + Sync {
         target_secret: &TargetSecret,
     ) -> Result<TargetSecret, Error>;
     async fn update_target_secret(&self, secret: &TargetSecret) -> Result<TargetSecret, Error>;
-    async fn delete_target_secret(&self, id: &Uuid) -> Result<bool, Error>;
+    async fn delete_target_secret(&self, id: Uuid) -> Result<bool, Error>;
     async fn upsert_target_secret(
         &self,
-        target_id: &Uuid,
-        secret_id: &Uuid,
+        target_id: Uuid,
+        secret_id: Uuid,
         is_active: bool,
-        updated_by: &Uuid,
+        updated_by: Uuid,
     ) -> Result<(), Error>;
 
     /// CasbinRule operations
@@ -231,24 +231,24 @@ pub trait DatabaseRepository: Send + Sync {
         &self,
         ptype: &str,
     ) -> Result<Vec<CasbinRuleGroup>, Error>;
-    async fn list_roles_by_user_id(&self, user_id: &Uuid) -> Result<Vec<Role>, Error>;
+    async fn list_roles_by_user_id(&self, user_id: Uuid) -> Result<Vec<Role>, Error>;
     async fn create_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error>;
     async fn update_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error>;
-    async fn delete_casbin_rule(&self, id: &Uuid) -> Result<bool, Error>;
+    async fn delete_casbin_rule(&self, id: Uuid) -> Result<bool, Error>;
     /// It's unsafe if ptype is not in [g1, g2, g3]
     async fn delete_casbin_rule_by_v0_v1(
         &self,
         ptype: &str,
-        v0: &Uuid,
-        v1: &Uuid,
+        v0: Uuid,
+        v1: Uuid,
     ) -> Result<bool, Error>;
 
     /// CasbinName operations - maps UUIDs to human-readable names
     async fn create_casbin_name(&self, name: &CasbinName) -> Result<CasbinName, Error>;
     async fn update_casbin_name(&self, rule: &CasbinName) -> Result<CasbinName, Error>;
-    async fn delete_casbin_name(&self, id: &Uuid) -> Result<bool, Error>;
+    async fn delete_casbin_name(&self, id: Uuid) -> Result<bool, Error>;
     async fn get_casbin_name_by_name(&self, name: &str) -> Result<Option<CasbinName>, Error>;
-    async fn get_casbin_name_by_id(&self, id: &Uuid) -> Result<Option<CasbinName>, Error>;
+    async fn get_casbin_name_by_id(&self, id: Uuid) -> Result<Option<CasbinName>, Error>;
     async fn list_casbin_names_by_ptype(
         &self,
         ptype: &str,
@@ -281,7 +281,7 @@ pub trait DatabaseRepository: Send + Sync {
 
     async fn get_session_recording_by_id(
         &self,
-        id: &Uuid,
+        id: Uuid,
     ) -> Result<Option<SessionRecording>, Error>;
 
     async fn list_session_recordings(
@@ -291,22 +291,22 @@ pub trait DatabaseRepository: Send + Sync {
 
     async fn list_recording_view_for_user(
         &self,
-        user_id: &Uuid,
+        user_id: Uuid,
     ) -> Result<Vec<RecordingView>, Error>;
 
     async fn list_session_recordings_for_user(
         &self,
-        user_id: &Uuid,
+        user_id: Uuid,
     ) -> Result<Vec<SessionRecording>, Error>;
 
     async fn list_session_recordings_for_target(
         &self,
-        target_id: &Uuid,
+        target_id: Uuid,
     ) -> Result<Vec<SessionRecording>, Error>;
 
     /// casbin operations
-    async fn get_policies_for_user(&self, user_id: &Uuid) -> Result<Vec<CasbinRule>, Error>;
-    async fn get_actions_for_policy(&self, policy_act: &Uuid) -> Result<Vec<Uuid>, Error>;
+    async fn get_policies_for_user(&self, user_id: Uuid) -> Result<Vec<CasbinRule>, Error>;
+    async fn get_actions_for_policy(&self, policy_act: Uuid) -> Result<Vec<Uuid>, Error>;
 
     /// Batch operations
     async fn create_users_batch(&self, users: &[User]) -> Result<Vec<User>, Error>;
@@ -326,13 +326,13 @@ pub trait DatabaseRepository: Send + Sync {
     async fn search_targets(&self, query: &str) -> Result<Vec<Target>, Error>;
     async fn list_targets_for_user(
         &self,
-        user_id: &Uuid,
+        user_id: Uuid,
         active_only: bool,
     ) -> Result<Vec<TargetSecretName>, Error>;
     async fn list_targets_by_ids(
         &self,
         ids: &[&Uuid],
-        pid: &Uuid,
+        pid: Uuid,
         active_only: bool,
     ) -> Result<Vec<TargetSecretName>, Error>;
 
@@ -340,7 +340,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn list_target_group(&self) -> Result<Vec<ObjectGroup>, Error>;
     async fn list_action_group(&self) -> Result<Vec<ObjectGroup>, Error>;
 
-    async fn check_object_active(&self, id: &Uuid) -> Result<bool, Error>;
+    async fn check_object_active(&self, id: Uuid) -> Result<bool, Error>;
 
     /// Statistics
     async fn count_users(&self) -> Result<i64, Error>;

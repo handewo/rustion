@@ -84,7 +84,8 @@ where
         };
 
         let target = if let Some(t) = backend
-            .get_target_by_id(&target_secret_name.target_id, true)
+            .db_repository()
+            .get_target_by_id(target_secret_name.target_id, true)
             .await?
         {
             t
@@ -511,7 +512,7 @@ where
             if let Some(r) = record
                 && let Ok(Some(rec)) = backend_for_task
                     .db_repository()
-                    .get_session_recording_by_id(&r.lock().await.recording_id)
+                    .get_session_recording_by_id(r.lock().await.recording_id)
                     .await
             {
                 let mut updated = rec;

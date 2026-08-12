@@ -54,7 +54,7 @@ where
         let mut save_error = None;
         let items = match backend
             .db_repository()
-            .list_roles_by_user_id(&selected_user_id)
+            .list_roles_by_user_id(selected_user_id)
             .await
         {
             Ok(items) => items,
@@ -132,7 +132,6 @@ where
         if t.is_bound {
             let id = t
                 .rule_id
-                .as_ref()
                 .ok_or(Error::Server(ServerError::MissingRuleId))?;
             self.backend.db_repository().delete_casbin_rule(id).await?;
             info!(

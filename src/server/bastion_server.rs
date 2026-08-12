@@ -336,7 +336,7 @@ impl BastionServer {
                         .map_err(|_| Error::Server(ServerError::InvalidProxyUrl))?;
                     let target = if let Some(t) = self
                         .db_repository()
-                        .get_target_by_target_secret_id(&id, true)
+                        .get_target_by_target_secret_id(id, true)
                         .await?
                     {
                         t
@@ -432,21 +432,6 @@ impl super::HandlerBackend for BastionServer {
             .await
     }
 
-    // async fn get_target_by_name(&self, name: &str) -> Result<Option<models::Target>, Error> {
-    //     self.database.repository().get_target_by_name(name).await
-    // }
-
-    async fn get_target_by_id(
-        &self,
-        id: &Uuid,
-        active_only: bool,
-    ) -> Result<Option<models::Target>, Error> {
-        self.database
-            .repository()
-            .get_target_by_id(id, active_only)
-            .await
-    }
-
     async fn list_targets_for_user(
         &self,
         user_id: &Uuid,
@@ -471,14 +456,14 @@ impl super::HandlerBackend for BastionServer {
             let ts = self
                 .database
                 .repository()
-                .list_targets_by_ids(&role_ids_ref, &pol.id, active_only)
+                .list_targets_by_ids(&role_ids_ref, pol.id, active_only)
                 .await?;
             if ts.is_empty() {
                 // Try pol.v1 directly as a target_secret ID
                 let t = self
                     .database
                     .repository()
-                    .list_targets_by_ids(&[&pol.v1], &pol.id, active_only)
+                    .list_targets_by_ids(&[&pol.v1], pol.id, active_only)
                     .await?;
                 if !t.is_empty() {
                     res.extend_from_slice(&t);
@@ -507,7 +492,7 @@ impl super::HandlerBackend for BastionServer {
         let mut secret = match self
             .database
             .repository()
-            .get_secret_by_target_secret_id(&target_secret_id, true)
+            .get_secret_by_target_secret_id(target_secret_id, true)
             .await?
         {
             Some(s) => {
@@ -712,7 +697,7 @@ impl super::HandlerBackend for BastionServer {
                     .await
                     .match_role(pol.v1, obj, casbin::GroupType::Object)
             {
-                if !self.database.repository().check_object_active(&obj).await? {
+                if !self.database.repository().check_object_active(obj).await? {
                     trace!(
                         "Reject due to object not active, sub: {}, act: {}, policy: {:?}",
                         sub, obj, pol

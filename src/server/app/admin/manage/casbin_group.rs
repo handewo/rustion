@@ -357,8 +357,8 @@ where
                 .db_repository()
                 .delete_casbin_rule_by_v0_v1(
                     &self.group_type.to_string(),
-                    &item_iden.rid,
-                    &group_iden.rid,
+                    item_iden.rid,
+                    group_iden.rid,
                 )
                 .await
             {

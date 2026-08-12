@@ -175,12 +175,12 @@ pub(super) async fn list_users_with_role(
 
 pub(super) async fn get_target_by_target_secret_id(
     db: &DatabaseConnection,
-    id: &Uuid,
+    id: Uuid,
     active_only: bool,
 ) -> Result<Option<Target>, Error> {
     let mut q = target::Entity::find()
         .join(JoinType::InnerJoin, target::Relation::TargetSecret.def())
-        .filter(target_secret::Column::Id.eq(*id));
+        .filter(target_secret::Column::Id.eq(id));
 
     if active_only {
         q = q
@@ -217,12 +217,12 @@ pub(super) async fn get_targets_by_target_secret_ids(
 
 pub(super) async fn get_secret_by_target_secret_id(
     db: &DatabaseConnection,
-    id: &Uuid,
+    id: Uuid,
     active_only: bool,
 ) -> Result<Option<Secret>, Error> {
     let mut q = secret::Entity::find()
         .join(JoinType::InnerJoin, secret::Relation::TargetSecret.def())
-        .filter(target_secret::Column::Id.eq(*id));
+        .filter(target_secret::Column::Id.eq(id));
 
     if active_only {
         q = q
@@ -235,12 +235,12 @@ pub(super) async fn get_secret_by_target_secret_id(
 
 pub(super) async fn list_target_secrets_by_target_id(
     db: &DatabaseConnection,
-    target_id: &Uuid,
+    target_id: Uuid,
     active_only: bool,
 ) -> Result<Vec<TargetSecret>, Error> {
     let mut q = target_secret::Entity::find()
         .join(JoinType::InnerJoin, target_secret::Relation::Target.def())
-        .filter(target_secret::Column::TargetId.eq(*target_id));
+        .filter(target_secret::Column::TargetId.eq(target_id));
 
     if active_only {
         q = q
@@ -261,7 +261,7 @@ pub(super) async fn list_target_secrets_by_target_id(
 /// over a `LEFT JOIN`: false when unbound, otherwise the binding's active flag.
 pub(super) async fn list_secrets_for_target(
     db: &DatabaseConnection,
-    target_id: &Uuid,
+    target_id: Uuid,
 ) -> Result<Vec<SecretInfo>, Error> {
     let all = secret::Entity::find()
         .order_by_asc(secret::Column::Name)
@@ -269,7 +269,7 @@ pub(super) async fn list_secrets_for_target(
         .await?;
 
     let bound: HashMap<Uuid, bool> = target_secret::Entity::find()
-        .filter(target_secret::Column::TargetId.eq(*target_id))
+        .filter(target_secret::Column::TargetId.eq(target_id))
         .all(db)
         .await?
         .into_iter()
@@ -289,11 +289,11 @@ pub(super) async fn list_secrets_for_target(
 
 /// True when `id` is an active `target_secret` (with active target and secret)
 /// or an active internal object.
-pub(super) async fn check_object_active(db: &DatabaseConnection, id: &Uuid) -> Result<bool, Error> {
+pub(super) async fn check_object_active(db: &DatabaseConnection, id: Uuid) -> Result<bool, Error> {
     let ts_active = target_secret::Entity::find()
         .join(JoinType::InnerJoin, target_secret::Relation::Target.def())
         .join(JoinType::InnerJoin, target_secret::Relation::Secret.def())
-        .filter(target_secret::Column::Id.eq(*id))
+        .filter(target_secret::Column::Id.eq(id))
         .filter(target_secret::Column::IsActive.eq(true))
         .filter(target::Column::IsActive.eq(true))
         .filter(secret::Column::IsActive.eq(true))
@@ -306,7 +306,7 @@ pub(super) async fn check_object_active(db: &DatabaseConnection, id: &Uuid) -> R
     }
 
     Ok(casbin_names::Entity::find()
-        .filter(casbin_names::Column::Id.eq(*id))
+        .filter(casbin_names::Column::Id.eq(id))
         .filter(casbin_names::Column::Ptype.eq(INTERNAL_OBJECT_TYPE))
         .filter(casbin_names::Column::IsActive.eq(true))
         .one(db)
@@ -322,7 +322,7 @@ pub(super) async fn check_object_active(db: &DatabaseConnection, id: &Uuid) -> R
 /// this user; `rule_id` is `None` and `is_bound` false when there's no binding.
 pub(super) async fn list_roles_by_user_id(
     db: &DatabaseConnection,
-    user_id: &Uuid,
+    user_id: Uuid,
 ) -> Result<Vec<Role>, Error> {
     let roles = casbin_names::Entity::find()
         .filter(casbin_names::Column::Ptype.eq("g1"))
@@ -333,7 +333,7 @@ pub(super) async fn list_roles_by_user_id(
     // v0 (role) -> rule id, for this user's g1 bindings.
     let bindings: HashMap<Uuid, Uuid> = casbin_rule::Entity::find()
         .filter(casbin_rule::Column::Ptype.eq("g1"))
-        .filter(casbin_rule::Column::V1.eq(*user_id))
+        .filter(casbin_rule::Column::V1.eq(user_id))
         .all(db)
         .await?
         .into_iter()
@@ -483,7 +483,7 @@ pub(super) async fn list_casbin_rule_group_by_ptype(
 /// whole fix.
 async fn resolve_policy_objects(
     db: &DatabaseConnection,
-    user_id: &Uuid,
+    user_id: Uuid,
 ) -> Result<Vec<(Uuid, Uuid)>, Error> {
     #[derive(FromQueryResult)]
     struct PolicyRow {
@@ -494,14 +494,14 @@ async fn resolve_policy_objects(
     // BUG-COMPATIBLE: `V0.eq(user)` selecting `v1`. See the note above.
     let group_subjects: Vec<Uuid> = casbin_rule::Entity::find()
         .filter(casbin_rule::Column::Ptype.eq("g1"))
-        .filter(casbin_rule::Column::V0.eq(*user_id))
+        .filter(casbin_rule::Column::V0.eq(user_id))
         .all(db)
         .await?
         .into_iter()
         .map(|r| r.v1)
         .collect();
 
-    let mut subjects = vec![*user_id];
+    let mut subjects = vec![user_id];
     subjects.extend(group_subjects);
 
     let policies = casbin_rule::Entity::find()
@@ -539,20 +539,20 @@ async fn resolve_policy_objects(
 
 pub(super) async fn get_policies_for_user(
     db: &DatabaseConnection,
-    user_id: &Uuid,
+    user_id: Uuid,
 ) -> Result<Vec<CasbinRule>, Error> {
     // Same subject resolution as `resolve_policy_objects`, including the
     // sub-select direction documented there.
     let group_subjects: Vec<Uuid> = casbin_rule::Entity::find()
         .filter(casbin_rule::Column::Ptype.eq("g1"))
-        .filter(casbin_rule::Column::V0.eq(*user_id))
+        .filter(casbin_rule::Column::V0.eq(user_id))
         .all(db)
         .await?
         .into_iter()
         .map(|r| r.v1)
         .collect();
 
-    let mut subjects = vec![*user_id];
+    let mut subjects = vec![user_id];
     subjects.extend(group_subjects);
 
     Ok(casbin_rule::Entity::find()
@@ -569,16 +569,16 @@ pub(super) async fn get_policies_for_user(
 /// belongs to none.
 pub(super) async fn get_actions_for_policy(
     db: &DatabaseConnection,
-    policy_act: &Uuid,
+    policy_act: Uuid,
 ) -> Result<Vec<Uuid>, Error> {
     let rules = casbin_rule::Entity::find()
         .filter(casbin_rule::Column::Ptype.eq("g3"))
-        .filter(casbin_rule::Column::V1.eq(*policy_act))
+        .filter(casbin_rule::Column::V1.eq(policy_act))
         .all(db)
         .await?;
 
     if rules.is_empty() {
-        return Ok(vec![*policy_act]);
+        return Ok(vec![policy_act]);
     }
 
     Ok(rules.into_iter().map(|r| r.v0).collect())
@@ -587,7 +587,7 @@ pub(super) async fn get_actions_for_policy(
 /// Target/secret pairs a user may reach, one row per (policy, target_secret).
 pub(super) async fn list_targets_for_user(
     db: &DatabaseConnection,
-    user_id: &Uuid,
+    user_id: Uuid,
     active_only: bool,
 ) -> Result<Vec<TargetSecretName>, Error> {
     let pairs = resolve_policy_objects(db, user_id).await?;
@@ -618,7 +618,7 @@ pub(super) async fn list_targets_for_user(
 pub(super) async fn list_targets_by_ids(
     db: &DatabaseConnection,
     ids: &[&Uuid],
-    pid: &Uuid,
+    pid: Uuid,
     active_only: bool,
 ) -> Result<Vec<TargetSecretName>, Error> {
     if ids.is_empty() {
@@ -633,7 +633,7 @@ pub(super) async fn list_targets_by_ids(
         .iter()
         .filter_map(|id| {
             rows.get(id).map(|r| TargetSecretName {
-                pid: *pid,
+                pid,
                 id: r.id,
                 target_id: r.target_id,
                 target_name: r.target_name.clone(),
@@ -785,7 +785,7 @@ pub(super) async fn list_action_group(db: &DatabaseConnection) -> Result<Vec<Obj
 /// A user's recordings, labelled `user@target:port`.
 pub(super) async fn list_recording_view_for_user(
     db: &DatabaseConnection,
-    user_id: &Uuid,
+    user_id: Uuid,
 ) -> Result<Vec<RecordingView>, Error> {
     #[derive(FromQueryResult)]
     struct Row {
@@ -817,7 +817,7 @@ pub(super) async fn list_recording_view_for_user(
             JoinType::LeftJoin,
             session_recordings::Relation::Target.def(),
         )
-        .filter(session_recordings::Column::UserId.eq(*user_id))
+        .filter(session_recordings::Column::UserId.eq(user_id))
         .order_by_desc(session_recordings::Column::StartedAt)
         .into_model::<Row>()
         .all(db)

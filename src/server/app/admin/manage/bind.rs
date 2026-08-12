@@ -202,7 +202,7 @@ where
         };
         self.backend
             .db_repository()
-            .upsert_target_secret(&t.id, &s.id, !s.is_bound, &self.admin_id)
+            .upsert_target_secret(t.id, s.id, !s.is_bound, self.admin_id)
             .await?;
         info!(
             "[{}] Secret '{}({})' {} target '{}({})' by admin_id={}",
@@ -225,7 +225,7 @@ where
             let result = self
                 .backend
                 .db_repository()
-                .list_secrets_for_target(&t.id)
+                .list_secrets_for_target(t.id)
                 .await;
             match result {
                 Ok(res) => self.secrets = res,

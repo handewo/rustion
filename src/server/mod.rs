@@ -36,24 +36,11 @@ pub(super) trait HandlerBackend: Send + Clone {
         active_only: bool,
     ) -> impl Future<Output = Result<Option<User>, Error>> + Send;
 
-    // fn get_target_by_name(
-    //     &self,
-    //     name: &str,
-    // ) -> impl Future<Output = Result<Option<Target>, Error>> + Send;
-
-    // fn update_user(&self, user: User) -> impl Future<Output = Result<User, Error>> + Send;
-
     fn update_user_password(
         &self,
         password: String,
         user: User,
     ) -> impl Future<Output = Result<User, Error>> + Send;
-
-    fn get_target_by_id(
-        &self,
-        id: &Uuid,
-        active_only: bool,
-    ) -> impl Future<Output = Result<Option<Target>, Error>> + Send;
 
     fn list_targets_for_user(
         &self,

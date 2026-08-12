@@ -181,7 +181,7 @@ where
         let mut message = None;
         let items = match backend
             .db_repository()
-            .list_recording_view_for_user(&user_id)
+            .list_recording_view_for_user(user_id)
             .await
         {
             Ok(items) => items,
@@ -251,7 +251,7 @@ where
         let items = match self
             .backend
             .db_repository()
-            .list_recording_view_for_user(&self.user_id)
+            .list_recording_view_for_user(self.user_id)
             .await
         {
             Ok(items) => items,

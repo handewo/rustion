@@ -722,7 +722,7 @@ mod tests {
         );
 
         db.repository()
-            .delete_casbin_rule(&Uuid::parse_str("f45acaa9-c0e4-4e6a-a95a-a35efc6e528f").unwrap())
+            .delete_casbin_rule(Uuid::parse_str("f45acaa9-c0e4-4e6a-a95a-a35efc6e528f").unwrap())
             .await
             .unwrap();
         server.load_role_manager().await.unwrap();
@@ -791,7 +791,7 @@ mod tests {
                 .unwrap()
         );
         db.repository()
-            .delete_casbin_rule(&Uuid::parse_str("6e62e16d-052e-4992-be35-4d1482449d90").unwrap())
+            .delete_casbin_rule(Uuid::parse_str("6e62e16d-052e-4992-be35-4d1482449d90").unwrap())
             .await
             .unwrap();
         server.load_role_manager().await.unwrap();
@@ -964,7 +964,7 @@ mod tests {
         let t = db
             .repository()
             .get_target_by_id(
-                &Uuid::parse_str("a3123268-b942-44b5-98cf-8df8ef6b26e7").unwrap(),
+                Uuid::parse_str("a3123268-b942-44b5-98cf-8df8ef6b26e7").unwrap(),
                 true,
             )
             .await

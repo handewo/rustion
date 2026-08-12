@@ -128,8 +128,8 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(res.into())
     }
 
-    async fn get_user_by_id(&self, id: &Uuid) -> Result<Option<User>, Error> {
-        Ok(user::Entity::find_by_id(*id)
+    async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>, Error> {
+        Ok(user::Entity::find_by_id(id)
             .one(&self.db)
             .await?
             .map(User::from))
@@ -163,9 +163,9 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(updated_user)
     }
 
-    async fn delete_user(&self, id: &Uuid) -> Result<bool, Error> {
+    async fn delete_user(&self, id: Uuid) -> Result<bool, Error> {
         debug!("Deleting user: id={}", id);
-        let res = user::Entity::delete_by_id(*id).exec(&self.db).await?;
+        let res = user::Entity::delete_by_id(id).exec(&self.db).await?;
         let deleted = res.rows_affected > 0;
         if deleted {
             debug!("User deleted successfully: id={}", id);
@@ -236,10 +236,10 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn get_target_by_id(
         &self,
-        id: &Uuid,
+        id: Uuid,
         active_only: bool,
     ) -> Result<Option<Target>, Error> {
-        let mut q = target::Entity::find_by_id(*id);
+        let mut q = target::Entity::find_by_id(id);
         if active_only {
             q = q.filter(target::Column::IsActive.eq(true));
         }
@@ -291,9 +291,9 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(updated_target)
     }
 
-    async fn delete_target(&self, id: &Uuid) -> Result<bool, Error> {
+    async fn delete_target(&self, id: Uuid) -> Result<bool, Error> {
         debug!("Deleting target: id={}", id);
-        let res = target::Entity::delete_by_id(*id).exec(&self.db).await?;
+        let res = target::Entity::delete_by_id(id).exec(&self.db).await?;
         let deleted = res.rows_affected > 0;
         if deleted {
             debug!("Target deleted successfully: id={}", id);
@@ -403,8 +403,8 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn get_secret_by_id(&self, id: &Uuid) -> Result<Option<Secret>, Error> {
-        Ok(secret::Entity::find_by_id(*id)
+    async fn get_secret_by_id(&self, id: Uuid) -> Result<Option<Secret>, Error> {
+        Ok(secret::Entity::find_by_id(id)
             .one(&self.db)
             .await?
             .map(Secret::from))
@@ -423,9 +423,9 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn delete_secret(&self, id: &Uuid) -> Result<bool, Error> {
+    async fn delete_secret(&self, id: Uuid) -> Result<bool, Error> {
         debug!("Deleting secret: id={}", id);
-        let res = secret::Entity::delete_by_id(*id).exec(&self.db).await?;
+        let res = secret::Entity::delete_by_id(id).exec(&self.db).await?;
         let deleted = res.rows_affected > 0;
         if deleted {
             debug!("Secret deleted successfully: id={}", id);
@@ -488,8 +488,8 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(updated)
     }
 
-    async fn delete_target_secret(&self, id: &Uuid) -> Result<bool, Error> {
-        let res = target_secret::Entity::delete_by_id(*id)
+    async fn delete_target_secret(&self, id: Uuid) -> Result<bool, Error> {
+        let res = target_secret::Entity::delete_by_id(id)
             .exec(&self.db)
             .await?;
         Ok(res.rows_affected > 0)
@@ -501,10 +501,10 @@ impl DatabaseRepository for SeaOrmRepository {
     /// * If it **does** exist → flip `is_active` to the provided value
     async fn upsert_target_secret(
         &self,
-        target_id: &Uuid,
-        secret_id: &Uuid,
+        target_id: Uuid,
+        secret_id: Uuid,
         is_active: bool,
-        updated_by: &Uuid,
+        updated_by: Uuid,
     ) -> Result<(), Error> {
         debug!(
             "Upserting target_secret binding: target_id={}, secret_id={}, is_active={}",
@@ -512,8 +512,8 @@ impl DatabaseRepository for SeaOrmRepository {
         );
 
         let existing = target_secret::Entity::find()
-            .filter(target_secret::Column::TargetId.eq(*target_id))
-            .filter(target_secret::Column::SecretId.eq(*secret_id))
+            .filter(target_secret::Column::TargetId.eq(target_id))
+            .filter(target_secret::Column::SecretId.eq(secret_id))
             .one(&self.db)
             .await?;
 
@@ -528,7 +528,7 @@ impl DatabaseRepository for SeaOrmRepository {
                 );
             }
             None => {
-                let mut ts = TargetSecret::new(*target_id, *secret_id, *updated_by);
+                let mut ts = TargetSecret::new(target_id, secret_id, updated_by);
                 ts.is_active = is_active;
                 self.create_target_secret(&ts).await?;
                 debug!(
@@ -603,9 +603,9 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(updated_rule)
     }
 
-    async fn delete_casbin_rule(&self, id: &Uuid) -> Result<bool, Error> {
+    async fn delete_casbin_rule(&self, id: Uuid) -> Result<bool, Error> {
         debug!("Deleting casbin_rule: '({})'", id);
-        let res = casbin_rule::Entity::delete_by_id(*id)
+        let res = casbin_rule::Entity::delete_by_id(id)
             .exec(&self.db)
             .await?;
         let deleted = res.rows_affected > 0;
@@ -618,8 +618,8 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn delete_casbin_rule_by_v0_v1(
         &self,
         ptype: &str,
-        v0: &Uuid,
-        v1: &Uuid,
+        v0: Uuid,
+        v1: Uuid,
     ) -> Result<bool, Error> {
         debug!(
             "Deleting casbin_rule where ptype={} v0={} v1={}",
@@ -627,8 +627,8 @@ impl DatabaseRepository for SeaOrmRepository {
         );
         let res = casbin_rule::Entity::delete_many()
             .filter(casbin_rule::Column::Ptype.eq(ptype))
-            .filter(casbin_rule::Column::V0.eq(*v0))
-            .filter(casbin_rule::Column::V1.eq(*v1))
+            .filter(casbin_rule::Column::V0.eq(v0))
+            .filter(casbin_rule::Column::V1.eq(v1))
             .exec(&self.db)
             .await?;
 
@@ -670,7 +670,7 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn update_casbin_name(&self, rule: &CasbinName) -> Result<CasbinName, Error> {
         // Internal types may not be renamed or re-typed.
-        if let Some(existing) = self.get_casbin_name_by_id(&rule.id).await?
+        if let Some(existing) = self.get_casbin_name_by_id(rule.id).await?
             && existing.is_internal()
             && (existing.ptype != rule.ptype || existing.name != rule.name)
         {
@@ -689,7 +689,7 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(updated_rule)
     }
 
-    async fn delete_casbin_name(&self, id: &Uuid) -> Result<bool, Error> {
+    async fn delete_casbin_name(&self, id: Uuid) -> Result<bool, Error> {
         debug!("Deleting casbin_name: id={}", id);
 
         if let Some(casbin_name) = self.get_casbin_name_by_id(id).await?
@@ -700,7 +700,7 @@ impl DatabaseRepository for SeaOrmRepository {
             )));
         }
 
-        let res = casbin_names::Entity::delete_by_id(*id)
+        let res = casbin_names::Entity::delete_by_id(id)
             .exec(&self.db)
             .await?;
         let deleted = res.rows_affected > 0;
@@ -718,8 +718,8 @@ impl DatabaseRepository for SeaOrmRepository {
             .map(CasbinName::from))
     }
 
-    async fn get_casbin_name_by_id(&self, id: &Uuid) -> Result<Option<CasbinName>, Error> {
-        Ok(casbin_names::Entity::find_by_id(*id)
+    async fn get_casbin_name_by_id(&self, id: Uuid) -> Result<Option<CasbinName>, Error> {
+        Ok(casbin_names::Entity::find_by_id(id)
             .one(&self.db)
             .await?
             .map(CasbinName::from))
@@ -840,9 +840,9 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn get_session_recording_by_id(
         &self,
-        id: &Uuid,
+        id: Uuid,
     ) -> Result<Option<SessionRecording>, Error> {
-        Ok(session_recordings::Entity::find_by_id(*id)
+        Ok(session_recordings::Entity::find_by_id(id)
             .one(&self.db)
             .await?
             .map(SessionRecording::from))
@@ -866,10 +866,10 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn list_session_recordings_for_user(
         &self,
-        user_id: &Uuid,
+        user_id: Uuid,
     ) -> Result<Vec<SessionRecording>, Error> {
         Ok(session_recordings::Entity::find()
-            .filter(session_recordings::Column::UserId.eq(*user_id))
+            .filter(session_recordings::Column::UserId.eq(user_id))
             .order_by_desc(session_recordings::Column::StartedAt)
             .all(&self.db)
             .await?
@@ -880,10 +880,10 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn list_session_recordings_for_target(
         &self,
-        target_id: &Uuid,
+        target_id: Uuid,
     ) -> Result<Vec<SessionRecording>, Error> {
         Ok(session_recordings::Entity::find()
-            .filter(session_recordings::Column::TargetId.eq(*target_id))
+            .filter(session_recordings::Column::TargetId.eq(target_id))
             .order_by_desc(session_recordings::Column::StartedAt)
             .all(&self.db)
             .await?
@@ -922,7 +922,7 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn get_target_by_target_secret_id(
         &self,
-        id: &Uuid,
+        id: Uuid,
         active_only: bool,
     ) -> Result<Option<Target>, Error> {
         super::query::get_target_by_target_secret_id(&self.db, id, active_only).await
@@ -938,25 +938,25 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn get_secret_by_target_secret_id(
         &self,
-        id: &Uuid,
+        id: Uuid,
         active_only: bool,
     ) -> Result<Option<Secret>, Error> {
         super::query::get_secret_by_target_secret_id(&self.db, id, active_only).await
     }
 
-    async fn list_secrets_for_target(&self, target_id: &Uuid) -> Result<Vec<SecretInfo>, Error> {
+    async fn list_secrets_for_target(&self, target_id: Uuid) -> Result<Vec<SecretInfo>, Error> {
         super::query::list_secrets_for_target(&self.db, target_id).await
     }
 
     async fn list_target_secrets_by_target_id(
         &self,
-        target_id: &Uuid,
+        target_id: Uuid,
         active_only: bool,
     ) -> Result<Vec<TargetSecret>, Error> {
         super::query::list_target_secrets_by_target_id(&self.db, target_id, active_only).await
     }
 
-    async fn list_roles_by_user_id(&self, user_id: &Uuid) -> Result<Vec<Role>, Error> {
+    async fn list_roles_by_user_id(&self, user_id: Uuid) -> Result<Vec<Role>, Error> {
         super::query::list_roles_by_user_id(&self.db, user_id).await
     }
 
@@ -967,17 +967,17 @@ impl DatabaseRepository for SeaOrmRepository {
         super::query::list_casbin_rule_group_by_ptype(&self.db, ptype).await
     }
 
-    async fn get_policies_for_user(&self, user_id: &Uuid) -> Result<Vec<CasbinRule>, Error> {
+    async fn get_policies_for_user(&self, user_id: Uuid) -> Result<Vec<CasbinRule>, Error> {
         super::query::get_policies_for_user(&self.db, user_id).await
     }
 
-    async fn get_actions_for_policy(&self, policy_act: &Uuid) -> Result<Vec<Uuid>, Error> {
+    async fn get_actions_for_policy(&self, policy_act: Uuid) -> Result<Vec<Uuid>, Error> {
         super::query::get_actions_for_policy(&self.db, policy_act).await
     }
 
     async fn list_targets_for_user(
         &self,
-        user_id: &Uuid,
+        user_id: Uuid,
         active_only: bool,
     ) -> Result<Vec<TargetSecretName>, Error> {
         super::query::list_targets_for_user(&self.db, user_id, active_only).await
@@ -986,7 +986,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn list_targets_by_ids(
         &self,
         ids: &[&Uuid],
-        pid: &Uuid,
+        pid: Uuid,
         active_only: bool,
     ) -> Result<Vec<TargetSecretName>, Error> {
         super::query::list_targets_by_ids(&self.db, ids, pid, active_only).await
@@ -1004,13 +1004,13 @@ impl DatabaseRepository for SeaOrmRepository {
         super::query::list_action_group(&self.db).await
     }
 
-    async fn check_object_active(&self, id: &Uuid) -> Result<bool, Error> {
+    async fn check_object_active(&self, id: Uuid) -> Result<bool, Error> {
         super::query::check_object_active(&self.db, id).await
     }
 
     async fn list_recording_view_for_user(
         &self,
-        user_id: &Uuid,
+        user_id: Uuid,
     ) -> Result<Vec<RecordingView>, Error> {
         super::query::list_recording_view_for_user(&self.db, user_id).await
     }

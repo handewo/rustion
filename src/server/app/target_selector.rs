@@ -320,7 +320,11 @@ where
         } else {
             Uuid::default()
         };
-        let target = match backend.get_target_by_id(&target_id, true).await {
+        let target = match backend
+            .db_repository()
+            .get_target_by_id(target_id, true)
+            .await
+        {
             Ok(t) => t,
             Err(e) => {
                 warn!("[{}] Fail to get target: {}", handler_id, e);

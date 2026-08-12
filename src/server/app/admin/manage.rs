@@ -357,7 +357,7 @@ where
         match self.selected_tab {
             SelectedTab::Users => {
                 if let Some(u) = self.items.get_user(idx) {
-                    let result = self.backend.db_repository().delete_user(&u.id).await;
+                    let result = self.backend.db_repository().delete_user(u.id).await;
 
                     if let Err(e) = result {
                         self.message = Some(Message::Error(vec!["Internal error".into()]));
@@ -383,7 +383,7 @@ where
             }
             SelectedTab::Targets => {
                 if let Some(t) = self.items.get_target(idx) {
-                    let result = self.backend.db_repository().delete_target(&t.id).await;
+                    let result = self.backend.db_repository().delete_target(t.id).await;
 
                     if let Err(e) = result {
                         self.message = Some(Message::Error(vec!["Internal error".into()]));
@@ -409,7 +409,7 @@ where
             }
             SelectedTab::Secrets => {
                 if let Some(s) = self.items.get_secret(idx) {
-                    let result = self.backend.db_repository().delete_secret(&s.id).await;
+                    let result = self.backend.db_repository().delete_secret(s.id).await;
 
                     if let Err(e) = result {
                         self.message = Some(Message::Error(vec!["Internal error".into()]));
@@ -438,7 +438,7 @@ where
                     let result = self
                         .backend
                         .db_repository()
-                        .delete_casbin_rule(&p.rule.id)
+                        .delete_casbin_rule(p.rule.id)
                         .await;
 
                     if let Err(e) = result {
@@ -465,7 +465,7 @@ where
             }
             SelectedTab::CasbinNames => {
                 if let Some(c) = self.items.get_casbin_name(idx) {
-                    let result = self.backend.db_repository().delete_casbin_name(&c.id).await;
+                    let result = self.backend.db_repository().delete_casbin_name(c.id).await;
 
                     if let Err(e) = result {
                         self.message = Some(Message::Error(vec!["Internal error".into()]));
@@ -1067,7 +1067,7 @@ where
 
                     self.backend
                         .db_repository()
-                        .list_secrets_for_target(&targets[0].id)
+                        .list_secrets_for_target(targets[0].id)
                         .await
                         .unwrap_or_default()
                 } else {
