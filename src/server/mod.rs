@@ -24,8 +24,10 @@ use russh::client as ru_client;
 use std::future::Future;
 use std::sync::Arc;
 
+//TODO: Refactor log method
 type HandlerLog = Arc<dyn Fn(String, String) -> BoxFuture<'static, ()> + Send + Sync>;
 
+//TODO: Remove uneccessary sql query
 pub(super) trait HandlerBackend: Send + Clone {
     fn db_repository(&self) -> &dyn DatabaseRepository;
     fn get_user_by_username(

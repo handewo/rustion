@@ -8,7 +8,7 @@ use uuid::Uuid;
 /// - v1: object UUID (target_secret, internal_object, or group)
 /// - v2: action UUID (action or action group)
 /// - v3-v5: extended policy data (IP ranges, time constraints, etc.) - stored as TEXT
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
 pub struct CasbinRule {
     pub id: Uuid,
     pub ptype: String,
@@ -52,7 +52,7 @@ impl CasbinRule {
 
 /// CasbinName maps UUIDs to human-readable names for casbin entities
 /// - ptype: 'g1' (user groups), 'g2' (object groups), 'g3' (action groups), 'act' (actions)
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CasbinName {
     pub id: Uuid,
     pub ptype: String,
@@ -113,7 +113,7 @@ pub enum ValidateError {
     InternalTypeModification,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
 pub struct CasbinRuleGroup {
     pub id: Uuid,
     pub v0: Uuid,
@@ -124,7 +124,7 @@ pub struct CasbinRuleGroup {
     pub v1_group_label: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
 pub struct Role {
     pub rid: Uuid,
     pub rule_id: Option<Uuid>,
@@ -132,9 +132,8 @@ pub struct Role {
     pub is_bound: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionPolicy {
-    #[sqlx(flatten)]
     pub rule: CasbinRule,
     pub user_role: String,
     pub target_group: String,
@@ -199,9 +198,75 @@ impl std::fmt::Display for PermissionPolicyEmptyError {
         }
     }
 }
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
 pub struct ObjectGroup {
     pub id: Uuid,
     pub name: String,
     pub is_group: bool,
+}
+
+impl From<crate::database::entity::casbin_rule::Model> for CasbinRule {
+    fn from(m: crate::database::entity::casbin_rule::Model) -> Self {
+        Self {
+            id: m.id,
+            ptype: m.ptype,
+            v0: m.v0,
+            v1: m.v1,
+            v2: m.v2,
+            v3: m.v3,
+            v4: m.v4,
+            v5: m.v5,
+            updated_by: m.updated_by,
+            updated_at: m.updated_at,
+        }
+    }
+}
+
+impl CasbinRule {
+    pub(in crate::database) fn into_active_model(
+        self,
+    ) -> crate::database::entity::casbin_rule::ActiveModel {
+        use sea_orm::ActiveValue::Set;
+        crate::database::entity::casbin_rule::ActiveModel {
+            id: Set(self.id),
+            ptype: Set(self.ptype),
+            v0: Set(self.v0),
+            v1: Set(self.v1),
+            v2: Set(self.v2),
+            v3: Set(self.v3),
+            v4: Set(self.v4),
+            v5: Set(self.v5),
+            updated_by: Set(self.updated_by),
+            updated_at: Set(self.updated_at),
+        }
+    }
+}
+
+impl From<crate::database::entity::casbin_names::Model> for CasbinName {
+    fn from(m: crate::database::entity::casbin_names::Model) -> Self {
+        Self {
+            id: m.id,
+            ptype: m.ptype,
+            name: m.name,
+            is_active: m.is_active,
+            updated_by: m.updated_by,
+            updated_at: m.updated_at,
+        }
+    }
+}
+
+impl CasbinName {
+    pub(in crate::database) fn into_active_model(
+        self,
+    ) -> crate::database::entity::casbin_names::ActiveModel {
+        use sea_orm::ActiveValue::Set;
+        crate::database::entity::casbin_names::ActiveModel {
+            id: Set(self.id),
+            ptype: Set(self.ptype),
+            name: Set(self.name),
+            is_active: Set(self.is_active),
+            updated_by: Set(self.updated_by),
+            updated_at: Set(self.updated_at),
+        }
+    }
 }

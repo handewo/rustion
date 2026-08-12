@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TargetSecret {
     pub id: Uuid,
     pub target_id: Uuid,
@@ -14,7 +14,7 @@ pub struct TargetSecret {
 }
 
 /// For login to remote target
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Secret {
     pub id: Uuid,
     pub name: String, //for display only
@@ -217,7 +217,7 @@ impl std::fmt::Display for ValidateError {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
 pub struct TargetSecretName {
     // policy id in casbin_rule
     pub pid: Uuid,
@@ -229,10 +229,74 @@ pub struct TargetSecretName {
     pub secret_user: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
 pub struct SecretInfo {
     pub id: Uuid,
     pub name: String,
     pub user: String,
     pub is_bound: bool,
+}
+
+impl From<crate::database::entity::secret::Model> for Secret {
+    fn from(m: crate::database::entity::secret::Model) -> Self {
+        Self {
+            id: m.id,
+            name: m.name,
+            user: m.user,
+            password: m.password,
+            private_key: m.private_key,
+            public_key: m.public_key,
+            is_active: m.is_active,
+            updated_by: m.updated_by,
+            updated_at: m.updated_at,
+        }
+    }
+}
+
+impl Secret {
+    pub(in crate::database) fn into_active_model(
+        self,
+    ) -> crate::database::entity::secret::ActiveModel {
+        use sea_orm::ActiveValue::Set;
+        crate::database::entity::secret::ActiveModel {
+            id: Set(self.id),
+            name: Set(self.name),
+            user: Set(self.user),
+            password: Set(self.password),
+            private_key: Set(self.private_key),
+            public_key: Set(self.public_key),
+            is_active: Set(self.is_active),
+            updated_by: Set(self.updated_by),
+            updated_at: Set(self.updated_at),
+        }
+    }
+}
+
+impl From<crate::database::entity::target_secret::Model> for TargetSecret {
+    fn from(m: crate::database::entity::target_secret::Model) -> Self {
+        Self {
+            id: m.id,
+            target_id: m.target_id,
+            secret_id: m.secret_id,
+            is_active: m.is_active,
+            updated_by: m.updated_by,
+            updated_at: m.updated_at,
+        }
+    }
+}
+
+impl TargetSecret {
+    pub(in crate::database) fn into_active_model(
+        self,
+    ) -> crate::database::entity::target_secret::ActiveModel {
+        use sea_orm::ActiveValue::Set;
+        crate::database::entity::target_secret::ActiveModel {
+            id: Set(self.id),
+            target_id: Set(self.target_id),
+            secret_id: Set(self.secret_id),
+            is_active: Set(self.is_active),
+            updated_by: Set(self.updated_by),
+            updated_at: Set(self.updated_at),
+        }
+    }
 }

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Session recording metadata for database storage
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRecording {
     pub id: Uuid,
     pub user_id: Uuid,
@@ -12,6 +12,7 @@ pub struct SessionRecording {
     pub started_at: i64,
     pub ended_at: Option<i64>,
     pub connection_id: Uuid,
+    //TODO:Using enum instead
     pub status: String,
 }
 
@@ -36,7 +37,7 @@ pub fn generate_path(id: Uuid) -> String {
     format!("{}.cast", id)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingView {
     pub id: Uuid,
     pub target_secret: String,
@@ -48,5 +49,40 @@ pub struct RecordingView {
 impl RecordingView {
     pub fn generate_path(&self) -> String {
         generate_path(self.id)
+    }
+}
+
+impl From<crate::database::entity::session_recordings::Model> for SessionRecording {
+    fn from(m: crate::database::entity::session_recordings::Model) -> Self {
+        Self {
+            id: m.id,
+            user_id: m.user_id,
+            target_id: m.target_id,
+            secret_id: m.secret_id,
+            file_path: m.file_path,
+            started_at: m.started_at,
+            ended_at: m.ended_at,
+            connection_id: m.connection_id,
+            status: m.status,
+        }
+    }
+}
+
+impl SessionRecording {
+    pub(in crate::database) fn into_active_model(
+        self,
+    ) -> crate::database::entity::session_recordings::ActiveModel {
+        use sea_orm::ActiveValue::Set;
+        crate::database::entity::session_recordings::ActiveModel {
+            id: Set(self.id),
+            user_id: Set(self.user_id),
+            target_id: Set(self.target_id),
+            secret_id: Set(self.secret_id),
+            file_path: Set(self.file_path),
+            started_at: Set(self.started_at),
+            ended_at: Set(self.ended_at),
+            connection_id: Set(self.connection_id),
+            status: Set(self.status),
+        }
     }
 }

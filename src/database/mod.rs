@@ -1,8 +1,10 @@
 pub mod common;
+pub(crate) mod entity;
 pub mod error;
 pub(crate) mod models;
+pub(crate) mod query;
+pub(crate) mod repository;
 pub(crate) mod service;
-pub(crate) mod sqlite;
 
 use crate::{database::models::UserWithRole, error::Error};
 use async_trait::async_trait;
@@ -13,21 +15,125 @@ use models::{
 };
 pub use uuid::Uuid;
 
+//TODO: Replace with database URL.
 /// Database configuration enum to support multiple database backends
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum DatabaseConfig {
-    Sqlite { path: String },
-    // Future database support can be added here
-    // Mysql { host: String, port: u16, database: String, username: String, password: String },
-    // Postgresql { host: String, port: u16, database: String, username: String, password: String },
+    Sqlite {
+        path: String,
+    },
+    Postgres {
+        host: String,
+        #[serde(default = "default_postgres_port")]
+        port: u16,
+        database: String,
+        username: String,
+        #[serde(default)]
+        password: String,
+    },
+    Mysql {
+        host: String,
+        #[serde(default = "default_mysql_port")]
+        port: u16,
+        database: String,
+        username: String,
+        #[serde(default)]
+        password: String,
+    },
+}
+
+fn default_postgres_port() -> u16 {
+    5432
+}
+
+fn default_mysql_port() -> u16 {
+    3306
+}
+
+impl DatabaseConfig {
+    /// Build the connection URL sea-orm dispatches its backend on.
+    ///
+    /// The scheme selects the driver, so this is the only place the backend
+    /// choice is made — the repository implementation is identical for all three.
+    pub fn connection_url(&self) -> String {
+        match self {
+            // `mode=rwc` = read/write/create, replacing sqlx's
+            // `create_if_missing(true)`.
+            DatabaseConfig::Sqlite { path } => format!("sqlite://{}?mode=rwc", path),
+            DatabaseConfig::Postgres {
+                host,
+                port,
+                database,
+                username,
+                password,
+            } => format!(
+                "postgres://{}:{}@{}:{}/{}",
+                encode_userinfo(username),
+                encode_userinfo(password),
+                host,
+                port,
+                database
+            ),
+            DatabaseConfig::Mysql {
+                host,
+                port,
+                database,
+                username,
+                password,
+            } => format!(
+                "mysql://{}:{}@{}:{}/{}",
+                encode_userinfo(username),
+                encode_userinfo(password),
+                host,
+                port,
+                database
+            ),
+        }
+    }
+}
+
+/// Percent-encode the reserved characters that would otherwise terminate the
+/// userinfo section of the URL, so passwords containing `@`, `:`, `/` and
+/// friends connect instead of producing a confusing parse error.
+fn encode_userinfo(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
 }
 
 impl std::fmt::Display for DatabaseConfig {
+    /// Credentials are deliberately omitted: this is printed in the startup
+    /// banner (`config/mod.rs`).
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DatabaseConfig::Sqlite { path } => {
                 write!(f, "sqlite({})", path)
+            }
+            DatabaseConfig::Postgres {
+                host,
+                port,
+                database,
+                username,
+                ..
+            } => {
+                write!(f, "postgres({}@{}:{}/{})", username, host, port, database)
+            }
+            DatabaseConfig::Mysql {
+                host,
+                port,
+                database,
+                username,
+                ..
+            } => {
+                write!(f, "mysql({}@{}:{}/{})", username, host, port, database)
             }
         }
     }
@@ -49,7 +155,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn initialize(&self) -> Result<(), Error>;
 
     /// User operations
-    async fn create_user(&self, user: &User) -> Result<User, Error>;
+    async fn create_user(&self, user: User) -> Result<User, Error>;
     async fn get_user_by_id(&self, id: &Uuid) -> Result<Option<User>, Error>;
     async fn get_user_by_username(
         &self,
@@ -73,7 +179,7 @@ pub trait DatabaseRepository: Send + Sync {
     ) -> Result<Option<Target>, Error>;
     async fn get_targets_by_target_secret_ids(
         &self,
-        ids: &[&Uuid],
+        ids: &[Uuid],
         active_only: bool,
     ) -> Result<Vec<Target>, Error>;
     async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, Error>;
@@ -245,14 +351,103 @@ pub trait DatabaseRepository: Send + Sync {
     async fn list_permission_polices(&self) -> Result<Vec<PermissionPolicy>, Error>;
 }
 
-/// Database factory to create appropriate repository based on configuration
+/// Database factory. sea-orm resolves the backend from the URL scheme, so a
+/// single [`repository::SeaOrmRepository`] serves SQLite, PostgreSQL and MySQL.
 pub async fn create_repository(
     config: &DatabaseConfig,
 ) -> Result<Box<dyn DatabaseRepository>, Error> {
-    match config {
-        DatabaseConfig::Sqlite { path } => {
-            let repo = sqlite::SqliteRepository::new(path).await?;
-            Ok(Box::new(repo))
-        } // Future database implementations can be added here
+    let repo = repository::SeaOrmRepository::new(config).await?;
+    Ok(Box::new(repo))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sqlite_url_creates_missing_file() {
+        let cfg = DatabaseConfig::Sqlite {
+            path: "rustion.db".into(),
+        };
+        // `mode=rwc` is what replaces sqlx's `create_if_missing(true)`.
+        assert_eq!(cfg.connection_url(), "sqlite://rustion.db?mode=rwc");
+    }
+
+    #[test]
+    fn postgres_and_mysql_urls() {
+        let pg = DatabaseConfig::Postgres {
+            host: "db.internal".into(),
+            port: 5432,
+            database: "rustion".into(),
+            username: "svc".into(),
+            password: "hunter2".into(),
+        };
+        assert_eq!(
+            pg.connection_url(),
+            "postgres://svc:hunter2@db.internal:5432/rustion"
+        );
+
+        let my = DatabaseConfig::Mysql {
+            host: "db.internal".into(),
+            port: 3306,
+            database: "rustion".into(),
+            username: "svc".into(),
+            password: "hunter2".into(),
+        };
+        assert_eq!(
+            my.connection_url(),
+            "mysql://svc:hunter2@db.internal:3306/rustion"
+        );
+    }
+
+    /// A password containing URL-reserved characters must not corrupt the URL.
+    #[test]
+    fn credentials_are_percent_encoded() {
+        let cfg = DatabaseConfig::Postgres {
+            host: "localhost".into(),
+            port: 5432,
+            database: "rustion".into(),
+            username: "user@corp".into(),
+            password: "p@ss:w/rd?#".into(),
+        };
+        assert_eq!(
+            cfg.connection_url(),
+            "postgres://user%40corp:p%40ss%3Aw%2Frd%3F%23@localhost:5432/rustion"
+        );
+    }
+
+    /// `Display` reaches the startup banner, so it must never leak the password.
+    #[test]
+    fn display_redacts_password() {
+        let cfg = DatabaseConfig::Mysql {
+            host: "localhost".into(),
+            port: 3306,
+            database: "rustion".into(),
+            username: "svc".into(),
+            password: "topsecret".into(),
+        };
+        let shown = cfg.to_string();
+        assert!(!shown.contains("topsecret"), "password leaked: {shown}");
+        assert_eq!(shown, "mysql(svc@localhost:3306/rustion)");
+    }
+
+    #[test]
+    fn existing_sqlite_toml_still_parses() {
+        let cfg: DatabaseConfig =
+            toml::from_str("type = \"sqlite\"\npath = \"rustion.db\"").unwrap();
+        assert!(matches!(cfg, DatabaseConfig::Sqlite { path } if path == "rustion.db"));
+    }
+
+    #[test]
+    fn backend_ports_default_when_omitted() {
+        let pg: DatabaseConfig =
+            toml::from_str("type = \"postgres\"\nhost = \"h\"\ndatabase = \"d\"\nusername = \"u\"")
+                .unwrap();
+        assert!(matches!(pg, DatabaseConfig::Postgres { port, .. } if port == 5432));
+
+        let my: DatabaseConfig =
+            toml::from_str("type = \"mysql\"\nhost = \"h\"\ndatabase = \"d\"\nusername = \"u\"")
+                .unwrap();
+        assert!(matches!(my, DatabaseConfig::Mysql { port, .. } if port == 3306));
     }
 }

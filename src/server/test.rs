@@ -46,7 +46,7 @@ mod tests {
 
         // Create users first (needed as updated_by reference)
         db.repository()
-            .create_user(&raw_data.users.pop().unwrap())
+            .create_user(raw_data.users.pop().unwrap())
             .await
             .unwrap();
         db.repository()
@@ -826,7 +826,7 @@ mod tests {
 
         // Create users first
         db.repository()
-            .create_user(&raw_data.users.pop().unwrap())
+            .create_user(raw_data.users.pop().unwrap())
             .await
             .unwrap();
         db.repository()

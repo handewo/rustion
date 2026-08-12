@@ -33,7 +33,11 @@ main.rs → cli.rs (clap) → Config (TOML) → BastionServer::with_config()
 ### Key Modules
 
 - **`server/casbin.rs`** — Custom lightweight Casbin RBAC engine (~550 LOC) using `petgraph` for role hierarchy. Supports time-of-day, IP CIDR, and expiry constraints via `ExtendPolicy`. Rule types: `p` (policy), `g1` (user→role), `g2` (secret→group), `g3` (action→group).
-- **`database/`** — Repository pattern with `DatabaseRepository` trait (50+ async methods). Only SQLite implemented (`sqlite.rs`). Factory: `create_repository()`.
+- **`database/`** — sea-orm 2.0 on SQLite, PostgreSQL, and MySQL. Repository pattern with `DatabaseRepository` trait (50+ async methods), backed by a single backend-agnostic `SeaOrmRepository` (`repository.rs`) — sea-orm picks the driver from the connection URL, so there is no per-backend impl. Factory: `create_repository()`.
+  - `entity/` — sea-orm entities (one module per table, struct must be named `Model`). Storage shape only.
+  - `models/` — domain types with validation and behaviour, plus `From<entity::Model>`/`into_active_model()` conversions. Deliberately separate from entities: `DeriveEntityModel` requires the name `Model`, and the boundary is where backend quirks are absorbed (e.g. `port` is `i32` in storage because sea-orm cannot read `u16` on PostgreSQL, but `u16` on `Target`).
+  - `query.rs` — joins, aggregation, and composed display labels. Built through the query builder for dialect portability; string concatenation and `GROUP_CONCAT` are done in Rust because they have no portable SQL spelling.
+  - Schema is created by `SchemaBuilder::sync()` (feature `schema-sync`), skipped when all tables already exist.
 - **`server/bastion_server.rs`** — Implements `russh::server::Server`. Holds config, database service, connection/rate-limit caches (moka), and the Casbin role manager.
 - **`server/bastion_handler.rs`** — Implements `russh::server::Handler`. Per-connection state machine routing I/O to the active `Application`.
 - **`server/app/admin/`** — TUI admin interface using ratatui + reedline. CRUD for users, targets, secrets, roles, permissions, and bindings.
@@ -41,7 +45,7 @@ main.rs → cli.rs (clap) → Config (TOML) → BastionServer::with_config()
 
 ### Key Traits
 
-- **`DatabaseRepository`** (`database/mod.rs`) — Async trait for all DB operations. Implement this for new database backends.
+- **`DatabaseRepository`** (`database/mod.rs`) — Async trait for all DB operations, and the seam `HandlerBackend` hands to the rest of the app. Adding a database sea-orm already supports means adding a `DatabaseConfig` variant with a connection URL, not a new impl.
 - **`HandlerBackend`** (`server/mod.rs`) — Abstraction over server operations (auth, target connections, RBAC enforcement, encryption). Implemented by `BastionServer`.
 
 ### Error Handling
@@ -61,6 +65,22 @@ Several dependencies use git forks (not crates.io): `russh`, `crossterm`, `reedl
 ## Configuration
 
 Runtime config is in `rustion.toml` (TOML format). Key settings: listen address, server key path, auth rate limits, connection pooling, database config, session recording. See `src/config/mod.rs` for the `Config` struct.
+
+The `[database]` table is tagged by `type`:
+
+```toml
+[database]
+type = "sqlite"
+path = "rustion.db"
+
+# type = "postgres"        # port defaults to 5432
+# host = "localhost"
+# database = "rustion"
+# username = "rustion"
+# password = "..."
+
+# type = "mysql"           # port defaults to 3306
+```
 
 ## Testing
 

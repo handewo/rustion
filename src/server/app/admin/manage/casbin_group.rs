@@ -504,8 +504,7 @@ where
             }
             Err(ref err) => {
                 let msg = match err {
-                    Error::Sqlx(sqlx::Error::Database(db_err))
-                        if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
+                    e if e.is_unique_violation() =>
                     {
                         warn!(
                             "[{}] Duplicate entry: {} '{}' already exists in group '{}'",

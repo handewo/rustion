@@ -691,7 +691,7 @@ where
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
-                                self.backend.db_repository().create_user(&user).await,
+                                self.backend.db_repository().create_user(user).await,
                             ),
                             Popup::Edit => (
                                 "updated",
@@ -700,22 +700,18 @@ where
                             _ => unreachable!(),
                         };
 
-                        if let Err(ref err) = result {
-                            let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(db_err))
-                                    if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
-                                {
-                                    "Username already exists"
-                                }
-                                _ => "Internal error",
-                            };
-                            warn!(
-                                "[{}] Failed to {} user '{}({})': {}",
-                                self.handler_id, action, user.username, user.id, err
-                            );
-                            self.message = Some(Message::Error(vec![msg.into()]));
-                            return Ok(());
-                        }
+                        let user = match result {
+                            Ok(u) => u,
+                            Err(ref err) => {
+                                let msg = match err {
+                                    e if e.is_unique_violation() => "Username already exists",
+                                    _ => "Internal error",
+                                };
+                                warn!("[{}] Failed to {} user: {}", self.handler_id, action, err);
+                                self.message = Some(Message::Error(vec![msg.into()]));
+                                return Ok(());
+                            }
+                        };
 
                         info!(
                             "[{}] User '{}({})' {} by admin_id={}",
@@ -757,11 +753,7 @@ where
 
                         if let Err(ref err) = result {
                             let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(db_err))
-                                    if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
-                                {
-                                    "Target already exists"
-                                }
+                                e if e.is_unique_violation() => "Target already exists",
                                 _ => "Internal error",
                             };
                             warn!(
@@ -813,11 +805,7 @@ where
                         };
                         if let Err(ref err) = result {
                             let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(db_err))
-                                    if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
-                                {
-                                    "Secret already exists"
-                                }
+                                e if e.is_unique_violation() => "Secret already exists",
                                 _ => "Internal error",
                             };
                             warn!(
@@ -868,11 +856,7 @@ where
                         };
                         if let Err(ref err) = result {
                             let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(db_err))
-                                    if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
-                                {
-                                    "Permission already exists"
-                                }
+                                e if e.is_unique_violation() => "Permission already exists",
                                 _ => "Internal error",
                             };
                             warn!(
@@ -931,11 +915,7 @@ where
 
                         if let Err(ref err) = result {
                             let msg = match err {
-                                Error::Sqlx(sqlx::Error::Database(db_err))
-                                    if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
-                                {
-                                    "Group already exists"
-                                }
+                                e if e.is_unique_violation() => "Group already exists",
                                 _ => "Internal error",
                             };
                             warn!(

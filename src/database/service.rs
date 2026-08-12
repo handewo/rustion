@@ -1,7 +1,7 @@
 use log::info;
 use std::sync::Arc;
 
-use crate::database::{create_repository, DatabaseConfig, DatabaseRepository};
+use crate::database::{DatabaseConfig, DatabaseRepository, create_repository};
 use crate::error::Error;
 
 /// Database service that provides high-level operations
@@ -30,8 +30,8 @@ impl DatabaseService {
 mod tests {
     use super::*;
     use crate::database::{
-        models::{target_secret::TargetSecret, CasbinRule, Secret},
         CasbinName, Target, User,
+        models::{CasbinRule, Secret, target_secret::TargetSecret},
     };
     use serde::{Deserialize, Serialize};
     use serde_json;
@@ -61,7 +61,7 @@ mod tests {
         test_data.read_to_string(&mut buffer).unwrap();
         let mut raw_data: RawData = serde_json::from_str(&buffer).unwrap();
         db.repository
-            .create_user(&raw_data.users.pop().unwrap())
+            .create_user(raw_data.users.pop().unwrap())
             .await
             .unwrap();
         db.repository

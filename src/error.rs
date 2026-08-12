@@ -16,7 +16,7 @@ pub enum Error {
     IO(#[from] std::io::Error),
 
     #[error(transparent)]
-    Sqlx(#[from] sqlx::Error),
+    Db(#[from] sea_orm::DbErr),
 
     #[error(transparent)]
     Json(#[from] serde_json::Error),
@@ -39,4 +39,23 @@ pub enum Error {
 
     #[error(transparent)]
     Utils(#[from] crate::utils::HttpProxyError),
+}
+
+impl Error {
+    /// Whether this error is a unique/primary-key constraint violation.
+    ///
+    /// Lets callers distinguish "already exists" from a genuine failure without
+    /// naming a driver type. `DbErr::sql_err()` maps the per-backend error codes,
+    /// so this behaves the same on SQLite, PostgreSQL and MySQL.
+    pub fn is_unique_violation(&self) -> bool {
+        let db_err = match self {
+            Error::Db(e) => e,
+            Error::Database(crate::database::error::DatabaseError::Db(e)) => e,
+            _ => return false,
+        };
+        matches!(
+            db_err.sql_err(),
+            Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+        )
+    }
 }

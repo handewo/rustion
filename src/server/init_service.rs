@@ -76,7 +76,7 @@ pub async fn init_service(config: Config) {
     let mut u = User::new(admin_id);
     u.username = "admin".into();
     u.id = admin_id;
-    let u = match db.repository().create_user(&u).await {
+    let u = match db.repository().create_user(u).await {
         Ok(user) => {
             info!("Admin user created with id={}", user.id);
             user

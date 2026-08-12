@@ -3,7 +3,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum DatabaseError {
     #[error(transparent)]
-    Sqlx(#[from] sqlx::Error),
+    Db(#[from] sea_orm::DbErr),
 
     #[error(transparent)]
     UserValidation(#[from] super::models::user::ValidateError),
@@ -26,4 +26,3 @@ pub enum DatabaseError {
     #[error(transparent)]
     CasbinNameValidation(#[from] super::models::casbin_rule::ValidateError),
 }
-
