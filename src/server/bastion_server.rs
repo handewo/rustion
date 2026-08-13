@@ -415,7 +415,7 @@ impl BastionServer {
             .hash_password(&password)
             .map_err(|_| Error::Server(ServerError::PasswordHashFailed))?;
         user.set_password_hash(h);
-        self.database.repository().update_user(&user).await?;
+        self.database.repository().update_user(user).await?;
         Ok(password.to_string())
     }
 }
@@ -591,8 +591,7 @@ impl super::HandlerBackend for BastionServer {
             .hash_password(&password)
             .map_err(|_| Error::Server(ServerError::PasswordHashFailed))?;
         user.set_password_hash(h);
-        self.database.repository().update_user(&user).await?;
-        Ok(user)
+        self.database.repository().update_user(user).await
     }
 
     fn set_password(&self, user: &mut models::User, password: &str) -> Result<(), Error> {
@@ -622,7 +621,7 @@ impl super::HandlerBackend for BastionServer {
             detail,
             created_at: chrono::Utc::now().timestamp_millis(),
         };
-        if let Err(e) = self.database.repository().insert_log(&l).await {
+        if let Err(e) = self.database.repository().insert_log(l).await {
             error!("Insert log to database failed: {}", e);
         };
     }

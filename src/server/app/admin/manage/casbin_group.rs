@@ -482,8 +482,8 @@ where
             }
         }
 
-        match self.backend.db_repository().create_casbin_rule(&cr).await {
-            Ok(_) => {
+        match self.backend.db_repository().create_casbin_rule(cr).await {
+            Ok(cr) => {
                 (self.log)(
                     LOG_TYPE.into(),
                     format!(
@@ -504,8 +504,7 @@ where
             }
             Err(ref err) => {
                 let msg = match err {
-                    e if e.is_unique_violation() =>
-                    {
+                    e if e.is_unique_violation() => {
                         warn!(
                             "[{}] Duplicate entry: {} '{}' already exists in group '{}'",
                             self.handler_id, t_type, obj.name, g_name

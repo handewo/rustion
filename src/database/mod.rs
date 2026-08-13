@@ -162,15 +162,14 @@ pub trait DatabaseRepository: Send + Sync {
         username: &str,
         active_only: bool,
     ) -> Result<Option<User>, Error>;
-    async fn update_user(&self, user: &User) -> Result<User, Error>;
+    async fn update_user(&self, user: User) -> Result<User, Error>;
     async fn delete_user(&self, id: Uuid) -> Result<bool, Error>;
     async fn list_users(&self, active_only: bool) -> Result<Vec<User>, Error>;
     async fn list_users_with_role(&self, active_only: bool) -> Result<Vec<UserWithRole>, Error>;
 
     /// Target operations
-    async fn create_target(&self, target: &Target) -> Result<Target, Error>;
-    async fn get_target_by_id(&self, id: Uuid, active_only: bool)
-    -> Result<Option<Target>, Error>;
+    async fn create_target(&self, target: Target) -> Result<Target, Error>;
+    async fn get_target_by_id(&self, id: Uuid, active_only: bool) -> Result<Option<Target>, Error>;
     async fn get_targets_by_ids(&self, ids: &[&Uuid]) -> Result<Vec<Target>, Error>;
     async fn get_target_by_target_secret_id(
         &self,
@@ -184,14 +183,14 @@ pub trait DatabaseRepository: Send + Sync {
     ) -> Result<Vec<Target>, Error>;
     async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, Error>;
     async fn get_target_by_hostname(&self, hostname: &str) -> Result<Option<Target>, Error>;
-    async fn update_target(&self, target: &Target) -> Result<Target, Error>;
+    async fn update_target(&self, target: Target) -> Result<Target, Error>;
     async fn delete_target(&self, id: Uuid) -> Result<bool, Error>;
     async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, Error>;
     async fn list_targets_info(&self) -> Result<Vec<TargetInfo>, Error>;
 
     /// Secret operations
-    async fn create_secret(&self, secret: &Secret) -> Result<Secret, Error>;
-    async fn update_secret(&self, target: &Secret) -> Result<Secret, Error>;
+    async fn create_secret(&self, secret: Secret) -> Result<Secret, Error>;
+    async fn update_secret(&self, secret: Secret) -> Result<Secret, Error>;
     async fn list_secrets(&self, active_only: bool) -> Result<Vec<Secret>, Error>;
     async fn get_secret_by_id(&self, id: Uuid) -> Result<Option<Secret>, Error>;
     async fn get_secret_by_target_secret_id(
@@ -212,9 +211,12 @@ pub trait DatabaseRepository: Send + Sync {
     ) -> Result<Vec<TargetSecret>, Error>;
     async fn create_target_secret(
         &self,
-        target_secret: &TargetSecret,
+        target_secret: TargetSecret,
     ) -> Result<TargetSecret, Error>;
-    async fn update_target_secret(&self, secret: &TargetSecret) -> Result<TargetSecret, Error>;
+    async fn update_target_secret(
+        &self,
+        target_secret: TargetSecret,
+    ) -> Result<TargetSecret, Error>;
     async fn delete_target_secret(&self, id: Uuid) -> Result<bool, Error>;
     async fn upsert_target_secret(
         &self,
@@ -232,8 +234,8 @@ pub trait DatabaseRepository: Send + Sync {
         ptype: &str,
     ) -> Result<Vec<CasbinRuleGroup>, Error>;
     async fn list_roles_by_user_id(&self, user_id: Uuid) -> Result<Vec<Role>, Error>;
-    async fn create_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error>;
-    async fn update_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error>;
+    async fn create_casbin_rule(&self, rule: CasbinRule) -> Result<CasbinRule, Error>;
+    async fn update_casbin_rule(&self, rule: CasbinRule) -> Result<CasbinRule, Error>;
     async fn delete_casbin_rule(&self, id: Uuid) -> Result<bool, Error>;
     /// It's unsafe if ptype is not in [g1, g2, g3]
     async fn delete_casbin_rule_by_v0_v1(
@@ -244,8 +246,8 @@ pub trait DatabaseRepository: Send + Sync {
     ) -> Result<bool, Error>;
 
     /// CasbinName operations - maps UUIDs to human-readable names
-    async fn create_casbin_name(&self, name: &CasbinName) -> Result<CasbinName, Error>;
-    async fn update_casbin_name(&self, rule: &CasbinName) -> Result<CasbinName, Error>;
+    async fn create_casbin_name(&self, name: CasbinName) -> Result<CasbinName, Error>;
+    async fn update_casbin_name(&self, name: CasbinName) -> Result<CasbinName, Error>;
     async fn delete_casbin_name(&self, id: Uuid) -> Result<bool, Error>;
     async fn get_casbin_name_by_name(&self, name: &str) -> Result<Option<CasbinName>, Error>;
     async fn get_casbin_name_by_id(&self, id: Uuid) -> Result<Option<CasbinName>, Error>;
@@ -259,24 +261,22 @@ pub trait DatabaseRepository: Send + Sync {
         &self,
         active_only: bool,
     ) -> Result<Vec<CasbinName>, Error>;
-    async fn create_casbin_names_batch(
-        &self,
-        rules: &[CasbinName],
-    ) -> Result<Vec<CasbinName>, Error>;
+    /// Returns the number of rows inserted.
+    async fn create_casbin_names_batch(&self, names: Vec<CasbinName>) -> Result<u64, Error>;
 
     /// Log operations
-    async fn insert_log(&self, log: &Log) -> Result<(), Error>;
+    async fn insert_log(&self, log: Log) -> Result<(), Error>;
     async fn list_logs(&self) -> Result<Vec<Log>, Error>;
 
     /// Session recording operations
     async fn create_session_recording(
         &self,
-        recording: &SessionRecording,
+        recording: SessionRecording,
     ) -> Result<SessionRecording, Error>;
 
     async fn update_session_recording(
         &self,
-        recording: &SessionRecording,
+        recording: SessionRecording,
     ) -> Result<SessionRecording, Error>;
 
     async fn get_session_recording_by_id(
@@ -309,17 +309,16 @@ pub trait DatabaseRepository: Send + Sync {
     async fn get_actions_for_policy(&self, policy_act: Uuid) -> Result<Vec<Uuid>, Error>;
 
     /// Batch operations
-    async fn create_users_batch(&self, users: &[User]) -> Result<Vec<User>, Error>;
-    async fn create_targets_batch(&self, targets: &[Target]) -> Result<Vec<Target>, Error>;
-    async fn create_secrets_batch(&self, targets: &[Secret]) -> Result<Vec<Secret>, Error>;
+    ///
+    /// Each returns the number of rows inserted, as reported by the driver.
+    async fn create_users_batch(&self, users: Vec<User>) -> Result<u64, Error>;
+    async fn create_targets_batch(&self, targets: Vec<Target>) -> Result<u64, Error>;
+    async fn create_secrets_batch(&self, secrets: Vec<Secret>) -> Result<u64, Error>;
     async fn create_target_secrets_batch(
         &self,
-        targets: &[TargetSecret],
-    ) -> Result<Vec<TargetSecret>, Error>;
-    async fn create_casbin_rules_batch(
-        &self,
-        rules: &[CasbinRule],
-    ) -> Result<Vec<CasbinRule>, Error>;
+        target_secrets: Vec<TargetSecret>,
+    ) -> Result<u64, Error>;
+    async fn create_casbin_rules_batch(&self, rules: Vec<CasbinRule>) -> Result<u64, Error>;
 
     /// Search operations
     async fn search_users(&self, query: &str) -> Result<Vec<User>, Error>;

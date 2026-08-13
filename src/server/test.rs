@@ -50,45 +50,45 @@ mod tests {
             .await
             .unwrap();
         db.repository()
-            .create_users_batch(&raw_data.users)
+            .create_users_batch(raw_data.users)
             .await
             .unwrap();
 
         db.repository()
-            .create_target(&raw_data.targets.pop().unwrap())
+            .create_target(raw_data.targets.pop().unwrap())
             .await
             .unwrap();
         db.repository()
-            .create_targets_batch(&raw_data.targets)
-            .await
-            .unwrap();
-
-        db.repository()
-            .create_secret(&raw_data.secrets.pop().unwrap())
-            .await
-            .unwrap();
-        db.repository()
-            .create_secrets_batch(&raw_data.secrets)
+            .create_targets_batch(raw_data.targets)
             .await
             .unwrap();
 
         db.repository()
-            .create_target_secret(&raw_data.target_secrets.pop().unwrap())
+            .create_secret(raw_data.secrets.pop().unwrap())
             .await
             .unwrap();
         db.repository()
-            .create_target_secrets_batch(&raw_data.target_secrets)
+            .create_secrets_batch(raw_data.secrets)
+            .await
+            .unwrap();
+
+        db.repository()
+            .create_target_secret(raw_data.target_secrets.pop().unwrap())
+            .await
+            .unwrap();
+        db.repository()
+            .create_target_secrets_batch(raw_data.target_secrets)
             .await
             .unwrap();
 
         // Create internal objects first
 
-        for cn in &raw_data.casbin_names {
+        for cn in raw_data.casbin_names {
             db.repository().create_casbin_name(cn).await.unwrap();
         }
 
         db.repository()
-            .create_casbin_rules_batch(&raw_data.casbin_rule)
+            .create_casbin_rules_batch(raw_data.casbin_rule)
             .await
             .unwrap();
 
@@ -339,7 +339,7 @@ mod tests {
             .unwrap()
             .clone();
         r.v2 = exec_uuid;
-        r = db.repository().update_casbin_rule(&r).await.unwrap();
+        r = db.repository().update_casbin_rule(r).await.unwrap();
         assert!(
             !server
                 .enforce(
@@ -392,7 +392,7 @@ mod tests {
             .unwrap()
             .clone();
         io.is_active = false;
-        db.repository().update_casbin_name(&io).await.unwrap();
+        db.repository().update_casbin_name(io).await.unwrap();
         assert!(
             !server
                 .enforce(alice.id, obj_login, login_uuid, ExtendPolicyReq::default(),)
@@ -419,7 +419,7 @@ mod tests {
             open_direct_tcpip_port: Some(PortPolicy::Allow(vec![2222, 22])),
         };
         r.v3 = serde_json::to_string(&ep).unwrap();
-        r = db.repository().update_casbin_rule(&r).await.unwrap();
+        r = db.repository().update_casbin_rule(r).await.unwrap();
         assert!(
             !server
                 .enforce(
@@ -523,7 +523,7 @@ mod tests {
             open_direct_tcpip_port: None,
         };
         r.v3 = serde_json::to_string(&ep).unwrap();
-        r = db.repository().update_casbin_rule(&r).await.unwrap();
+        r = db.repository().update_casbin_rule(r).await.unwrap();
         assert!(
             !server
                 .enforce(
@@ -625,7 +625,7 @@ mod tests {
             open_direct_tcpip_port: None,
         };
         r.v3 = serde_json::to_string(&ep).unwrap();
-        db.repository().update_casbin_rule(&r).await.unwrap();
+        db.repository().update_casbin_rule(r).await.unwrap();
         assert!(
             !server
                 .enforce(
@@ -678,7 +678,7 @@ mod tests {
             .unwrap()
             .clone();
         ts.is_active = false;
-        db.repository().update_target_secret(&ts).await.unwrap();
+        db.repository().update_target_secret(ts).await.unwrap();
         assert!(
             !server
                 .enforce(
@@ -708,7 +708,7 @@ mod tests {
             .unwrap()
             .clone();
         t.is_active = false;
-        db.repository().update_target(&t).await.unwrap();
+        db.repository().update_target(t).await.unwrap();
         assert!(
             !server
                 .enforce(
@@ -766,7 +766,7 @@ mod tests {
             .unwrap()
             .clone();
         s.is_active = false;
-        db.repository().update_secret(&s).await.unwrap();
+        db.repository().update_secret(s).await.unwrap();
         assert!(
             !server
                 .enforce(
@@ -830,43 +830,43 @@ mod tests {
             .await
             .unwrap();
         db.repository()
-            .create_users_batch(&raw_data.users)
+            .create_users_batch(raw_data.users)
             .await
             .unwrap();
 
         db.repository()
-            .create_target(&raw_data.targets.pop().unwrap())
+            .create_target(raw_data.targets.pop().unwrap())
             .await
             .unwrap();
         db.repository()
-            .create_targets_batch(&raw_data.targets)
+            .create_targets_batch(raw_data.targets)
             .await
             .unwrap();
 
         db.repository()
-            .create_secret(&raw_data.secrets.pop().unwrap())
+            .create_secret(raw_data.secrets.pop().unwrap())
             .await
             .unwrap();
         db.repository()
-            .create_secrets_batch(&raw_data.secrets)
+            .create_secrets_batch(raw_data.secrets)
             .await
             .unwrap();
 
         db.repository()
-            .create_target_secret(&raw_data.target_secrets.pop().unwrap())
+            .create_target_secret(raw_data.target_secrets.pop().unwrap())
             .await
             .unwrap();
         db.repository()
-            .create_target_secrets_batch(&raw_data.target_secrets)
+            .create_target_secrets_batch(raw_data.target_secrets)
             .await
             .unwrap();
 
-        for cn in &raw_data.casbin_names {
+        for cn in raw_data.casbin_names {
             db.repository().create_casbin_name(cn).await.unwrap();
         }
 
         db.repository()
-            .create_casbin_rules_batch(&raw_data.casbin_rule)
+            .create_casbin_rules_batch(raw_data.casbin_rule)
             .await
             .unwrap();
 
@@ -971,7 +971,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let t = t.set_active(false);
-        db.repository().update_target(&t).await.unwrap();
+        db.repository().update_target(t).await.unwrap();
         assert!(
             !server
                 .enforce(
@@ -1012,7 +1012,7 @@ mod tests {
             String::new(),
             admin.id,
         );
-        db.repository().create_casbin_rule(&r).await.unwrap();
+        db.repository().create_casbin_rule(r).await.unwrap();
         server.load_role_manager().await.unwrap();
         assert!(
             server

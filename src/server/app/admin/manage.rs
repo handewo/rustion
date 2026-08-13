@@ -695,7 +695,7 @@ where
                             ),
                             Popup::Edit => (
                                 "updated",
-                                self.backend.db_repository().update_user(&user).await,
+                                self.backend.db_repository().update_user(user).await,
                             ),
                             _ => unreachable!(),
                         };
@@ -742,27 +742,27 @@ where
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
-                                self.backend.db_repository().create_target(&target).await,
+                                self.backend.db_repository().create_target(target).await,
                             ),
                             Popup::Edit => (
                                 "updated",
-                                self.backend.db_repository().update_target(&target).await,
+                                self.backend.db_repository().update_target(target).await,
                             ),
                             _ => unreachable!(),
                         };
 
-                        if let Err(ref err) = result {
-                            let msg = match err {
-                                e if e.is_unique_violation() => "Target already exists",
-                                _ => "Internal error",
-                            };
-                            warn!(
-                                "[{}] Failed to {} target '{}({})': {}",
-                                self.handler_id, action, target.name, target.id, err
-                            );
-                            self.message = Some(Message::Error(vec![msg.into()]));
-                            return Ok(());
-                        }
+                        let target = match result {
+                            Ok(t) => t,
+                            Err(ref err) => {
+                                let msg = match err {
+                                    e if e.is_unique_violation() => "Target already exists",
+                                    _ => "Internal error",
+                                };
+                                warn!("[{}] Failed to {} target: {}", self.handler_id, action, err);
+                                self.message = Some(Message::Error(vec![msg.into()]));
+                                return Ok(());
+                            }
+                        };
 
                         info!(
                             "[{}] Target '{}({})' {} by admin_id={}",
@@ -795,26 +795,28 @@ where
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
-                                self.backend.db_repository().create_secret(&secret).await,
+                                self.backend.db_repository().create_secret(secret).await,
                             ),
                             Popup::Edit => (
                                 "updated",
-                                self.backend.db_repository().update_secret(&secret).await,
+                                self.backend.db_repository().update_secret(secret).await,
                             ),
                             _ => unreachable!(),
                         };
-                        if let Err(ref err) = result {
-                            let msg = match err {
-                                e if e.is_unique_violation() => "Secret already exists",
-                                _ => "Internal error",
-                            };
-                            warn!(
-                                "[{}] Failed to {} secret '{}({})': {}",
-                                self.handler_id, action, secret.name, secret.id, err
-                            );
-                            self.message = Some(Message::Error(vec![msg.into()]));
-                            return Ok(());
-                        }
+
+                        let secret = match result {
+                            Ok(s) => s,
+                            Err(ref err) => {
+                                let msg = match err {
+                                    e if e.is_unique_violation() => "Secret already exists",
+                                    _ => "Internal error",
+                                };
+                                warn!("[{}] Failed to {} secret: {}", self.handler_id, action, err);
+                                self.message = Some(Message::Error(vec![msg.into()]));
+                                return Ok(());
+                            }
+                        };
+
                         info!(
                             "[{}] Secret '{}({})' {} by admin_id={}",
                             self.handler_id, secret.name, secret.id, action, self.admin_id
@@ -842,37 +844,42 @@ where
                                 "added",
                                 self.backend
                                     .db_repository()
-                                    .create_casbin_rule(&perm.rule)
+                                    .create_casbin_rule(perm.rule)
                                     .await,
                             ),
                             Popup::Edit => (
                                 "updated",
                                 self.backend
                                     .db_repository()
-                                    .update_casbin_rule(&perm.rule)
+                                    .update_casbin_rule(perm.rule)
                                     .await,
                             ),
                             _ => unreachable!(),
                         };
-                        if let Err(ref err) = result {
-                            let msg = match err {
-                                e if e.is_unique_violation() => "Permission already exists",
-                                _ => "Internal error",
-                            };
-                            warn!(
-                                "[{}] Failed to {} permission '({})': {}",
-                                self.handler_id, action, perm.rule.id, err
-                            );
-                            self.message = Some(Message::Error(vec![msg.into()]));
-                            return Ok(());
-                        }
+
+                        let rule = match result {
+                            Ok(s) => s,
+                            Err(ref err) => {
+                                let msg = match err {
+                                    e if e.is_unique_violation() => "Permission already exists",
+                                    _ => "Internal error",
+                                };
+                                warn!(
+                                    "[{}] Failed to {} permission: {}",
+                                    self.handler_id, action, err
+                                );
+                                self.message = Some(Message::Error(vec![msg.into()]));
+                                return Ok(());
+                            }
+                        };
+
                         info!(
                             "[{}] Permission '({})' {} by admin_id={}",
-                            self.handler_id, perm.rule.id, action, self.admin_id
+                            self.handler_id, rule.id, action, self.admin_id
                         );
                         (self.log)(
                             LOG_TYPE.into(),
-                            format!("Permission '({})' {}", perm.rule.id, action),
+                            format!("Permission '({})' {}", rule.id, action),
                         )
                         .await;
                         let msg = vec![format!("Permission {}", action)];
@@ -900,31 +907,34 @@ where
                                 "added",
                                 self.backend
                                     .db_repository()
-                                    .create_casbin_name(&casbin_name)
+                                    .create_casbin_name(casbin_name)
                                     .await,
                             ),
                             Popup::Edit => (
                                 "updated",
                                 self.backend
                                     .db_repository()
-                                    .update_casbin_name(&casbin_name)
+                                    .update_casbin_name(casbin_name)
                                     .await,
                             ),
                             _ => unreachable!(),
                         };
 
-                        if let Err(ref err) = result {
-                            let msg = match err {
-                                e if e.is_unique_violation() => "Group already exists",
-                                _ => "Internal error",
-                            };
-                            warn!(
-                                "[{}] Failed to {} casbin name '{}({})': {}",
-                                self.handler_id, action, casbin_name.name, casbin_name.id, err
-                            );
-                            self.message = Some(Message::Error(vec![msg.into()]));
-                            return Ok(());
-                        }
+                        let casbin_name = match result {
+                            Ok(s) => s,
+                            Err(ref err) => {
+                                let msg = match err {
+                                    e if e.is_unique_violation() => "Group already exists",
+                                    _ => "Internal error",
+                                };
+                                warn!(
+                                    "[{}] Failed to {} casbin name: {}",
+                                    self.handler_id, action, err
+                                );
+                                self.message = Some(Message::Error(vec![msg.into()]));
+                                return Ok(());
+                            }
+                        };
 
                         info!(
                             "[{}] Casbin name '{}({})' {} by admin_id={}",

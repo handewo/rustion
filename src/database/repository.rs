@@ -147,20 +147,16 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(q.one(&self.db).await?.map(User::from))
     }
 
-    async fn update_user(&self, user: &User) -> Result<User, Error> {
+    async fn update_user(&self, mut user: User) -> Result<User, Error> {
         debug!("Updating user: '{}({})'", user.username, user.id);
-        let mut updated_user = user.clone();
-        updated_user.updated_at = Utc::now().timestamp_millis();
+        user.updated_at = Utc::now().timestamp_millis();
 
-        user::Entity::update(updated_user.clone().into_active_model())
+        let res = user::Entity::update(user.into_active_model())
             .exec(&self.db)
             .await?;
 
-        debug!(
-            "User updated successfully: '{}({})'",
-            updated_user.username, updated_user.id
-        );
-        Ok(updated_user)
+        debug!("User updated successfully: '{}({})'", res.username, res.id);
+        Ok(res.into())
     }
 
     async fn delete_user(&self, id: Uuid) -> Result<bool, Error> {
@@ -206,39 +202,31 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn create_users_batch(&self, users: &[User]) -> Result<Vec<User>, Error> {
+    async fn create_users_batch(&self, users: Vec<User>) -> Result<u64, Error> {
         if users.is_empty() {
-            return Ok(vec![]);
+            return Ok(0);
         }
-        user::Entity::insert_many(
+        let rows = user::Entity::insert_many(
             users
-                .iter()
-                .cloned()
+                .into_iter()
                 .map(User::into_active_model)
                 .collect::<Vec<_>>(),
         )
-        .exec(&self.db)
+        .exec_without_returning(&self.db)
         .await?;
-        Ok(users.to_vec())
+        Ok(rows)
     }
 
     // -------------------------------------------------------------- targets
 
-    async fn create_target(&self, target: &Target) -> Result<Target, Error> {
+    async fn create_target(&self, target: Target) -> Result<Target, Error> {
         debug!("Creating target: '{}({})'", target.name, target.id);
-        target.clone().into_active_model().insert(&self.db).await?;
-        debug!(
-            "Target created successfully: '{}({})'",
-            target.name, target.id
-        );
-        Ok(target.clone())
+        let res = target.into_active_model().insert(&self.db).await?;
+        debug!("Target created successfully: '{}({})'", res.name, res.id);
+        Ok(res.into())
     }
 
-    async fn get_target_by_id(
-        &self,
-        id: Uuid,
-        active_only: bool,
-    ) -> Result<Option<Target>, Error> {
+    async fn get_target_by_id(&self, id: Uuid, active_only: bool) -> Result<Option<Target>, Error> {
         let mut q = target::Entity::find_by_id(id);
         if active_only {
             q = q.filter(target::Column::IsActive.eq(true));
@@ -275,20 +263,16 @@ impl DatabaseRepository for SeaOrmRepository {
             .map(Target::from))
     }
 
-    async fn update_target(&self, target: &Target) -> Result<Target, Error> {
+    async fn update_target(&self, mut target: Target) -> Result<Target, Error> {
         debug!("Updating target: '{}({})'", target.name, target.id);
-        let mut updated_target = target.clone();
-        updated_target.updated_at = Utc::now().timestamp_millis();
+        target.updated_at = Utc::now().timestamp_millis();
 
-        target::Entity::update(updated_target.clone().into_active_model())
+        let res = target::Entity::update(target.into_active_model())
             .exec(&self.db)
             .await?;
 
-        debug!(
-            "Target updated successfully: '{}({})'",
-            updated_target.name, updated_target.id
-        );
-        Ok(updated_target)
+        debug!("Target updated successfully: '{}({})'", res.name, res.id);
+        Ok(res.into())
     }
 
     async fn delete_target(&self, id: Uuid) -> Result<bool, Error> {
@@ -346,48 +330,40 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn create_targets_batch(&self, targets: &[Target]) -> Result<Vec<Target>, Error> {
+    async fn create_targets_batch(&self, targets: Vec<Target>) -> Result<u64, Error> {
         if targets.is_empty() {
-            return Ok(vec![]);
+            return Ok(0);
         }
-        target::Entity::insert_many(
+        let rows = target::Entity::insert_many(
             targets
-                .iter()
-                .cloned()
+                .into_iter()
                 .map(Target::into_active_model)
                 .collect::<Vec<_>>(),
         )
-        .exec(&self.db)
+        .exec_without_returning(&self.db)
         .await?;
-        Ok(targets.to_vec())
+        Ok(rows)
     }
 
     // -------------------------------------------------------------- secrets
 
-    async fn create_secret(&self, secret: &Secret) -> Result<Secret, Error> {
+    async fn create_secret(&self, secret: Secret) -> Result<Secret, Error> {
         debug!("Creating secret: '{}({})'", secret.name, secret.id);
-        secret.clone().into_active_model().insert(&self.db).await?;
-        debug!(
-            "Secret created successfully: '{}({})'",
-            secret.name, secret.id
-        );
-        Ok(secret.clone())
+        let res = secret.into_active_model().insert(&self.db).await?;
+        debug!("Secret created successfully: '{}({})'", res.name, res.id);
+        Ok(res.into())
     }
 
-    async fn update_secret(&self, secret: &Secret) -> Result<Secret, Error> {
+    async fn update_secret(&self, mut secret: Secret) -> Result<Secret, Error> {
         debug!("Updating secret: '{}({})'", secret.name, secret.id);
-        let mut updated_secret = secret.clone();
-        updated_secret.updated_at = Utc::now().timestamp_millis();
+        secret.updated_at = Utc::now().timestamp_millis();
 
-        secret::Entity::update(updated_secret.clone().into_active_model())
+        let res = secret::Entity::update(secret.into_active_model())
             .exec(&self.db)
             .await?;
 
-        debug!(
-            "Secret updated successfully: '{}({})'",
-            updated_secret.name, updated_secret.id
-        );
-        Ok(updated_secret)
+        debug!("Secret updated successfully: '{}({})'", res.name, res.id);
+        Ok(res.into())
     }
 
     async fn list_secrets(&self, active_only: bool) -> Result<Vec<Secret>, Error> {
@@ -433,20 +409,19 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(deleted)
     }
 
-    async fn create_secrets_batch(&self, secrets: &[Secret]) -> Result<Vec<Secret>, Error> {
+    async fn create_secrets_batch(&self, secrets: Vec<Secret>) -> Result<u64, Error> {
         if secrets.is_empty() {
-            return Ok(vec![]);
+            return Ok(0);
         }
-        secret::Entity::insert_many(
+        let rows = secret::Entity::insert_many(
             secrets
-                .iter()
-                .cloned()
+                .into_iter()
                 .map(Secret::into_active_model)
                 .collect::<Vec<_>>(),
         )
-        .exec(&self.db)
+        .exec_without_returning(&self.db)
         .await?;
-        Ok(secrets.to_vec())
+        Ok(rows)
     }
 
     // ------------------------------------------------------- target_secrets
@@ -467,25 +442,23 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn create_target_secret(
         &self,
-        target_secret: &TargetSecret,
+        target_secret: TargetSecret,
     ) -> Result<TargetSecret, Error> {
-        target_secret
-            .clone()
-            .into_active_model()
-            .insert(&self.db)
-            .await?;
-        Ok(target_secret.clone())
+        let res = target_secret.into_active_model().insert(&self.db).await?;
+        Ok(res.into())
     }
 
-    async fn update_target_secret(&self, secret: &TargetSecret) -> Result<TargetSecret, Error> {
-        let mut updated = secret.clone();
-        updated.updated_at = Utc::now().timestamp_millis();
+    async fn update_target_secret(
+        &self,
+        mut target_secret: TargetSecret,
+    ) -> Result<TargetSecret, Error> {
+        target_secret.updated_at = Utc::now().timestamp_millis();
 
-        target_secret::Entity::update(updated.clone().into_active_model())
+        let res = target_secret::Entity::update(target_secret.into_active_model())
             .exec(&self.db)
             .await?;
 
-        Ok(updated)
+        Ok(res.into())
     }
 
     async fn delete_target_secret(&self, id: Uuid) -> Result<bool, Error> {
@@ -521,7 +494,7 @@ impl DatabaseRepository for SeaOrmRepository {
             Some(m) => {
                 let mut ts = TargetSecret::from(m);
                 ts.is_active = is_active;
-                self.update_target_secret(&ts).await?;
+                self.update_target_secret(ts).await?;
                 debug!(
                     "Target_secret binding updated: target_id={}, secret_id={}",
                     target_id, secret_id
@@ -530,7 +503,7 @@ impl DatabaseRepository for SeaOrmRepository {
             None => {
                 let mut ts = TargetSecret::new(target_id, secret_id, updated_by);
                 ts.is_active = is_active;
-                self.create_target_secret(&ts).await?;
+                self.create_target_secret(ts).await?;
                 debug!(
                     "Target_secret binding created: target_id={}, secret_id={}",
                     target_id, secret_id
@@ -543,21 +516,20 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn create_target_secrets_batch(
         &self,
-        secrets: &[TargetSecret],
-    ) -> Result<Vec<TargetSecret>, Error> {
-        if secrets.is_empty() {
-            return Ok(vec![]);
+        target_secrets: Vec<TargetSecret>,
+    ) -> Result<u64, Error> {
+        if target_secrets.is_empty() {
+            return Ok(0);
         }
-        target_secret::Entity::insert_many(
-            secrets
-                .iter()
-                .cloned()
+        let rows = target_secret::Entity::insert_many(
+            target_secrets
+                .into_iter()
                 .map(TargetSecret::into_active_model)
                 .collect::<Vec<_>>(),
         )
-        .exec(&self.db)
+        .exec_without_returning(&self.db)
         .await?;
-        Ok(secrets.to_vec())
+        Ok(rows)
     }
 
     // ---------------------------------------------------------- casbin_rule
@@ -583,31 +555,28 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn create_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error> {
+    async fn create_casbin_rule(&self, rule: CasbinRule) -> Result<CasbinRule, Error> {
         debug!("Creating casbin_rule: '({})'", rule.id);
-        rule.clone().into_active_model().insert(&self.db).await?;
-        debug!("Casbin_rule created successfully: '({})'", rule.id);
-        Ok(rule.clone())
+        let res = rule.into_active_model().insert(&self.db).await?;
+        debug!("Casbin_rule created successfully: '({})'", res.id);
+        Ok(res.into())
     }
 
-    async fn update_casbin_rule(&self, rule: &CasbinRule) -> Result<CasbinRule, Error> {
+    async fn update_casbin_rule(&self, mut rule: CasbinRule) -> Result<CasbinRule, Error> {
         debug!("Updating casbin_rule: '({})'", rule.id);
-        let mut updated_rule = rule.clone();
-        updated_rule.updated_at = Utc::now().timestamp_millis();
+        rule.updated_at = Utc::now().timestamp_millis();
 
-        casbin_rule::Entity::update(updated_rule.clone().into_active_model())
+        let res = casbin_rule::Entity::update(rule.into_active_model())
             .exec(&self.db)
             .await?;
 
-        debug!("Casbin_rule updated successfully: '({})'", updated_rule.id);
-        Ok(updated_rule)
+        debug!("Casbin_rule updated successfully: '({})'", res.id);
+        Ok(res.into())
     }
 
     async fn delete_casbin_rule(&self, id: Uuid) -> Result<bool, Error> {
         debug!("Deleting casbin_rule: '({})'", id);
-        let res = casbin_rule::Entity::delete_by_id(id)
-            .exec(&self.db)
-            .await?;
+        let res = casbin_rule::Entity::delete_by_id(id).exec(&self.db).await?;
         let deleted = res.rows_affected > 0;
         if deleted {
             debug!("Casbin_rule deleted successfully: '({})'", id);
@@ -642,51 +611,46 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(deleted)
     }
 
-    async fn create_casbin_rules_batch(
-        &self,
-        rules: &[CasbinRule],
-    ) -> Result<Vec<CasbinRule>, Error> {
+    async fn create_casbin_rules_batch(&self, rules: Vec<CasbinRule>) -> Result<u64, Error> {
         if rules.is_empty() {
-            return Ok(vec![]);
+            return Ok(0);
         }
-        casbin_rule::Entity::insert_many(
+        let rows = casbin_rule::Entity::insert_many(
             rules
-                .iter()
-                .cloned()
+                .into_iter()
                 .map(CasbinRule::into_active_model)
                 .collect::<Vec<_>>(),
         )
-        .exec(&self.db)
+        .exec_without_returning(&self.db)
         .await?;
-        Ok(rules.to_vec())
+        Ok(rows)
     }
 
     // --------------------------------------------------------- casbin_names
 
-    async fn create_casbin_name(&self, name: &CasbinName) -> Result<CasbinName, Error> {
-        name.clone().into_active_model().insert(&self.db).await?;
-        Ok(name.clone())
+    async fn create_casbin_name(&self, name: CasbinName) -> Result<CasbinName, Error> {
+        let res = name.into_active_model().insert(&self.db).await?;
+        Ok(res.into())
     }
 
-    async fn update_casbin_name(&self, rule: &CasbinName) -> Result<CasbinName, Error> {
+    async fn update_casbin_name(&self, mut name: CasbinName) -> Result<CasbinName, Error> {
         // Internal types may not be renamed or re-typed.
-        if let Some(existing) = self.get_casbin_name_by_id(rule.id).await?
+        if let Some(existing) = self.get_casbin_name_by_id(name.id).await?
             && existing.is_internal()
-            && (existing.ptype != rule.ptype || existing.name != rule.name)
+            && (existing.ptype != name.ptype || existing.name != name.name)
         {
             return Err(Error::Database(DatabaseError::CasbinNameValidation(
                 ValidateError::InternalTypeModification,
             )));
         }
 
-        let mut updated_rule = rule.clone();
-        updated_rule.updated_at = Utc::now().timestamp_millis();
+        name.updated_at = Utc::now().timestamp_millis();
 
-        casbin_names::Entity::update(updated_rule.clone().into_active_model())
+        let res = casbin_names::Entity::update(name.into_active_model())
             .exec(&self.db)
             .await?;
 
-        Ok(updated_rule)
+        Ok(res.into())
     }
 
     async fn delete_casbin_name(&self, id: Uuid) -> Result<bool, Error> {
@@ -773,29 +737,25 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn create_casbin_names_batch(
-        &self,
-        casbin_names_batch: &[CasbinName],
-    ) -> Result<Vec<CasbinName>, Error> {
-        if casbin_names_batch.is_empty() {
-            return Ok(vec![]);
+    async fn create_casbin_names_batch(&self, names: Vec<CasbinName>) -> Result<u64, Error> {
+        if names.is_empty() {
+            return Ok(0);
         }
-        casbin_names::Entity::insert_many(
-            casbin_names_batch
-                .iter()
-                .cloned()
+        let rows = casbin_names::Entity::insert_many(
+            names
+                .into_iter()
                 .map(CasbinName::into_active_model)
                 .collect::<Vec<_>>(),
         )
-        .exec(&self.db)
+        .exec_without_returning(&self.db)
         .await?;
-        Ok(casbin_names_batch.to_vec())
+        Ok(rows)
     }
 
     // ------------------------------------------------------------------ logs
 
-    async fn insert_log(&self, log: &Log) -> Result<(), Error> {
-        log.clone().into_active_model().insert(&self.db).await?;
+    async fn insert_log(&self, log: Log) -> Result<(), Error> {
+        log.into_active_model().insert(&self.db).await?;
         Ok(())
     }
 
@@ -813,29 +773,25 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn create_session_recording(
         &self,
-        recording: &SessionRecording,
+        recording: SessionRecording,
     ) -> Result<SessionRecording, Error> {
         debug!(
             "Creating session_recording: user_id={}, target_id={}",
             recording.user_id, recording.target_id
         );
-        recording
-            .clone()
-            .into_active_model()
-            .insert(&self.db)
-            .await?;
-        Ok(recording.clone())
+        let res = recording.into_active_model().insert(&self.db).await?;
+        Ok(res.into())
     }
 
     async fn update_session_recording(
         &self,
-        recording: &SessionRecording,
+        recording: SessionRecording,
     ) -> Result<SessionRecording, Error> {
         debug!("Updating session_recording: id={}", recording.id);
-        session_recordings::Entity::update(recording.clone().into_active_model())
+        let res = session_recordings::Entity::update(recording.into_active_model())
             .exec(&self.db)
             .await?;
-        Ok(recording.clone())
+        Ok(res.into())
     }
 
     async fn get_session_recording_by_id(

@@ -354,7 +354,7 @@ where
                 if let Err(e) = self
                     .backend
                     .db_repository()
-                    .create_session_recording(&recording)
+                    .create_session_recording(recording)
                     .await
                 {
                     log::error!(
@@ -520,7 +520,7 @@ where
                 updated.status = "completed".to_string();
                 if let Err(e) = backend_for_task
                     .db_repository()
-                    .update_session_recording(&updated)
+                    .update_session_recording(updated)
                     .await
                 {
                     log::error!("[{}] Failed to update session recording: {}", handler_id, e);

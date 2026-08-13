@@ -136,57 +136,41 @@ pub async fn init_service(config: Config) {
         u.id,
     );
 
-    let casbin_names_rows = match db
-        .repository()
-        .create_casbin_names_batch(&[
-            action_tcpip,
-            action_pty,
-            action_exec,
-            action_shell,
-            action_login,
-            obj_login,
-            obj_admin,
-            obj_player,
-        ])
-        .await
-    {
-        Ok(rows) => {
-            info!("Created {} casbin_names entries", rows.len());
-            rows
-        }
+    // Ids are generated client-side by `CasbinName::new`, so capture the ones the policies
+    // below need before the values are moved into the batch.
+    let obj_login_id = obj_login.id;
+    let obj_admin_id = obj_admin.id;
+    let action_login_id = action_login.id;
+    let action_shell_id = action_shell.id;
+
+    let names = vec![
+        action_tcpip,
+        action_pty,
+        action_exec,
+        action_shell,
+        action_login,
+        obj_login,
+        obj_admin,
+        obj_player,
+    ];
+    match db.repository().create_casbin_names_batch(names).await {
+        Ok(rows) => info!("Created {} casbin_names entries", rows),
         Err(e) => {
             panic!("Failed to create casbin_names batch: {}", e);
         }
-    };
-
-    // Get UUIDs for internal objects (OBJ_LOGIN, OBJ_ADMIN)
-    let obj_login_id = casbin_names_rows
-        .iter()
-        .find(|o| o.name == OBJ_LOGIN)
-        .map(|o| o.id)
-        .unwrap_or_else(|| panic!("Failed to find OBJ_LOGIN in casbin_names"));
-    let obj_admin_id = casbin_names_rows
-        .iter()
-        .find(|o| o.name == OBJ_ADMIN)
-        .map(|o| o.id)
-        .unwrap_or_else(|| panic!("Failed to find OBJ_ADMIN in casbin_names"));
-    let action_login = casbin_names_rows
-        .iter()
-        .find(|o| o.name == ACT_LOGIN)
-        .unwrap_or_else(|| panic!("Failed to find ACT_LOGIN in casbin_names"));
-    let action_shell = casbin_names_rows
-        .iter()
-        .find(|o| o.name == ACT_SHELL)
-        .unwrap_or_else(|| panic!("Failed to find ACT_SHELL in casbin_names"));
+    }
 
     // Create login_group UUID and store in casbin_names
     let login_group = CasbinName::new("g1".to_string(), "login_group".to_string(), true, u.id);
-    match db.repository().create_casbin_name(&login_group).await {
-        Ok(_) => info!("Created login_group casbin_name"),
+    let login_group_id = match db.repository().create_casbin_name(login_group).await {
+        Ok(n) => {
+            info!("Created login_group casbin_name");
+            n.id
+        }
         Err(e) => {
             panic!("Failed to create login_group: {}", e);
         }
-    }
+    };
 
     info!("Creating default permission policies");
 
@@ -207,13 +191,13 @@ pub async fn init_service(config: Config) {
         "p".to_string(),
         u.id,
         obj_login_id,
-        action_login.id,
+        action_login_id,
         serde_json::to_string(&ext).unwrap(),
         String::new(),
         String::new(),
         u.id,
     );
-    match db.repository().create_casbin_rule(&p).await {
+    match db.repository().create_casbin_rule(p).await {
         Ok(_) => info!("Created policy: admin can login from localhost (IPv4)"),
         Err(e) => {
             panic!("Failed to create admin login policy (IPv4): {}", e);
@@ -225,13 +209,13 @@ pub async fn init_service(config: Config) {
         "p".to_string(),
         u.id,
         obj_admin_id,
-        action_shell.id,
+        action_shell_id,
         serde_json::to_string(&ext).unwrap(),
         String::new(),
         String::new(),
         u.id,
     );
-    match db.repository().create_casbin_rule(&p).await {
+    match db.repository().create_casbin_rule(p).await {
         Ok(_) => info!("Created policy: admin can access admin panel from localhost (IPv4)"),
         Err(e) => {
             panic!("Failed to create admin panel policy (IPv4): {}", e);
@@ -256,13 +240,13 @@ pub async fn init_service(config: Config) {
         "p".to_string(),
         u.id,
         obj_login_id,
-        action_login.id,
+        action_login_id,
         serde_json::to_string(&ext).unwrap(),
         String::new(),
         String::new(),
         u.id,
     );
-    match db.repository().create_casbin_rule(&p).await {
+    match db.repository().create_casbin_rule(p).await {
         Ok(_) => info!("Created policy: admin can login from localhost (IPv6)"),
         Err(e) => {
             panic!("Failed to create admin login policy (IPv6): {}", e);
@@ -274,13 +258,13 @@ pub async fn init_service(config: Config) {
         "p".to_string(),
         u.id,
         obj_admin_id,
-        action_shell.id,
+        action_shell_id,
         serde_json::to_string(&ext).unwrap(),
         String::new(),
         String::new(),
         u.id,
     );
-    match db.repository().create_casbin_rule(&p).await {
+    match db.repository().create_casbin_rule(p).await {
         Ok(_) => info!("Created policy: admin can access admin panel from localhost (IPv6)"),
         Err(e) => {
             panic!("Failed to create admin panel policy (IPv6): {}", e);
@@ -298,15 +282,15 @@ pub async fn init_service(config: Config) {
     };
     let p = CasbinRule::new(
         "p".to_string(),
-        login_group.id,
+        login_group_id,
         obj_login_id,
-        action_login.id,
+        action_login_id,
         serde_json::to_string(&ext).unwrap(),
         String::new(),
         String::new(),
         u.id,
     );
-    match db.repository().create_casbin_rule(&p).await {
+    match db.repository().create_casbin_rule(p).await {
         Ok(_) => info!("Created policy: login_group can login (no IP restriction)"),
         Err(e) => {
             panic!("Failed to create login_group policy: {}", e);

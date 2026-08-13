@@ -130,9 +130,7 @@ where
         let idx = self.role_table.state.selected().unwrap();
         let t = self.items.get_mut(idx).unwrap();
         if t.is_bound {
-            let id = t
-                .rule_id
-                .ok_or(Error::Server(ServerError::MissingRuleId))?;
+            let id = t.rule_id.ok_or(Error::Server(ServerError::MissingRuleId))?;
             self.backend.db_repository().delete_casbin_rule(id).await?;
             info!(
                 "[{}] Role '{}({})' revoked from user_id={} by admin_id={}",
@@ -157,7 +155,7 @@ where
                 String::new(),
                 self.admin_id,
             );
-            self.backend.db_repository().create_casbin_rule(&cr).await?;
+            self.backend.db_repository().create_casbin_rule(cr).await?;
             info!(
                 "[{}] Role '{}({})' granted to user_id={} by admin_id={}",
                 self.handler_id, t.role, t.rid, self.selected_user_id, self.admin_id

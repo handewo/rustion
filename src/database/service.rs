@@ -60,54 +60,80 @@ mod tests {
         let mut buffer = String::new();
         test_data.read_to_string(&mut buffer).unwrap();
         let mut raw_data: RawData = serde_json::from_str(&buffer).unwrap();
+        // Each batch insert reports the rows the driver actually wrote; assert it matches
+        // the number of entities handed in.
         db.repository
             .create_user(raw_data.users.pop().unwrap())
             .await
             .unwrap();
-        db.repository
-            .create_users_batch(&raw_data.users)
-            .await
-            .unwrap();
+        let n = raw_data.users.len() as u64;
+        assert_eq!(
+            db.repository
+                .create_users_batch(raw_data.users)
+                .await
+                .unwrap(),
+            n
+        );
 
         db.repository
-            .create_target(&raw_data.targets.pop().unwrap())
+            .create_target(raw_data.targets.pop().unwrap())
             .await
             .unwrap();
-        db.repository
-            .create_targets_batch(&raw_data.targets)
-            .await
-            .unwrap();
+        let n = raw_data.targets.len() as u64;
+        assert_eq!(
+            db.repository
+                .create_targets_batch(raw_data.targets)
+                .await
+                .unwrap(),
+            n
+        );
 
         db.repository
-            .create_casbin_rule(&raw_data.casbin_rule.pop().unwrap())
+            .create_casbin_rule(raw_data.casbin_rule.pop().unwrap())
             .await
             .unwrap();
-        db.repository
-            .create_casbin_rules_batch(&raw_data.casbin_rule)
-            .await
-            .unwrap();
+        let n = raw_data.casbin_rule.len() as u64;
+        assert_eq!(
+            db.repository
+                .create_casbin_rules_batch(raw_data.casbin_rule)
+                .await
+                .unwrap(),
+            n
+        );
 
         db.repository
-            .create_secret(&raw_data.secrets.pop().unwrap())
+            .create_secret(raw_data.secrets.pop().unwrap())
             .await
             .unwrap();
-        db.repository
-            .create_secrets_batch(&raw_data.secrets)
-            .await
-            .unwrap();
+        let n = raw_data.secrets.len() as u64;
+        assert_eq!(
+            db.repository
+                .create_secrets_batch(raw_data.secrets)
+                .await
+                .unwrap(),
+            n
+        );
 
         db.repository
-            .create_target_secret(&raw_data.target_secrets.pop().unwrap())
+            .create_target_secret(raw_data.target_secrets.pop().unwrap())
             .await
             .unwrap();
-        db.repository
-            .create_target_secrets_batch(&raw_data.target_secrets)
-            .await
-            .unwrap();
-        db.repository
-            .create_casbin_names_batch(&raw_data.casbin_names)
-            .await
-            .unwrap();
+        let n = raw_data.target_secrets.len() as u64;
+        assert_eq!(
+            db.repository
+                .create_target_secrets_batch(raw_data.target_secrets)
+                .await
+                .unwrap(),
+            n
+        );
+        let n = raw_data.casbin_names.len() as u64;
+        assert_eq!(
+            db.repository
+                .create_casbin_names_batch(raw_data.casbin_names)
+                .await
+                .unwrap(),
+            n
+        );
 
         db
     }
