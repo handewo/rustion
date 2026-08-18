@@ -2,7 +2,7 @@
 mod tests {
     use crate::database::common::OBJ_LOGIN;
     use crate::database::models::{
-        CasbinRule, Secret, Target, TargetSecretName, User, casbin_rule::CasbinName,
+        CasbinRule, Ptype, Secret, Target, TargetSecretName, User, casbin_rule::CasbinName,
         target_secret::TargetSecret,
     };
     use crate::database::{DatabaseConfig, common, service::DatabaseService};
@@ -1003,7 +1003,7 @@ mod tests {
             .id;
 
         let r = CasbinRule::new(
-            "p".to_string(),
+            Ptype::Policy,
             admin.id,
             obj_login,
             all_req_uuid,

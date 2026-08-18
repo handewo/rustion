@@ -24,7 +24,8 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
-use crate::database::common::{INTERNAL_ACTION_TYPE, INTERNAL_OBJECT_TYPE};
+use crate::database::entity::casbin_names::NamePtype;
+use crate::database::entity::casbin_rule::Ptype;
 use crate::database::entity::{
     casbin_names, casbin_rule, secret, session_recordings, target, target_secret, user,
 };
@@ -307,7 +308,7 @@ pub(super) async fn check_object_active(db: &DatabaseConnection, id: Uuid) -> Re
 
     Ok(casbin_names::Entity::find()
         .filter(casbin_names::Column::Id.eq(id))
-        .filter(casbin_names::Column::Ptype.eq(INTERNAL_OBJECT_TYPE))
+        .filter(casbin_names::Column::Ptype.eq(NamePtype::InternalObjectType))
         .filter(casbin_names::Column::IsActive.eq(true))
         .one(db)
         .await?
@@ -325,14 +326,14 @@ pub(super) async fn list_roles_by_user_id(
     user_id: Uuid,
 ) -> Result<Vec<Role>, Error> {
     let roles = casbin_names::Entity::find()
-        .filter(casbin_names::Column::Ptype.eq("g1"))
+        .filter(casbin_names::Column::Ptype.eq(NamePtype::G1))
         .order_by_asc(casbin_names::Column::Name)
         .all(db)
         .await?;
 
     // v0 (role) -> rule id, for this user's g1 bindings.
     let bindings: HashMap<Uuid, Uuid> = casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq("g1"))
+        .filter(casbin_rule::Column::Ptype.eq(Ptype::G1))
         .filter(casbin_rule::Column::V1.eq(user_id))
         .all(db)
         .await?
@@ -368,7 +369,7 @@ pub(super) async fn list_roles_by_user_id(
 /// * `g3` — `v0` is an internal action (object label) or a group; `v1` is a group.
 pub(super) async fn list_casbin_rule_group_by_ptype(
     db: &DatabaseConnection,
-    ptype: &str,
+    ptype: Ptype,
 ) -> Result<Vec<CasbinRuleGroup>, Error> {
     let rules = casbin_rule::Entity::find()
         .filter(casbin_rule::Column::Ptype.eq(ptype))
@@ -378,7 +379,7 @@ pub(super) async fn list_casbin_rule_group_by_ptype(
     let names = casbin_name_map(db).await?;
 
     match ptype {
-        "g1" => {
+        Ptype::G1 => {
             let usernames: HashMap<Uuid, String> = user::Entity::find()
                 .all(db)
                 .await?
@@ -399,7 +400,7 @@ pub(super) async fn list_casbin_rule_group_by_ptype(
                 })
                 .collect())
         }
-        "g2" => {
+        Ptype::G2 => {
             let parts = parts_by_id(db).await?;
 
             Ok(rules
@@ -410,7 +411,7 @@ pub(super) async fn list_casbin_rule_group_by_ptype(
                     let v0_object_label = parts.get(&r.v0).map(|p| p.short_label()).or_else(|| {
                         names
                             .get(&r.v0)
-                            .filter(|n| n.ptype == INTERNAL_OBJECT_TYPE)
+                            .filter(|n| n.ptype == NamePtype::InternalObjectType)
                             .map(|n| n.name.clone())
                     });
                     CasbinRuleGroup {
@@ -425,13 +426,13 @@ pub(super) async fn list_casbin_rule_group_by_ptype(
                 })
                 .collect())
         }
-        "g3" => Ok(rules
+        Ptype::G3 => Ok(rules
             .into_iter()
             .map(|r| {
                 // Internal actions land in the object label, everything else in
                 // the group label — the two disjoint joins in the original.
                 let v0 = names.get(&r.v0);
-                let is_internal_action = v0.map(|n| n.ptype == INTERNAL_ACTION_TYPE);
+                let is_internal_action = v0.map(|n| n.ptype == NamePtype::InternalActionType);
                 CasbinRuleGroup {
                     id: r.id,
                     v0: r.v0,
@@ -445,12 +446,14 @@ pub(super) async fn list_casbin_rule_group_by_ptype(
                     v1_object_label: None,
                     v1_group_label: names
                         .get(&r.v1)
-                        .filter(|n| n.ptype != INTERNAL_ACTION_TYPE)
+                        .filter(|n| n.ptype != NamePtype::InternalActionType)
                         .map(|n| n.name.clone()),
                 }
             })
             .collect()),
-        other => unreachable!("unsupported group ptype: {other}"),
+        // Now exhaustive: `p` is the only other variant, and a permission policy
+        // is not a group membership.
+        Ptype::Policy => unreachable!("list_casbin_rule_group_by_ptype called with `p`"),
     }
 }
 
@@ -493,7 +496,7 @@ async fn resolve_policy_objects(
 
     // BUG-COMPATIBLE: `V0.eq(user)` selecting `v1`. See the note above.
     let group_subjects: Vec<Uuid> = casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq("g1"))
+        .filter(casbin_rule::Column::Ptype.eq(Ptype::G1))
         .filter(casbin_rule::Column::V0.eq(user_id))
         .all(db)
         .await?
@@ -508,7 +511,7 @@ async fn resolve_policy_objects(
         .select_only()
         .column(casbin_rule::Column::Id)
         .column(casbin_rule::Column::V1)
-        .filter(casbin_rule::Column::Ptype.eq("p"))
+        .filter(casbin_rule::Column::Ptype.eq(Ptype::Policy))
         .filter(casbin_rule::Column::V0.is_in(subjects))
         .into_model::<PolicyRow>()
         .all(db)
@@ -517,7 +520,7 @@ async fn resolve_policy_objects(
     // g2 group -> member object ids.
     let mut g2_members: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
     for r in casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq("g2"))
+        .filter(casbin_rule::Column::Ptype.eq(Ptype::G2))
         .all(db)
         .await?
     {
@@ -544,7 +547,7 @@ pub(super) async fn get_policies_for_user(
     // Same subject resolution as `resolve_policy_objects`, including the
     // sub-select direction documented there.
     let group_subjects: Vec<Uuid> = casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq("g1"))
+        .filter(casbin_rule::Column::Ptype.eq(Ptype::G1))
         .filter(casbin_rule::Column::V0.eq(user_id))
         .all(db)
         .await?
@@ -556,7 +559,7 @@ pub(super) async fn get_policies_for_user(
     subjects.extend(group_subjects);
 
     Ok(casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq("p"))
+        .filter(casbin_rule::Column::Ptype.eq(Ptype::Policy))
         .filter(casbin_rule::Column::V0.is_in(subjects))
         .all(db)
         .await?
@@ -572,7 +575,7 @@ pub(super) async fn get_actions_for_policy(
     policy_act: Uuid,
 ) -> Result<Vec<Uuid>, Error> {
     let rules = casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq("g3"))
+        .filter(casbin_rule::Column::Ptype.eq(Ptype::G3))
         .filter(casbin_rule::Column::V1.eq(policy_act))
         .all(db)
         .await?;
@@ -711,7 +714,7 @@ pub(super) async fn list_user_group(db: &DatabaseConnection) -> Result<Vec<Objec
 
     out.extend(
         casbin_names::Entity::find()
-            .filter(casbin_names::Column::Ptype.eq("g1"))
+            .filter(casbin_names::Column::Ptype.eq(NamePtype::G1))
             .order_by_asc(casbin_names::Column::Name)
             .all(db)
             .await?
@@ -744,14 +747,14 @@ pub(super) async fn list_target_group(db: &DatabaseConnection) -> Result<Vec<Obj
             .filter(
                 casbin_names::Column::Ptype
                     .eq("g2")
-                    .or(casbin_names::Column::Ptype.eq(INTERNAL_OBJECT_TYPE)),
+                    .or(casbin_names::Column::Ptype.eq(NamePtype::InternalObjectType)),
             )
             .order_by_asc(casbin_names::Column::Name)
             .all(db)
             .await?
             .into_iter()
             .map(|n| ObjectGroup {
-                is_group: n.ptype == "g2",
+                is_group: n.ptype == NamePtype::G2,
                 id: n.id,
                 name: n.name,
             }),
@@ -765,15 +768,15 @@ pub(super) async fn list_action_group(db: &DatabaseConnection) -> Result<Vec<Obj
     Ok(casbin_names::Entity::find()
         .filter(
             casbin_names::Column::Ptype
-                .eq("g3")
-                .or(casbin_names::Column::Ptype.eq(INTERNAL_ACTION_TYPE)),
+                .eq(NamePtype::G3)
+                .or(casbin_names::Column::Ptype.eq(NamePtype::InternalActionType)),
         )
         .order_by_asc(casbin_names::Column::Name)
         .all(db)
         .await?
         .into_iter()
         .map(|n| ObjectGroup {
-            is_group: n.ptype == "g3",
+            is_group: n.ptype == NamePtype::G3,
             id: n.id,
             name: n.name,
         })
@@ -855,7 +858,7 @@ pub(super) async fn list_permission_polices(
     db: &DatabaseConnection,
 ) -> Result<Vec<PermissionPolicy>, Error> {
     let rules = casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq("p"))
+        .filter(casbin_rule::Column::Ptype.eq(Ptype::Policy))
         .all(db)
         .await?;
 

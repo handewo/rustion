@@ -9,9 +9,9 @@ pub(crate) mod service;
 use crate::{database::models::UserWithRole, error::Error};
 use async_trait::async_trait;
 use models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, Log, ObjectGroup, PermissionPolicy, RecordingView,
-    Role, Secret, SecretInfo, SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName,
-    User,
+    CasbinName, CasbinRule, CasbinRuleGroup, Log, NamePtype, ObjectGroup, PermissionPolicy, Ptype,
+    RecordingView, Role, Secret, SecretInfo, SessionRecording, Target, TargetInfo, TargetSecret,
+    TargetSecretName, User,
 };
 pub use uuid::Uuid;
 
@@ -228,19 +228,20 @@ pub trait DatabaseRepository: Send + Sync {
 
     /// CasbinRule operations
     async fn list_casbin_rules(&self) -> Result<Vec<CasbinRule>, Error>;
-    async fn list_casbin_rules_by_ptype(&self, ptype: &str) -> Result<Vec<CasbinRule>, Error>;
+    async fn list_casbin_rules_by_ptype(&self, ptype: Ptype) -> Result<Vec<CasbinRule>, Error>;
     async fn list_casbin_rule_group_by_ptype(
         &self,
-        ptype: &str,
+        ptype: Ptype,
     ) -> Result<Vec<CasbinRuleGroup>, Error>;
     async fn list_roles_by_user_id(&self, user_id: Uuid) -> Result<Vec<Role>, Error>;
     async fn create_casbin_rule(&self, rule: CasbinRule) -> Result<CasbinRule, Error>;
     async fn update_casbin_rule(&self, rule: CasbinRule) -> Result<CasbinRule, Error>;
     async fn delete_casbin_rule(&self, id: Uuid) -> Result<bool, Error>;
-    /// It's unsafe if ptype is not in [g1, g2, g3]
+    /// It's unsafe if ptype is not in [g1, g2, g3] — [`Ptype::Policy`] rows are
+    /// identified by `v0`/`v1`/`v2` together, so this would delete too much.
     async fn delete_casbin_rule_by_v0_v1(
         &self,
-        ptype: &str,
+        ptype: Ptype,
         v0: Uuid,
         v1: Uuid,
     ) -> Result<bool, Error>;
@@ -253,7 +254,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn get_casbin_name_by_id(&self, id: Uuid) -> Result<Option<CasbinName>, Error>;
     async fn list_casbin_names_by_ptype(
         &self,
-        ptype: &str,
+        ptype: NamePtype,
         active_only: bool,
     ) -> Result<Vec<CasbinName>, Error>;
     async fn list_casbin_names(&self, active_only: bool) -> Result<Vec<CasbinName>, Error>;

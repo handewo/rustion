@@ -7,9 +7,9 @@ use tokio::io;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
+use crate::asciinema::Result;
 use crate::asciinema::tty::{RawTty, TtySize};
 use crate::asciinema::util::Utf8Decoder;
-use crate::asciinema::Result;
 
 #[derive(Clone)]
 pub enum Event {

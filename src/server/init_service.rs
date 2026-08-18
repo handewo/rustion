@@ -88,49 +88,49 @@ pub async fn init_service(config: Config) {
 
     // Create UUIDs for actions and store in casbin_names
     let action_login = CasbinName::new(
-        INTERNAL_ACTION_TYPE.to_string(),
+        NamePtype::InternalActionType,
         ACT_LOGIN.to_string(),
         true,
         u.id,
     );
     let action_shell = CasbinName::new(
-        INTERNAL_ACTION_TYPE.to_string(),
+        NamePtype::InternalActionType,
         ACT_SHELL.to_string(),
         true,
         u.id,
     );
     let action_exec = CasbinName::new(
-        INTERNAL_ACTION_TYPE.to_string(),
+        NamePtype::InternalActionType,
         ACT_EXEC.to_string(),
         true,
         u.id,
     );
     let action_pty = CasbinName::new(
-        INTERNAL_ACTION_TYPE.to_string(),
+        NamePtype::InternalActionType,
         ACT_PTY.to_string(),
         true,
         u.id,
     );
     let action_tcpip = CasbinName::new(
-        INTERNAL_ACTION_TYPE.to_string(),
+        NamePtype::InternalActionType,
         ACT_DIRECT_TCPIP.to_string(),
         true,
         u.id,
     );
     let obj_login = CasbinName::new(
-        INTERNAL_OBJECT_TYPE.to_string(),
+        NamePtype::InternalObjectType,
         OBJ_LOGIN.to_string(),
         true,
         u.id,
     );
     let obj_admin = CasbinName::new(
-        INTERNAL_OBJECT_TYPE.to_string(),
+        NamePtype::InternalObjectType,
         OBJ_ADMIN.to_string(),
         true,
         u.id,
     );
     let obj_player = CasbinName::new(
-        INTERNAL_OBJECT_TYPE.to_string(),
+        NamePtype::InternalObjectType,
         OBJ_PLAYER.to_string(),
         true,
         u.id,
@@ -161,7 +161,7 @@ pub async fn init_service(config: Config) {
     }
 
     // Create login_group UUID and store in casbin_names
-    let login_group = CasbinName::new("g1".to_string(), "login_group".to_string(), true, u.id);
+    let login_group = CasbinName::new(NamePtype::G1, "login_group".to_string(), true, u.id);
     let login_group_id = match db.repository().create_casbin_name(login_group).await {
         Ok(n) => {
             info!("Created login_group casbin_name");
@@ -188,7 +188,7 @@ pub async fn init_service(config: Config) {
 
     // Policy: admin can login from localhost (IPv4)
     let p = CasbinRule::new(
-        "p".to_string(),
+        Ptype::Policy,
         u.id,
         obj_login_id,
         action_login_id,
@@ -206,7 +206,7 @@ pub async fn init_service(config: Config) {
 
     // Policy: admin can access admin panel from localhost (IPv4)
     let p = CasbinRule::new(
-        "p".to_string(),
+        Ptype::Policy,
         u.id,
         obj_admin_id,
         action_shell_id,
@@ -237,7 +237,7 @@ pub async fn init_service(config: Config) {
 
     // Policy: admin can login from localhost (IPv6)
     let p = CasbinRule::new(
-        "p".to_string(),
+        Ptype::Policy,
         u.id,
         obj_login_id,
         action_login_id,
@@ -255,7 +255,7 @@ pub async fn init_service(config: Config) {
 
     // Policy: admin can access admin panel from localhost (IPv6)
     let p = CasbinRule::new(
-        "p".to_string(),
+        Ptype::Policy,
         u.id,
         obj_admin_id,
         action_shell_id,
@@ -281,7 +281,7 @@ pub async fn init_service(config: Config) {
         open_direct_tcpip_port: None,
     };
     let p = CasbinRule::new(
-        "p".to_string(),
+        Ptype::Policy,
         login_group_id,
         obj_login_id,
         action_login_id,

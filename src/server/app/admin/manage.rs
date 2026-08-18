@@ -243,15 +243,15 @@ where
                 ))))
             }
             SelectedTab::Permissions => {
-                let mut perm = PermissionPolicy::new(self.admin_id);
-                perm.rule.ptype = "p".to_string();
+                let perm = PermissionPolicy::new(self.admin_id);
                 self.editor = Editor::Permission(Box::new(
                     permission::PermissionEditor::new(perm, self.backend.clone()).await,
                 ))
             }
             SelectedTab::CasbinNames => {
                 self.editor = Editor::CasbinName(Box::new(casbin_name::CasbinNameEditor::new(
-                    CasbinName::new(String::new(), String::new(), true, self.admin_id),
+                    // `G1` matches the radio's first option in `casbin_name.rs`.
+                    CasbinName::new(NamePtype::G1, String::new(), true, self.admin_id),
                     true,
                 )))
             }
@@ -1573,7 +1573,12 @@ impl TableData {
                 ]
             }
             Self::CasbinNames(data) => {
-                let ptype_len = data.iter().map(|v| v.ptype.len()).max().unwrap_or(0).max(6);
+                let ptype_len = data
+                    .iter()
+                    .map(|v| v.ptype.as_str().len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(6);
 
                 let name_len = data
                     .iter()

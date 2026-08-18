@@ -25,6 +25,7 @@ use std::pin::Pin;
 use super::bastion_handler::BastionHandler;
 use crate::config::Config;
 use crate::database::models;
+use crate::database::models::Ptype;
 use crate::database::service::DatabaseService;
 use crate::error::Error;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
@@ -135,15 +136,15 @@ impl BastionServer {
         let role_manager = {
             let g1 = database
                 .repository()
-                .list_casbin_rule_group_by_ptype("g1")
+                .list_casbin_rule_group_by_ptype(Ptype::G1)
                 .await?;
             let g2 = database
                 .repository()
-                .list_casbin_rule_group_by_ptype("g2")
+                .list_casbin_rule_group_by_ptype(Ptype::G2)
                 .await?;
             let g3 = database
                 .repository()
-                .list_casbin_rule_group_by_ptype("g3")
+                .list_casbin_rule_group_by_ptype(Ptype::G3)
                 .await?;
 
             casbin::RoleManage::new(&g1, &g2, &g3)?
@@ -262,17 +263,17 @@ impl BastionServer {
         let g1 = self
             .database
             .repository()
-            .list_casbin_rule_group_by_ptype("g1")
+            .list_casbin_rule_group_by_ptype(Ptype::G1)
             .await?;
         let g2 = self
             .database
             .repository()
-            .list_casbin_rule_group_by_ptype("g2")
+            .list_casbin_rule_group_by_ptype(Ptype::G2)
             .await?;
         let g3 = self
             .database
             .repository()
-            .list_casbin_rule_group_by_ptype("g3")
+            .list_casbin_rule_group_by_ptype(Ptype::G3)
             .await?;
 
         let mut m = self.role_manager.write().await;
@@ -441,7 +442,7 @@ impl super::HandlerBackend for BastionServer {
         let policies = self
             .database
             .repository()
-            .list_casbin_rules_by_ptype("p")
+            .list_casbin_rules_by_ptype(Ptype::Policy)
             .await?;
         let allowed_policies = self.role_manager.read().await.match_sub(policies, *user_id);
 
@@ -682,7 +683,7 @@ impl super::HandlerBackend for BastionServer {
         let policies = self
             .database
             .repository()
-            .list_casbin_rules_by_ptype("p")
+            .list_casbin_rules_by_ptype(Ptype::Policy)
             .await?;
         let allowed_policies = self.role_manager.read().await.match_sub(policies, sub);
         trace!("sub: {} polices: {:?}", sub, allowed_policies);

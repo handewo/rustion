@@ -1,5 +1,6 @@
 use crate::database::error::DatabaseError;
-use crate::database::models::CasbinName;
+use crate::database::models::casbin_rule::ValidateError;
+use crate::database::models::{CasbinName, NamePtype};
 use crate::error::Error;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -25,7 +26,8 @@ pub struct CasbinNameEditor {
 
 impl CasbinNameEditor {
     pub fn new(casbin_name: CasbinName, add_new: bool) -> Self {
-        let mut type_radio = FormField::radio("*Type*", &PTYPE_OPTIONS, &casbin_name.ptype, 5);
+        let mut type_radio =
+            FormField::radio("*Type*", &PTYPE_OPTIONS, casbin_name.ptype.as_str(), 5);
         if !add_new {
             type_radio = type_radio.readonly()
         }
@@ -59,7 +61,13 @@ impl CasbinNameEditor {
     }
 
     fn save_casbin_name(&mut self) -> Result<(), Error> {
-        self.casbin_name.ptype = self.form.get_radio(F_PTYPE).to_string();
+        // The radio carries the name, not the stored value. Unreachable in
+        // practice — `PTYPE_OPTIONS` only offers g1/g2/g3 — but it hands back a
+        // plain `&str`, so the mismatch has to be handled somewhere.
+        self.casbin_name.ptype =
+            NamePtype::from_name(self.form.get_radio(F_PTYPE)).ok_or(Error::Database(
+                DatabaseError::CasbinNameValidation(ValidateError::PtypeInvalid),
+            ))?;
         self.casbin_name.name = self.form.get_text(F_NAME).trim().into();
         self.casbin_name.is_active = self.form.get_checkbox(F_IS_ACTIVE);
 

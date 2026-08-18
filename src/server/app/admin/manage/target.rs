@@ -1,14 +1,10 @@
 use crate::database::error::DatabaseError;
-use crate::database::models::target::ValidateError;
 use crate::database::models::Target;
+use crate::database::models::target::ValidateError;
 use crate::error::Error;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    widgets::Widget,
-};
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 // Field indices
 const F_NAME: usize = 0;
@@ -31,7 +27,10 @@ impl TargetEditor {
             FormField::text("*Name*", Some(target.name.clone())),
             FormField::text("*Hostname*", Some(target.hostname.clone())),
             FormField::text("*Port*", Some(target.port.to_string())),
-            FormField::text("*Server Public Key*", Some(target.server_public_key.clone())),
+            FormField::text(
+                "*Server Public Key*",
+                Some(target.server_public_key.clone()),
+            ),
             FormField::text("Description", target.description.clone()),
             FormField::text("Proxy", target.proxy.clone()),
             FormField::checkbox("Is Active", target.is_active),
@@ -78,13 +77,12 @@ impl TargetEditor {
             Err(_) => {
                 return Err(Error::Database(DatabaseError::TargetValidation(
                     ValidateError::PortNotNumber,
-                )))
+                )));
             }
         };
         self.target.port = port as u16;
 
-        self.target.server_public_key =
-            self.form.get_text(F_SERVER_PUBLIC_KEY).trim().to_string();
+        self.target.server_public_key = self.form.get_text(F_SERVER_PUBLIC_KEY).trim().to_string();
 
         let desc = self.form.get_text(F_DESCRIPTION).trim().to_string();
         self.target.description = (!desc.is_empty()).then_some(desc);

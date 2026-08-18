@@ -13,9 +13,6 @@ pub const ACT_EXEC: &str = "__internal_action_exec";
 pub const ACT_LOGIN: &str = "__internal_action_login";
 pub const ACT_DIRECT_TCPIP: &str = "__internal_action_open_direct_tcpip";
 
-pub const INTERNAL_OBJECT_TYPE: &str = "__internal_object_type";
-pub const INTERNAL_ACTION_TYPE: &str = "__internal_action_type";
-
 pub const INTERNAL_OBJECTS: [&str; 3] = [OBJ_LOGIN, OBJ_ADMIN, OBJ_PLAYER];
 
 pub const INTERNAL_ACTIONS: [&str; 5] = [ACT_SHELL, ACT_DIRECT_TCPIP, ACT_EXEC, ACT_LOGIN, ACT_PTY];

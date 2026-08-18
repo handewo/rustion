@@ -394,7 +394,7 @@ impl FieldsToArray for CasbinName {
             DisplayMode::Full => {
                 vec![
                     self.id.to_string(),
-                    self.ptype.clone(),
+                    self.ptype.to_string(),
                     self.name.clone(),
                     self.is_active.to_string(),
                     self.updated_by.to_string(),
@@ -403,11 +403,11 @@ impl FieldsToArray for CasbinName {
             }
             DisplayMode::Manage => {
                 // Convert ptype to friendly name for display
-                let ptype_display = match self.ptype.as_str() {
-                    "g1" => "Role",
-                    "g2" => "Target",
-                    "g3" => "Action",
-                    _ => &self.ptype,
+                let ptype_display = match self.ptype {
+                    NamePtype::G1 => "Role",
+                    NamePtype::G2 => "Target",
+                    NamePtype::G3 => "Action",
+                    other => other.as_str(),
                 };
                 vec![
                     ptype_display.to_string(),
@@ -443,7 +443,7 @@ impl FieldsToArray for CasbinRule {
             DisplayMode::Full => {
                 vec![
                     self.id.to_string(),
-                    self.ptype.clone(),
+                    self.ptype.to_string(),
                     self.v0.to_string(),
                     self.v1.to_string(),
                     self.v2.to_string(),

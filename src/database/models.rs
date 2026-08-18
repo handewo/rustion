@@ -6,7 +6,7 @@ pub(crate) mod target_secret;
 pub(crate) mod user;
 
 pub(crate) use casbin_rule::{
-    CasbinName, CasbinRule, CasbinRuleGroup, ObjectGroup, PermissionPolicy, Role,
+    CasbinName, CasbinRule, CasbinRuleGroup, NamePtype, ObjectGroup, PermissionPolicy, Ptype, Role,
 };
 pub use log::Log;
 pub(crate) use session_recording::{RecordingView, SessionRecording};

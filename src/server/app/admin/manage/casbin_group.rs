@@ -355,11 +355,7 @@ where
             match self
                 .backend
                 .db_repository()
-                .delete_casbin_rule_by_v0_v1(
-                    &self.group_type.to_string(),
-                    item_iden.rid,
-                    group_iden.rid,
-                )
+                .delete_casbin_rule_by_v0_v1(self.group_type.into(), item_iden.rid, group_iden.rid)
                 .await
             {
                 Ok(res) => {
@@ -425,7 +421,7 @@ where
                 "Unknown".to_string()
             });
         let cr = CasbinRule::new(
-            self.group_type.to_string(),
+            self.group_type.into(),
             obj.id,
             iden.rid,
             Uuid::default(),

@@ -3,11 +3,7 @@ use crate::database::models::target_secret::Secret;
 use crate::error::Error;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    widgets::Widget,
-};
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 // Field indices
 const F_NAME: usize = 0;

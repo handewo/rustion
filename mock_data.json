@@ -1308,7 +1308,7 @@
     },
     {
       "id": "7a2eef20-e94a-4f0c-beb9-d85b78020bb4",
-      "ptype": "act",
+      "ptype": "__internal_action_type",
       "name": "__internal_action_pty",
       "is_active": true,
       "updated_by": "ef3f2c71-14ca-49b2-93af-917618f1b09f",

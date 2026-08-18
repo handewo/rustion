@@ -4,7 +4,7 @@ use crate::server::error::ServerError;
 use std::fmt;
 use std::fmt::Display;
 use {
-    crate::database::models::{CasbinRule, CasbinRuleGroup},
+    crate::database::models::{CasbinRule, CasbinRuleGroup, Ptype},
     petgraph::stable_graph::{NodeIndex, StableDiGraph},
     petgraph::visit::{Bfs, Walker},
     std::collections::HashMap,
@@ -26,12 +26,15 @@ pub enum GroupType {
     Action,
 }
 
-impl From<GroupType> for &str {
+// `From<GroupType> for &str` used to sit here, feeding `ptype` filters. `ptype`
+// is an integer column now, so a `&str` would compile and match nothing —
+// `Display` below stays for log messages, which is all it was ever right for.
+impl From<GroupType> for Ptype {
     fn from(value: GroupType) -> Self {
         match value {
-            GroupType::Subject => "g1",
-            GroupType::Object => "g2",
-            GroupType::Action => "g3",
+            GroupType::Subject => Ptype::G1,
+            GroupType::Object => Ptype::G2,
+            GroupType::Action => Ptype::G3,
         }
     }
 }

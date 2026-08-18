@@ -1,14 +1,10 @@
 use crate::database::error::DatabaseError;
-use crate::database::models::user::ValidateError;
 use crate::database::models::User;
+use crate::database::models::user::ValidateError;
 use crate::error::Error;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    widgets::Widget,
-};
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 // Field indices
 const F_USERNAME: usize = 0;

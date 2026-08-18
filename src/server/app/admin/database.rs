@@ -414,7 +414,12 @@ impl TableData {
                     .unwrap_or(0)
                     .max(4);
 
-                let ptype_len = data.iter().map(|v| v.ptype.len()).max().unwrap_or(0).max(5);
+                let ptype_len = data
+                    .iter()
+                    .map(|v| v.ptype.as_str().len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(5);
 
                 vec![
                     Constraint::Length(LENGTH_UUID), // id

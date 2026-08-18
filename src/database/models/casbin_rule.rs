@@ -2,8 +2,11 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub(crate) use crate::database::entity::casbin_names::NamePtype;
+pub(crate) use crate::database::entity::casbin_rule::Ptype;
+
 /// CasbinRule stores RBAC policies with all UUID references stored as BLOB
-/// - ptype: policy type ('p' for policy, 'g1' for user groups, 'g2' for object groups, 'g3' for action groups)
+/// - ptype: rule kind, see [`Ptype`]
 /// - v0: subject UUID (user or group)
 /// - v1: object UUID (target_secret, internal_object, or group)
 /// - v2: action UUID (action or action group)
@@ -11,13 +14,13 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
 pub struct CasbinRule {
     pub id: Uuid,
-    pub ptype: String,
-    pub v0: Uuid,         // Subject UUID
-    pub v1: Uuid,         // Object UUID
-    pub v2: Uuid,         // Action UUID
-    pub v3: String,       // Extended policy data
-    pub v4: String,       // Extended policy data
-    pub v5: String,       // Extended policy data
+    pub ptype: Ptype,
+    pub v0: Uuid,   // Subject UUID
+    pub v1: Uuid,   // Object UUID
+    pub v2: Uuid,   // Action UUID
+    pub v3: String, // Extended policy data
+    pub v4: String, // Extended policy data
+    pub v5: String, // Extended policy data
     pub updated_by: Uuid,
     pub updated_at: i64,
 }
@@ -25,7 +28,7 @@ pub struct CasbinRule {
 impl CasbinRule {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        ptype: String,
+        ptype: Ptype,
         v0: Uuid,
         v1: Uuid,
         v2: Uuid,
@@ -51,11 +54,11 @@ impl CasbinRule {
 }
 
 /// CasbinName maps UUIDs to human-readable names for casbin entities
-/// - ptype: 'g1' (user groups), 'g2' (object groups), 'g3' (action groups), 'act' (actions)
+/// - ptype: see [`NamePtype`], a wider set than a `casbin_rule` row can hold
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CasbinName {
     pub id: Uuid,
-    pub ptype: String,
+    pub ptype: NamePtype,
     pub name: String,
     pub is_active: bool,
     pub updated_by: Uuid,
@@ -63,7 +66,7 @@ pub struct CasbinName {
 }
 
 impl CasbinName {
-    pub fn new(ptype: String, name: String, is_active: bool, updated_by: Uuid) -> Self {
+    pub fn new(ptype: NamePtype, name: String, is_active: bool, updated_by: Uuid) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
             id: Uuid::new_v4(),
@@ -76,17 +79,13 @@ impl CasbinName {
     }
 
     pub fn is_internal(&self) -> bool {
-        matches!(
-            self.ptype.as_str(),
-            "__internal_action_type" | "__internal_object_type"
-        )
+        self.ptype.is_internal()
     }
 
     pub fn validate(&self) -> Result<(), ValidateError> {
-        if self.ptype.trim().is_empty() {
-            return Err(ValidateError::PtypeEmpty);
-        }
-        if !matches!(self.ptype.as_str(), "g1" | "g2" | "g3") {
+        // `NamePtype` makes the empty case unrepresentable, but `act` and the two
+        // internal markers are still values a user must not pick.
+        if !matches!(self.ptype, NamePtype::G1 | NamePtype::G2 | NamePtype::G3) {
             return Err(ValidateError::PtypeInvalid);
         }
         if self.name.trim().is_empty() {
@@ -101,8 +100,8 @@ impl CasbinName {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ValidateError {
-    #[error("Ptype cannot be empty")]
-    PtypeEmpty,
+    // `PtypeEmpty` used to live here. `NamePtype` has no empty state, so it
+    // became unconstructible.
     #[error("Ptype must be one of g1, g2, g3")]
     PtypeInvalid,
     #[error("Name cannot be empty")]
@@ -144,7 +143,9 @@ impl PermissionPolicy {
     pub fn new(updated_by: Uuid) -> Self {
         Self {
             rule: CasbinRule::new(
-                String::new(),
+                // A permission policy is a `p` rule by definition; there is no
+                // longer an empty state for the caller to fill in.
+                Ptype::Policy,
                 Uuid::default(),
                 Uuid::default(),
                 Uuid::default(),

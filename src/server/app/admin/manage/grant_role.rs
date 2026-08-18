@@ -1,5 +1,5 @@
 use crate::database::Uuid;
-use crate::database::models::{CasbinRule, Role};
+use crate::database::models::{CasbinRule, Ptype, Role};
 use crate::error::Error;
 use crate::server::HandlerLog;
 use crate::server::error::ServerError;
@@ -146,7 +146,7 @@ where
             .await;
         } else {
             let cr = CasbinRule::new(
-                "g1".to_string(),
+                Ptype::G1,
                 t.rid,
                 self.selected_user_id,
                 Uuid::default(),
