@@ -2,9 +2,8 @@ use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::error::ServerError;
 use std::fmt;
-use std::fmt::Display;
 use {
-    crate::database::models::{CasbinRule, CasbinRuleGroup, Ptype},
+    crate::database::models::{CasbinRule, CasbinRuleGroup, GroupType},
     petgraph::stable_graph::{NodeIndex, StableDiGraph},
     petgraph::visit::{Bfs, Walker},
     std::collections::HashMap,
@@ -17,36 +16,6 @@ pub struct RoleManage {
     g1: StableDiGraph<RuleGroup, ()>,
     g2: StableDiGraph<RuleGroup, ()>,
     g3: StableDiGraph<RuleGroup, ()>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum GroupType {
-    Subject,
-    Object,
-    Action,
-}
-
-// `From<GroupType> for &str` used to sit here, feeding `ptype` filters. `ptype`
-// is an integer column now, so a `&str` would compile and match nothing —
-// `Display` below stays for log messages, which is all it was ever right for.
-impl From<GroupType> for Ptype {
-    fn from(value: GroupType) -> Self {
-        match value {
-            GroupType::Subject => Ptype::G1,
-            GroupType::Object => Ptype::G2,
-            GroupType::Action => Ptype::G3,
-        }
-    }
-}
-
-impl Display for GroupType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Subject => write!(f, "g1"),
-            Self::Object => write!(f, "g2"),
-            Self::Action => write!(f, "g3"),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

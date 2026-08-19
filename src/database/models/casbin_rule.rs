@@ -5,6 +5,51 @@ use uuid::Uuid;
 pub(crate) use crate::database::entity::casbin_names::NamePtype;
 pub(crate) use crate::database::entity::casbin_rule::Ptype;
 
+/// Which of the three role hierarchies a group membership belongs to.
+///
+/// A strict subset of [`Ptype`]: the `g*` variants, without `p`. That is the
+/// whole point of it existing separately — a caller holding a `GroupType`
+/// cannot be holding [`Ptype::Policy`], so the operations that are only
+/// meaningful for group rows (walking a hierarchy, deleting by `v0`/`v1`) can
+/// say so in their signature instead of documenting a caveat.
+///
+/// Lives here rather than in `server::casbin` because both the RBAC engine and
+/// the [`DatabaseRepository`](crate::database::DatabaseRepository) trait speak
+/// in it, and the database layer cannot depend on the server layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GroupType {
+    /// user → role, `g1`
+    Subject,
+    /// object → group, `g2`
+    Object,
+    /// action → group, `g3`
+    Action,
+}
+
+impl From<GroupType> for Ptype {
+    fn from(value: GroupType) -> Self {
+        match value {
+            GroupType::Subject => Ptype::G1,
+            GroupType::Object => Ptype::G2,
+            GroupType::Action => Ptype::G3,
+        }
+    }
+}
+
+impl GroupType {
+    /// The `ptype` name, for logs. Borrowed from [`Ptype`] rather than spelled
+    /// again here, so the two cannot drift.
+    pub fn as_str(&self) -> &'static str {
+        Ptype::from(*self).as_str()
+    }
+}
+
+impl std::fmt::Display for GroupType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// CasbinRule stores RBAC policies with all UUID references stored as BLOB
 /// - ptype: rule kind, see [`Ptype`]
 /// - v0: subject UUID (user or group)
@@ -268,6 +313,35 @@ impl CasbinName {
             is_active: Set(self.is_active),
             updated_by: Set(self.updated_by),
             updated_at: Set(self.updated_at),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `GroupType` is meant to be `Ptype` minus `p`. Nothing in the type system
+    /// says so, so say it here: every variant must map to a `g*`, and the three
+    /// mappings must be distinct.
+    #[test]
+    fn group_type_maps_onto_the_g_ptypes() {
+        let mapped: Vec<Ptype> = [GroupType::Subject, GroupType::Object, GroupType::Action]
+            .into_iter()
+            .map(Ptype::from)
+            .collect();
+
+        assert_eq!(mapped, vec![Ptype::G1, Ptype::G2, Ptype::G3]);
+        assert!(!mapped.contains(&Ptype::Policy), "`p` is not a group type");
+    }
+
+    /// The name is borrowed from `Ptype`, so this is really a check that the
+    /// delegation is wired to the matching variant.
+    #[test]
+    fn group_type_names_match_their_ptype() {
+        for gt in [GroupType::Subject, GroupType::Object, GroupType::Action] {
+            assert_eq!(gt.as_str(), Ptype::from(gt).as_str());
+            assert_eq!(gt.to_string(), gt.as_str());
         }
     }
 }

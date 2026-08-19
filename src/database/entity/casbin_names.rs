@@ -29,10 +29,10 @@ impl ActiveModelBehavior for ActiveModel {}
 
 /// What kind of casbin entity a `casbin_names` row names.
 ///
-/// Wider than [`super::casbin_rule::Ptype`]: a name can describe a single
-/// action (`act`) or one of the two internal type markers, none of which are
-/// valid in a `casbin_rule` row. The two are deliberately separate types so a
-/// rule's `ptype` cannot be assigned a value only a name can hold.
+/// Wider than [`super::casbin_rule::Ptype`]: a name can carry one of the two
+/// internal type markers, which are not valid in a `casbin_rule` row. The two
+/// are deliberately separate types so a rule's `ptype` cannot be assigned a
+/// value only a name can hold.
 ///
 /// Stored as a small integer, like `Ptype`. The `num_value`s are the on-disk
 /// format and must never be renumbered. They line up with `Ptype`'s where the
@@ -134,8 +134,8 @@ mod tests {
             (1, NamePtype::G1),
             (2, NamePtype::G2),
             (3, NamePtype::G3),
-            (5, NamePtype::InternalActionType),
-            (6, NamePtype::InternalObjectType),
+            (4, NamePtype::InternalActionType),
+            (5, NamePtype::InternalObjectType),
         ] {
             assert_eq!(p.to_value(), want, "{p} changed its stored value");
             assert_eq!(NamePtype::try_from_value(&want).unwrap(), p);
@@ -144,7 +144,7 @@ mod tests {
             NamePtype::try_from_value(&0).is_err(),
             "0 is reserved for `p`"
         );
-        assert!(NamePtype::try_from_value(&7).is_err());
+        assert!(NamePtype::try_from_value(&6).is_err());
     }
 
     /// `g1`/`g2`/`g3` mean the same thing in both enums, so they must store the

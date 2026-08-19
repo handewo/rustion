@@ -25,7 +25,7 @@ use std::pin::Pin;
 use super::bastion_handler::BastionHandler;
 use crate::config::Config;
 use crate::database::models;
-use crate::database::models::Ptype;
+use crate::database::models::{GroupType, Ptype};
 use crate::database::service::DatabaseService;
 use crate::error::Error;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
@@ -450,7 +450,7 @@ impl super::HandlerBackend for BastionServer {
         for pol in allowed_policies {
             // Get all role IDs from object group
             let role_manager = self.role_manager.read().await;
-            let role_ids = role_manager.fetch_role_from_start(pol.v1, casbin::GroupType::Object);
+            let role_ids = role_manager.fetch_role_from_start(pol.v1, GroupType::Object);
             drop(role_manager); // Release the lock before awaiting database
             let role_ids_ref: Vec<&Uuid> = role_ids.iter().collect();
 
@@ -695,7 +695,7 @@ impl super::HandlerBackend for BastionServer {
                     .role_manager
                     .read()
                     .await
-                    .match_role(pol.v1, obj, casbin::GroupType::Object)
+                    .match_role(pol.v1, obj, GroupType::Object)
             {
                 if !self.database.repository().check_object_active(obj).await? {
                     trace!(
@@ -706,11 +706,11 @@ impl super::HandlerBackend for BastionServer {
                 }
                 // match act
                 if pol.v2 == act
-                    || self.role_manager.read().await.match_role(
-                        pol.v2,
-                        act,
-                        casbin::GroupType::Action,
-                    )
+                    || self
+                        .role_manager
+                        .read()
+                        .await
+                        .match_role(pol.v2, act, GroupType::Action)
                 {
                     // match ext
                     if verify_extend_policy(&ext, &pol.v3)? {
@@ -776,7 +776,7 @@ impl super::HandlerBackend for BastionServer {
         })
     }
 
-    async fn get_graph(&self, rt: casbin::GroupType) -> StableDiGraph<casbin::RuleGroup, ()> {
+    async fn get_graph(&self, rt: GroupType) -> StableDiGraph<casbin::RuleGroup, ()> {
         self.role_manager.read().await.get_group(rt)
     }
 }

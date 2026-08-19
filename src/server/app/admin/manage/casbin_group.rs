@@ -1,9 +1,8 @@
 use super::LOG_TYPE;
 use crate::database::Uuid;
-use crate::database::models::{CasbinRule, ObjectGroup};
+use crate::database::models::{CasbinRule, GroupType, ObjectGroup};
 use crate::error::Error;
 use crate::server::HandlerLog;
-use crate::server::casbin::GroupType;
 use crate::server::widgets::tree;
 use crate::server::widgets::{
     AdminTable, DisplayMode, Message, centered_area, common::*, render_confirm_dialog,
@@ -355,7 +354,7 @@ where
             match self
                 .backend
                 .db_repository()
-                .delete_casbin_rule_by_v0_v1(self.group_type.into(), item_iden.rid, group_iden.rid)
+                .delete_casbin_rule_by_group(self.group_type, item_iden.rid, group_iden.rid)
                 .await
             {
                 Ok(res) => {

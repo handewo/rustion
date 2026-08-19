@@ -21,9 +21,9 @@ use crate::database::entity::{
 use crate::database::error::DatabaseError;
 use crate::database::models::casbin_rule::ValidateError;
 use crate::database::models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, Log, NamePtype, ObjectGroup, PermissionPolicy, Ptype,
-    RecordingView, Role, Secret, SecretInfo, SessionRecording, Target, TargetInfo, TargetSecret,
-    TargetSecretName, User, UserWithRole,
+    CasbinName, CasbinRule, CasbinRuleGroup, GroupType, Log, NamePtype, ObjectGroup,
+    PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo, SessionRecording, Target,
+    TargetInfo, TargetSecret, TargetSecretName, User, UserWithRole,
 };
 use crate::database::{DatabaseConfig, DatabaseRepository};
 use crate::error::Error;
@@ -584,12 +584,13 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(deleted)
     }
 
-    async fn delete_casbin_rule_by_v0_v1(
+    async fn delete_casbin_rule_by_group(
         &self,
-        ptype: Ptype,
+        group_type: GroupType,
         v0: Uuid,
         v1: Uuid,
     ) -> Result<bool, Error> {
+        let ptype = Ptype::from(group_type);
         debug!(
             "Deleting casbin_rule where ptype={} v0={} v1={}",
             ptype, v0, v1

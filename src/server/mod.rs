@@ -15,9 +15,8 @@ pub use casbin::{Label, RuleGroup};
 
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
-use crate::database::models::{Target, TargetSecretName, User};
+use crate::database::models::{GroupType, Target, TargetSecretName, User};
 use crate::error::Error;
-use crate::server::casbin::GroupType;
 use futures::future::BoxFuture;
 use petgraph::stable_graph::StableDiGraph;
 use russh::client as ru_client;

@@ -3,7 +3,6 @@ use crate::database::Uuid;
 use crate::database::models::*;
 use crate::error::Error;
 use crate::server::HandlerLog;
-use crate::server::casbin::GroupType;
 use crate::server::widgets::{
     AdminTable, Colors, DisplayMode, FieldsToArray, Message, TableData as TD, centered_area,
     common::*, render_confirm_dialog, render_message_popup,

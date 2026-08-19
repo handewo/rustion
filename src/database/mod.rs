@@ -9,9 +9,9 @@ pub(crate) mod service;
 use crate::{database::models::UserWithRole, error::Error};
 use async_trait::async_trait;
 use models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, Log, NamePtype, ObjectGroup, PermissionPolicy, Ptype,
-    RecordingView, Role, Secret, SecretInfo, SessionRecording, Target, TargetInfo, TargetSecret,
-    TargetSecretName, User,
+    CasbinName, CasbinRule, CasbinRuleGroup, GroupType, Log, NamePtype, ObjectGroup,
+    PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo, SessionRecording, Target,
+    TargetInfo, TargetSecret, TargetSecretName, User,
 };
 pub use uuid::Uuid;
 
@@ -237,11 +237,15 @@ pub trait DatabaseRepository: Send + Sync {
     async fn create_casbin_rule(&self, rule: CasbinRule) -> Result<CasbinRule, Error>;
     async fn update_casbin_rule(&self, rule: CasbinRule) -> Result<CasbinRule, Error>;
     async fn delete_casbin_rule(&self, id: Uuid) -> Result<bool, Error>;
-    /// It's unsafe if ptype is not in [g1, g2, g3] — [`Ptype::Policy`] rows are
-    /// identified by `v0`/`v1`/`v2` together, so this would delete too much.
-    async fn delete_casbin_rule_by_v0_v1(
+    /// Deletes a single group membership.
+    ///
+    /// Takes [`GroupType`] rather than [`Ptype`] because a `p` row cannot be
+    /// addressed this way: policies are identified by `v0`/`v1`/`v2` together,
+    /// so a `Ptype::Policy` here would delete every action for the pair. That
+    /// used to be a doc caveat; the type now rules it out.
+    async fn delete_casbin_rule_by_group(
         &self,
-        ptype: Ptype,
+        group_type: GroupType,
         v0: Uuid,
         v1: Uuid,
     ) -> Result<bool, Error>;
