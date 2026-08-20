@@ -17,6 +17,7 @@ mod database;
 pub mod error;
 mod manage;
 mod shell;
+mod validate;
 
 const LOG_TYPE: &str = "admin";
 

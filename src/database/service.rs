@@ -31,8 +31,10 @@ mod tests {
     use super::*;
     use crate::database::{
         CasbinName, Target, User,
+        entity::user,
         models::{CasbinRule, Secret, target_secret::TargetSecret},
     };
+    use sea_orm::ActiveValue::Set;
     use serde::{Deserialize, Serialize};
     use serde_json;
     use std::{fs::File, io::Read};
@@ -60,12 +62,21 @@ mod tests {
         let mut buffer = String::new();
         test_data.read_to_string(&mut buffer).unwrap();
         let mut raw_data: RawData = serde_json::from_str(&buffer).unwrap();
+        let first_user = raw_data.users.pop().unwrap();
+        let active_model: user::ActiveModel = user::ActiveModel {
+            id: Set(first_user.id),
+            username: Set(first_user.username),
+            email: Set(first_user.email),
+            authorized_keys: Set(first_user.authorized_keys.map(|v| v.into())),
+            force_init_pass: Set(first_user.force_init_pass),
+            is_active: Set(first_user.is_active),
+            updated_by: Set(first_user.updated_by),
+            updated_at: Set(first_user.updated_at),
+            ..Default::default()
+        };
         // Each batch insert reports the rows the driver actually wrote; assert it matches
         // the number of entities handed in.
-        db.repository
-            .create_user(raw_data.users.pop().unwrap())
-            .await
-            .unwrap();
+        db.repository.create_user(active_model).await.unwrap();
         let n = raw_data.users.len() as u64;
         assert_eq!(
             db.repository

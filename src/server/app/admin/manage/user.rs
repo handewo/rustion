@@ -1,10 +1,13 @@
-use crate::database::error::DatabaseError;
+use super::super::error::AdminError;
+use super::super::validate;
+use crate::database::entity::user;
 use crate::database::models::User;
-use crate::database::models::user::ValidateError;
 use crate::error::Error;
+use crate::server::app::error::AppError;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use sea_orm::ActiveValue::{Set, Unchanged};
 
 // Field indices
 const F_USERNAME: usize = 0;
@@ -17,12 +20,13 @@ const F_AUTHORIZED_KEYS: usize = 5;
 #[derive(Debug)]
 pub struct UserEditor {
     pub user: User,
+    pub active_model: user::ActiveModel,
     pub form: FormEditor,
     pub generate_password: bool,
 }
 
 impl UserEditor {
-    pub fn new(user: User) -> Self {
+    pub fn new(user: User, is_new: bool) -> Self {
         let form = FormEditor::new(vec![
             FormField::text("*Username*", Some(user.username.clone())),
             FormField::text("Email", user.email.clone()),
@@ -35,8 +39,26 @@ impl UserEditor {
                 8,
             ),
         ]);
+
+        let active_model = if is_new {
+            user::ActiveModel {
+                id: Set(user.id),
+                force_init_pass: Set(user.force_init_pass),
+                is_active: Set(user.is_active),
+                updated_by: Set(user.updated_by),
+                ..Default::default()
+            }
+        } else {
+            user::ActiveModel {
+                id: Unchanged(user.id),
+                updated_by: Set(user.updated_by),
+                ..Default::default()
+            }
+        };
+
         Self {
             user,
+            active_model,
             form,
             generate_password: false,
         }
@@ -50,9 +72,9 @@ impl UserEditor {
         match self.form.handle_key_event(key, modifiers) {
             FormEvent::Save => {
                 if let Err(e) = self.save_user() {
-                    let lines = if let Error::Database(DatabaseError::UserValidation(
-                        ValidateError::AuthorizedKeyInvalid(ref idx),
-                    )) = e
+                    let lines = if let Error::App(AppError::Admin(AdminError::Validate(
+                        validate::ValidateError::AuthorizedKeyInvalid(ref idx),
+                    ))) = e
                     {
                         vec![
                             String::from("Invalid authorized keys"),
@@ -81,14 +103,36 @@ impl UserEditor {
     }
 
     fn save_user(&mut self) -> Result<(), Error> {
-        self.user.username = self.form.get_text(F_USERNAME).trim().into();
+        let username = self.form.get_text(F_USERNAME).trim().to_string();
+        if self.user.username != username || self.user.username.is_empty() {
+            validate::varify_username(&username)
+                .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            self.active_model.username = Set(username.clone());
+            self.user.username = username
+        }
 
         let email = self.form.get_text(F_EMAIL).trim().to_string();
-        self.user.email = (!email.is_empty()).then_some(email);
+        let email = (!email.is_empty()).then_some(email);
+        if self.user.email != email {
+            if let Some(e) = email.as_ref() {
+                validate::varify_email(e).map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            }
+            self.active_model.email = Set(email.clone());
+            self.user.email = email
+        }
 
         self.generate_password = self.form.get_checkbox(F_PASSWORD);
-        self.user.force_init_pass = self.form.get_checkbox(F_FORCE_INIT_PASS);
-        self.user.is_active = self.form.get_checkbox(F_IS_ACTIVE);
+
+        let force_init_pass = self.form.get_checkbox(F_FORCE_INIT_PASS);
+        if self.user.force_init_pass != force_init_pass {
+            self.active_model.force_init_pass = Set(force_init_pass);
+            self.user.force_init_pass = force_init_pass
+        }
+        let is_active = self.form.get_checkbox(F_IS_ACTIVE);
+        if self.user.is_active != is_active {
+            self.active_model.is_active = Set(is_active);
+            self.user.is_active = force_init_pass
+        }
 
         let authorized_keys = self
             .form
@@ -97,16 +141,19 @@ impl UserEditor {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect::<Vec<String>>();
-
         self.form
             .get_multiline_mut(F_AUTHORIZED_KEYS)
             .reset_lines(&authorized_keys);
-        self.user
-            .set_authorized_keys((!authorized_keys.is_empty()).then_some(authorized_keys));
+        let authorized_keys = (!authorized_keys.is_empty()).then_some(authorized_keys);
+        if self.user.get_authorized_keys() != authorized_keys.as_deref() {
+            if let Some(ref keys) = authorized_keys {
+                validate::varify_authorized_keys(keys)
+                    .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            }
+            self.active_model.authorized_keys = Set(authorized_keys.map(|v| v.into()))
+        }
 
-        self.user
-            .validate()
-            .map_err(|e| Error::Database(DatabaseError::UserValidation(e)))
+        Ok(())
     }
 }
 

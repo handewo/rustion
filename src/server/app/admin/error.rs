@@ -4,4 +4,7 @@ use thiserror::Error;
 pub enum AdminError {
     #[error("Target '{target}' already has a bound secret with user '{user}'")]
     DuplicateTargetUser { target: String, user: String },
+
+    #[error(transparent)]
+    Validate(#[from] super::validate::ValidateError),
 }

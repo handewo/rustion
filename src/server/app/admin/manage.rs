@@ -228,8 +228,10 @@ where
 
         match self.selected_tab {
             SelectedTab::Users => {
-                self.editor =
-                    Editor::User(Box::new(user::UserEditor::new(User::new(self.admin_id))))
+                self.editor = Editor::User(Box::new(user::UserEditor::new(
+                    User::new(self.admin_id),
+                    true,
+                )))
             }
             SelectedTab::Targets => {
                 self.editor = Editor::Target(Box::new(target::TargetEditor::new(Target::new(
@@ -289,13 +291,14 @@ where
         match self.selected_tab {
             SelectedTab::Users => {
                 let idx = self.table.state.selected().unwrap();
-                let user = match self.items.get_user(idx) {
+                let mut user = match self.items.get_user(idx) {
                     Some(u) => u,
                     None => {
                         return false;
                     }
                 };
-                self.editor = Editor::User(Box::new(user::UserEditor::new(user)));
+                user.updated_by = self.admin_id;
+                self.editor = Editor::User(Box::new(user::UserEditor::new(user, false)));
             }
             SelectedTab::Targets => {
                 let idx = self.table.state.selected().unwrap();
@@ -680,21 +683,21 @@ where
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
                     if !e.form.show_cancel_confirmation {
                         let mut password = String::new();
-                        let mut user = e.user.to_owned();
+                        let mut active_model = e.active_model.to_owned();
 
                         if e.generate_password {
                             password = crate::common::gen_password(12);
-                            self.backend.set_password(&mut user, &password)?;
+                            self.backend.set_password(&mut active_model, &password)?;
                         }
 
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
-                                self.backend.db_repository().create_user(user).await,
+                                self.backend.db_repository().create_user(active_model).await,
                             ),
                             Popup::Edit => (
                                 "updated",
-                                self.backend.db_repository().update_user(user).await,
+                                self.backend.db_repository().update_user(active_model).await,
                             ),
                             _ => unreachable!(),
                         };

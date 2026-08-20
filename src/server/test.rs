@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::database::common::OBJ_LOGIN;
+    use crate::database::entity::user;
     use crate::database::models::{
         CasbinRule, Ptype, Secret, Target, TargetSecretName, User, casbin_rule::CasbinName,
         target_secret::TargetSecret,
@@ -12,6 +13,7 @@ mod tests {
     use crate::server::{self, HandlerBackend};
     use chrono::{Datelike, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc};
     use ipnetwork::IpNetwork;
+    use sea_orm::ActiveValue::{Set, Unchanged};
     use serde::{Deserialize, Serialize};
     use std::str::FromStr;
     use std::{fs::File, io::Read};
@@ -45,10 +47,19 @@ mod tests {
         let mut raw_data: RawData = serde_json::from_str(&buffer).unwrap();
 
         // Create users first (needed as updated_by reference)
-        db.repository()
-            .create_user(raw_data.users.pop().unwrap())
-            .await
-            .unwrap();
+        let mut first_user = raw_data.users.pop().unwrap();
+        let active_model: user::ActiveModel = user::ActiveModel {
+            id: Set(first_user.id),
+            username: Set(first_user.username.clone()),
+            email: Set(first_user.email.clone()),
+            authorized_keys: Set(first_user.take_authorized_keys().map(|v| v.into())),
+            force_init_pass: Set(first_user.force_init_pass),
+            is_active: Set(first_user.is_active),
+            updated_by: Set(first_user.updated_by),
+            updated_at: Set(first_user.updated_at),
+            ..Default::default()
+        };
+        db.repository().create_user(active_model).await.unwrap();
         db.repository()
             .create_users_batch(raw_data.users)
             .await
@@ -136,8 +147,12 @@ mod tests {
             .unwrap();
         assert_eq!(admin.id.to_string(), "ef3f2c71-14ca-49b2-93af-917618f1b09f");
 
+        let active_model = user::ActiveModel {
+            id: Unchanged(alice.id),
+            ..Default::default()
+        };
         alice = server
-            .update_user_password("12345678".into(), alice)
+            .update_user_password("12345678".into(), active_model)
             .await
             .unwrap();
         assert!(alice.verify_password("12345678"));
@@ -825,10 +840,19 @@ mod tests {
         let mut raw_data: RawData = serde_json::from_str(&buffer).unwrap();
 
         // Create users first
-        db.repository()
-            .create_user(raw_data.users.pop().unwrap())
-            .await
-            .unwrap();
+        let mut first_user = raw_data.users.pop().unwrap();
+        let active_model: user::ActiveModel = user::ActiveModel {
+            id: Set(first_user.id),
+            username: Set(first_user.username.clone()),
+            email: Set(first_user.email.clone()),
+            authorized_keys: Set(first_user.take_authorized_keys().map(|v| v.into())),
+            force_init_pass: Set(first_user.force_init_pass),
+            is_active: Set(first_user.is_active),
+            updated_by: Set(first_user.updated_by),
+            updated_at: Set(first_user.updated_at),
+            ..Default::default()
+        };
+        db.repository().create_user(active_model).await.unwrap();
         db.repository()
             .create_users_batch(raw_data.users)
             .await

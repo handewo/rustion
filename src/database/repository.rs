@@ -8,6 +8,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use log::{debug, info};
+use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::ExprTrait;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait,
@@ -121,10 +122,10 @@ impl DatabaseRepository for SeaOrmRepository {
 
     // ---------------------------------------------------------------- users
 
-    async fn create_user(&self, user: User) -> Result<User, Error> {
-        debug!("Creating user: '{}({})'", user.username, user.id);
-        let res = user.into_active_model().insert(&self.db).await?;
-        debug!("User created successfully: '{}({})'", res.username, res.id);
+    async fn create_user(&self, mut user: user::ActiveModel) -> Result<User, Error> {
+        let now = Utc::now().timestamp_millis();
+        user.updated_at = Set(now);
+        let res = user.insert(&self.db).await?;
         Ok(res.into())
     }
 
@@ -147,15 +148,9 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(q.one(&self.db).await?.map(User::from))
     }
 
-    async fn update_user(&self, mut user: User) -> Result<User, Error> {
-        debug!("Updating user: '{}({})'", user.username, user.id);
-        user.updated_at = Utc::now().timestamp_millis();
-
-        let res = user::Entity::update(user.into_active_model())
-            .exec(&self.db)
-            .await?;
-
-        debug!("User updated successfully: '{}({})'", res.username, res.id);
+    async fn update_user(&self, mut user: user::ActiveModel) -> Result<User, Error> {
+        user.updated_at = Set(Utc::now().timestamp_millis());
+        let res = user::Entity::update(user).exec(&self.db).await?;
         Ok(res.into())
     }
 

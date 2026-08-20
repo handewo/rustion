@@ -6,7 +6,10 @@ pub(crate) mod query;
 pub(crate) mod repository;
 pub(crate) mod service;
 
-use crate::{database::models::UserWithRole, error::Error};
+use crate::{
+    database::{entity::user, models::UserWithRole},
+    error::Error,
+};
 use async_trait::async_trait;
 use models::{
     CasbinName, CasbinRule, CasbinRuleGroup, GroupType, Log, NamePtype, ObjectGroup,
@@ -155,14 +158,14 @@ pub trait DatabaseRepository: Send + Sync {
     async fn initialize(&self) -> Result<(), Error>;
 
     /// User operations
-    async fn create_user(&self, user: User) -> Result<User, Error>;
+    async fn create_user(&self, user: user::ActiveModel) -> Result<User, Error>;
     async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>, Error>;
     async fn get_user_by_username(
         &self,
         username: &str,
         active_only: bool,
     ) -> Result<Option<User>, Error>;
-    async fn update_user(&self, user: User) -> Result<User, Error>;
+    async fn update_user(&self, user: user::ActiveModel) -> Result<User, Error>;
     async fn delete_user(&self, id: Uuid) -> Result<bool, Error>;
     async fn list_users(&self, active_only: bool) -> Result<Vec<User>, Error>;
     async fn list_users_with_role(&self, active_only: bool) -> Result<Vec<UserWithRole>, Error>;

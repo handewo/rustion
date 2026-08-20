@@ -1,8 +1,10 @@
 use super::extend_policy;
 use crate::config::Config;
 use crate::database::common::*;
+use crate::database::entity;
 use crate::database::{models::*, service::DatabaseService};
 use ::log::info;
+use sea_orm::ActiveValue::{Set, Unchanged};
 use uuid::Uuid;
 
 pub async fn init_service(config: Config) {
@@ -72,10 +74,15 @@ pub async fn init_service(config: Config) {
     info!("All tables verified empty, proceeding with initialization");
 
     // init admin user
-    let admin_id = Uuid::new_v4();
-    let mut u = User::new(admin_id);
-    u.username = "admin".into();
-    u.id = admin_id;
+    let admin_id = Uuid::now_v7();
+    let u = entity::user::ActiveModel {
+        id: Set(admin_id),
+        username: Set("admin".to_string()),
+        updated_by: Set(admin_id),
+        force_init_pass: Set(true),
+        is_active: Set(true),
+        ..Default::default()
+    };
     let u = match db.repository().create_user(u).await {
         Ok(user) => {
             info!("Admin user created with id={}", user.id);
@@ -304,7 +311,11 @@ pub async fn init_service(config: Config) {
         }
     };
 
-    let pass = match server.generate_random_password(u).await {
+    let active_model = entity::user::ActiveModel {
+        id: Unchanged(admin_id),
+        ..Default::default()
+    };
+    let pass = match server.generate_random_password(active_model).await {
         Ok(p) => p,
         Err(e) => {
             panic!("Failed to generate random password: {}", e);

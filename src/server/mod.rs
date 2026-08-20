@@ -15,6 +15,7 @@ pub use casbin::{Label, RuleGroup};
 
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
+use crate::database::entity::user;
 use crate::database::models::{GroupType, Target, TargetSecretName, User};
 use crate::error::Error;
 use futures::future::BoxFuture;
@@ -38,7 +39,7 @@ pub(super) trait HandlerBackend: Send + Clone {
     fn update_user_password(
         &self,
         password: String,
-        user: User,
+        user: user::ActiveModel,
     ) -> impl Future<Output = Result<User, Error>> + Send;
 
     fn list_targets_for_user(
@@ -114,7 +115,7 @@ pub(super) trait HandlerBackend: Send + Clone {
     fn record_input(&self) -> bool;
     fn record_path(&self) -> &str;
 
-    fn set_password(&self, user: &mut User, password: &str) -> Result<(), Error>;
+    fn set_password(&self, user: &mut user::ActiveModel, password: &str) -> Result<(), Error>;
     fn load_role_manager(&self) -> impl Future<Output = Result<(), Error>> + Send;
 
     fn get_graph(

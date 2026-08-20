@@ -36,3 +36,5 @@ pub const MANAGE_LIST: [&str; 9] = [
     MANAGE_TARGET_GROUP,
     MANAGE_ACTION_GROUP,
 ];
+
+pub const MAX_USERNAME_LEN: usize = 40;

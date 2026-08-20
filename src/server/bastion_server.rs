@@ -2,6 +2,7 @@ use super::casbin;
 use super::extend_policy::{ExtendPolicyReq, verify_extend_policy};
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
+use crate::database::entity::user;
 use crate::server::HandlerBackend;
 use crate::server::error::ServerError;
 use crate::utils::proxy_connect;
@@ -19,6 +20,7 @@ use rand::rng;
 use russh::client as ru_client;
 use russh::keys::Algorithm;
 use russh::server::{Config as RusshConfig, Server};
+use sea_orm::ActiveValue::Set;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -410,12 +412,15 @@ impl BastionServer {
         }
     }
 
-    pub async fn generate_random_password(&self, mut user: models::User) -> Result<String, Error> {
+    pub async fn generate_random_password(
+        &self,
+        mut user: user::ActiveModel,
+    ) -> Result<String, Error> {
         let password = crate::common::gen_password(12);
         let h = self
             .hash_password(&password)
             .map_err(|_| Error::Server(ServerError::PasswordHashFailed))?;
-        user.set_password_hash(h);
+        user.password_hash = Set(Some(h));
         self.database.repository().update_user(user).await?;
         Ok(password.to_string())
     }
@@ -586,27 +591,22 @@ impl super::HandlerBackend for BastionServer {
     async fn update_user_password(
         &self,
         password: String,
-        mut user: models::User,
+        mut user: user::ActiveModel,
     ) -> Result<models::User, Error> {
         let h = self
             .hash_password(&password)
             .map_err(|_| Error::Server(ServerError::PasswordHashFailed))?;
-        user.set_password_hash(h);
+        user.password_hash = Set(Some(h));
         self.database.repository().update_user(user).await
     }
 
-    fn set_password(&self, user: &mut models::User, password: &str) -> Result<(), Error> {
+    fn set_password(&self, user: &mut user::ActiveModel, password: &str) -> Result<(), Error> {
         let h = self
             .hash_password(password)
             .map_err(|_| Error::Server(ServerError::PasswordHashFailed))?;
-        user.set_password_hash(h);
+        user.password_hash = Set(Some(h));
         Ok(())
     }
-
-    // async fn update_user(&self, user: models::User) -> Result<models::User, Error> {
-    //     self.database.repository().update_user(&user).await?;
-    //     Ok(user)
-    // }
 
     async fn insert_log(
         &self,

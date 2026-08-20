@@ -6,9 +6,6 @@ pub enum DatabaseError {
     Db(#[from] sea_orm::DbErr),
 
     #[error(transparent)]
-    UserValidation(#[from] super::models::user::ValidateError),
-
-    #[error(transparent)]
     TargetValidation(#[from] super::models::target::ValidateError),
 
     #[error(transparent)]

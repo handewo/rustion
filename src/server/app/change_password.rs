@@ -1,4 +1,5 @@
 use super::AppParams;
+use crate::database::entity::user;
 use crate::database::models::User;
 use crate::error::Error;
 use bytes::Bytes;
@@ -10,6 +11,7 @@ use inquire::{
 use log::{debug, warn};
 use russh::ChannelId;
 use russh::server as ru_server;
+use sea_orm::ActiveValue::{Set, Unchanged};
 use tokio::sync::mpsc;
 
 static LOG_TYPE: &str = "password";
@@ -90,7 +92,7 @@ enum Status {
 }
 
 pub(crate) async fn shell_request<B>(
-    mut user: User,
+    user: User,
     app_params: AppParams<B>,
     channel: ChannelId,
     session: &mut ru_server::Session,
@@ -136,9 +138,16 @@ where
                         Some(s) => {
                             match s {
                                 Status::Finish(password) => {
-                                    user.force_init_pass=false;
+                                    let mut active_model = user::ActiveModel{
+                                        id: Unchanged(user_id),
+                                        updated_by: Set(user_id),
+                                        ..Default::default()
+                                    };
+                                    if user.force_init_pass {
+                                        active_model.force_init_pass=Set(false)
+                                    };
                                     let mut exit_status = 0;
-                                    if backend.update_user_password(password.clone(),user).await.is_err() {
+                                    if backend.update_user_password(password, active_model).await.is_err() {
                                         exit_status = 1;
                                         warn!("[{}] Password update failed for user '{}({})'", handler_id, username, user_id);
                                         handle_prompt.data(channel, "\r\npassword updated failed.\r\n"
