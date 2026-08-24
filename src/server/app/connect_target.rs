@@ -1,6 +1,8 @@
 use crate::asciinema;
 use crate::database::Uuid;
-use crate::database::models::{SessionRecording, Target, TargetSecretName, User};
+use crate::database::entity::session_recording as session_recording_entity;
+use crate::database::models::session_recording;
+use crate::database::models::{Target, TargetSecretName, User};
 use crate::error::Error;
 use crate::server::app::error::AppError;
 use crate::server::{HandlerLog, error::ServerError, extend_policy};
@@ -8,6 +10,7 @@ use log::{debug, trace};
 use russh::client as ru_client;
 use russh::server as ru_server;
 use russh::{Channel, ChannelId, ChannelMsg, ChannelReadHalf, ChannelWriteHalf, Pty};
+use sea_orm::ActiveValue::{Set, Unchanged};
 use std::fmt;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -326,18 +329,16 @@ where
             .await?;
 
         if self.backend.enable_record() {
-            let recording = SessionRecording::new(
-                self.user_id,
-                self.target_secret_name.target_id,
-                self.target_secret_name.secret_id,
-                self.handler_id,
-            );
+            // The id is minted here rather than by the database: it names the
+            // `.cast` file the recorder opens before the row is written.
+            let recording_id = Uuid::now_v7();
+            let file_path = session_recording::generate_path(recording_id);
 
             // Create the asciinema recorder
             if self.record_session.is_none() {
                 let session = asciinema::new_recorder(
                     Some(term.to_string()),
-                    std::path::PathBuf::from(self.backend.record_path()).join(&recording.file_path),
+                    std::path::PathBuf::from(self.backend.record_path()).join(&file_path),
                     (window_size.0 as u16, window_size.1 as u16),
                     None,
                     self.backend.record_input(),
@@ -347,14 +348,23 @@ where
                 // Wrap session with recording metadata
                 let recording_session = RecordingSession {
                     session,
-                    recording_id: recording.id,
+                    recording_id,
                 };
 
                 // Save to database
                 if let Err(e) = self
                     .backend
                     .db_repository()
-                    .create_session_recording(recording)
+                    .create_session_recording(session_recording_entity::ActiveModel {
+                        id: Set(recording_id),
+                        user_id: Set(self.user_id),
+                        target_id: Set(self.target_secret_name.target_id),
+                        secret_id: Set(self.target_secret_name.secret_id),
+                        file_path: Set(file_path),
+                        connection_id: Set(self.handler_id),
+                        status: Set(session_recording::STATUS_ACTIVE.into()),
+                        ..Default::default()
+                    })
                     .await
                 {
                     log::error!(
@@ -508,19 +518,18 @@ where
                     }
                 }
             }
-            // Update session recording as completed
-            if let Some(r) = record
-                && let Ok(Some(rec)) = backend_for_task
-                    .db_repository()
-                    .get_session_recording_by_id(r.lock().await.recording_id)
-                    .await
-            {
-                let mut updated = rec;
-                updated.ended_at = Some(chrono::Utc::now().timestamp_millis());
-                updated.status = "completed".to_string();
+            // Update session recording as completed. Only the two columns that
+            // move are `Set`, so this needs no read of the existing row.
+            if let Some(r) = record {
+                let id = r.lock().await.recording_id;
                 if let Err(e) = backend_for_task
                     .db_repository()
-                    .update_session_recording(updated)
+                    .update_session_recording(session_recording_entity::ActiveModel {
+                        id: Unchanged(id),
+                        ended_at: Set(Some(chrono::Utc::now().timestamp_millis())),
+                        status: Set(session_recording::STATUS_COMPLETED.into()),
+                        ..Default::default()
+                    })
                     .await
                 {
                     log::error!("[{}] Failed to update session recording: {}", handler_id, e);

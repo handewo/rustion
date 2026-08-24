@@ -5,21 +5,12 @@ pub enum DatabaseError {
     #[error(transparent)]
     Db(#[from] sea_orm::DbErr),
 
-    #[error(transparent)]
-    TargetValidation(#[from] super::models::target::ValidateError),
-
-    #[error(transparent)]
-    ProxyParseError(#[from] super::models::target::ProxyParseError),
-
     #[error("invalid proxy URI")]
     InvalidProxy,
 
-    #[error(transparent)]
-    SecretValidation(#[from] super::models::target_secret::ValidateError),
-
-    #[error(transparent)]
-    PermissionPolicyValidation(#[from] super::models::casbin_rule::PermissionPolicyEmptyError),
-
-    #[error(transparent)]
-    CasbinNameValidation(#[from] super::models::casbin_rule::ValidateError),
+    /// The one rule the repository enforces itself. Field validation lives in
+    /// the admin editors (`server::app::admin::validate`), but this guards rows
+    /// the RBAC engine depends on by name, so it has to hold for every caller.
+    #[error("cannot modify internal types")]
+    InternalTypeModification,
 }

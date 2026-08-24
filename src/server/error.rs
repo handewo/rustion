@@ -65,9 +65,6 @@ pub enum ServerError {
     #[error(transparent)]
     ExtendPolicy(#[from] ExtendPolicyError),
 
-    #[error("Rule ID is none for bound role")]
-    MissingRuleId,
-
     // Handler errors
     #[error("Invalid login name format")]
     InvalidLoginMode,

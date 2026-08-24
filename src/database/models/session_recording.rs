@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Session recording metadata for database storage
+/// Session recording metadata, as read back from storage.
+///
+/// Read-only, like [`super::Log`]: writes go through the repository as an
+/// `entity::session_recordings::ActiveModel`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRecording {
     pub id: Uuid,
@@ -16,22 +19,11 @@ pub struct SessionRecording {
     pub status: String,
 }
 
-impl SessionRecording {
-    pub fn new(user_id: Uuid, target_id: Uuid, secret_id: Uuid, connection_id: Uuid) -> Self {
-        let id = Uuid::new_v4();
-        Self {
-            id,
-            user_id,
-            target_id,
-            secret_id,
-            file_path: generate_path(id),
-            started_at: chrono::Utc::now().timestamp_millis(),
-            ended_at: None,
-            connection_id,
-            status: "active".to_string(),
-        }
-    }
-}
+/// The status of a freshly opened recording. `connect_target` flips it to
+/// `"completed"` when the channel closes.
+pub const STATUS_ACTIVE: &str = "active";
+/// The status of a recording whose channel has closed.
+pub const STATUS_COMPLETED: &str = "completed";
 
 pub fn generate_path(id: Uuid) -> String {
     format!("{}.cast", id)
@@ -52,8 +44,8 @@ impl RecordingView {
     }
 }
 
-impl From<crate::database::entity::session_recordings::Model> for SessionRecording {
-    fn from(m: crate::database::entity::session_recordings::Model) -> Self {
+impl From<crate::database::entity::session_recording::Model> for SessionRecording {
+    fn from(m: crate::database::entity::session_recording::Model) -> Self {
         Self {
             id: m.id,
             user_id: m.user_id,
@@ -64,25 +56,6 @@ impl From<crate::database::entity::session_recordings::Model> for SessionRecordi
             ended_at: m.ended_at,
             connection_id: m.connection_id,
             status: m.status,
-        }
-    }
-}
-
-impl SessionRecording {
-    pub(in crate::database) fn into_active_model(
-        self,
-    ) -> crate::database::entity::session_recordings::ActiveModel {
-        use sea_orm::ActiveValue::Set;
-        crate::database::entity::session_recordings::ActiveModel {
-            id: Set(self.id),
-            user_id: Set(self.user_id),
-            target_id: Set(self.target_id),
-            secret_id: Set(self.secret_id),
-            file_path: Set(self.file_path),
-            started_at: Set(self.started_at),
-            ended_at: Set(self.ended_at),
-            connection_id: Set(self.connection_id),
-            status: Set(self.status),
         }
     }
 }

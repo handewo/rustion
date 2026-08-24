@@ -38,3 +38,7 @@ pub const MANAGE_LIST: [&str; 9] = [
 ];
 
 pub const MAX_USERNAME_LEN: usize = 40;
+
+/// Applies to a target's name and hostname alike, which is why it is not
+/// spelled per-field.
+pub const MAX_NAME_LEN: usize = 50;

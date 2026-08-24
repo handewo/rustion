@@ -1,9 +1,14 @@
-use crate::database::error::DatabaseError;
+use super::super::error::AdminError;
+use super::super::validate;
+use crate::database::entity::secret;
 use crate::database::models::target_secret::Secret;
 use crate::error::Error;
+use crate::server::app::error::AppError;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use sea_orm::ActiveValue::{Set, Unchanged};
+use std::sync::Arc;
 
 // Field indices
 const F_NAME: usize = 0;
@@ -12,16 +17,26 @@ const F_PASSWORD: usize = 2;
 const F_IS_ACTIVE: usize = 3;
 const F_PRIVATE_KEY: usize = 4;
 
+/// The two secret columns leave this editor as plaintext: deriving the public key
+/// from a private key needs the key in the clear, and so does the passphrase that
+/// unlocks it. `manage.rs` encrypts them on the way to the repository — see
+/// [`Self::password_updated`] and [`Self::private_key_updated`].
 #[derive(Debug)]
-pub struct SecretEditor {
+pub(super) struct SecretEditor<B>
+where
+    B: 'static + crate::server::HandlerBackend + Send + Sync,
+{
     pub secret: Secret,
+    pub active_model: secret::ActiveModel,
     pub form: FormEditor,
-    pub private_key_updated: bool,
-    pub password_updated: bool,
+    backend: Arc<B>,
 }
 
-impl SecretEditor {
-    pub fn new(secret: Secret) -> Self {
+impl<B> SecretEditor<B>
+where
+    B: 'static + crate::server::HandlerBackend + Send + Sync,
+{
+    pub fn new(secret: Secret, is_new: bool, backend: Arc<B>) -> Self {
         let form = FormEditor::new(vec![
             FormField::text("*Name*", Some(secret.name.clone())),
             FormField::text("*User*", Some(secret.user.clone())),
@@ -29,11 +44,27 @@ impl SecretEditor {
             FormField::checkbox("Is Active", secret.is_active),
             FormField::multiline("Private Key", Some(&[secret.print_private_key()]), 8),
         ]);
+
+        let active_model = if is_new {
+            secret::ActiveModel {
+                id: Set(secret.id),
+                is_active: Set(secret.is_active),
+                updated_by: Set(secret.updated_by),
+                ..Default::default()
+            }
+        } else {
+            secret::ActiveModel {
+                id: Unchanged(secret.id),
+                updated_by: Set(secret.updated_by),
+                ..Default::default()
+            }
+        };
+
         Self {
             secret,
+            active_model,
             form,
-            private_key_updated: false,
-            password_updated: false,
+            backend,
         }
     }
 
@@ -59,48 +90,69 @@ impl SecretEditor {
     }
 
     fn save_secret(&mut self) -> Result<(), Error> {
-        self.secret.name = self.form.get_text(F_NAME).trim().into();
-        self.secret.user = self.form.get_text(F_USER).trim().into();
-
-        let password = self.form.get_text(F_PASSWORD).trim().to_string();
-        // If the password field was modified (not the placeholder), update it
-        // TODO: A better method is needed here.
-        if password != self.secret.print_password() {
-            if password.is_empty() {
-                let _ = self.secret.take_password();
-            } else {
-                self.secret.set_password(Some(password));
-            }
-            self.password_updated = true;
+        let name = self.form.get_text(F_NAME).trim().to_string();
+        if self.secret.name != name || self.secret.name.is_empty() {
+            validate::varify_name(&name).map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            self.active_model.name = Set(name.clone());
         }
 
-        self.secret.is_active = self.form.get_checkbox(F_IS_ACTIVE);
+        let user = self.form.get_text(F_USER).trim().to_string();
+        if self.secret.user != user || self.secret.user.is_empty() {
+            validate::varify_secret_user(&user)
+                .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            self.active_model.user = Set(user.clone());
+        }
 
+        // The form only ever shows a mask, so "differs from the mask" is the one
+        // available signal that the operator typed something.
+        // TODO: A better method is needed here.
+        let password = self.form.get_text(F_PASSWORD).trim().to_string();
+        if !password.is_empty() {
+            self.active_model.password = Set(Some(self.backend.encrypt_plain_text(&password)?))
+        } else {
+            if !self.secret.print_password().is_empty() {
+                self.active_model.password = Set(None)
+            }
+        }
+
+        let is_active = self.form.get_checkbox(F_IS_ACTIVE);
+        if self.secret.is_active != is_active {
+            self.active_model.is_active = Set(is_active);
+        }
+
+        // TODO: A better method is needed here.
         let private_key = self
             .form
             .get_multiline(F_PRIVATE_KEY)
             .join("\n")
             .trim()
             .to_string();
-        // If the private key field was modified (not the placeholder), update it
-        // TODO: A better method is needed here.
-        if private_key != self.secret.print_private_key() {
-            if private_key.is_empty() {
-                let _ = self.secret.take_private_key();
-                let _ = self.secret.take_public_key();
-            } else {
-                self.secret.set_private_key(Some(private_key));
+        if private_key.is_empty() {
+            if !self.secret.print_private_key().is_empty() {
+                self.active_model.private_key = Set(None);
+                self.active_model.public_key = Set(None);
             }
-            self.private_key_updated = true;
+        } else {
+            // Only a passphrase entered in this same edit can unlock an
+            // encrypted key; the stored one is ciphertext by now.
+            let public_key = validate::varify_private_key(
+                &private_key,
+                (!password.is_empty()).then_some(password.as_str()),
+            )
+            .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            self.active_model.private_key =
+                Set(Some(self.backend.encrypt_plain_text(&private_key)?));
+            self.active_model.public_key = Set(Some(public_key));
         }
 
-        self.secret
-            .validate(self.private_key_updated)
-            .map_err(|e| Error::Database(DatabaseError::SecretValidation(e)))
+        Ok(())
     }
 }
 
-impl Widget for &mut SecretEditor {
+impl<B> Widget for &mut SecretEditor<B>
+where
+    B: 'static + crate::server::HandlerBackend + Send + Sync,
+{
     fn render(self, area: Rect, buf: &mut Buffer) {
         self.form.render_ui(area, buf);
     }

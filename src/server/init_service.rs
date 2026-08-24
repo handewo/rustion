@@ -93,93 +93,44 @@ pub async fn init_service(config: Config) {
         }
     };
 
-    // Create UUIDs for actions and store in casbin_names
-    let action_login = CasbinName::new(
+    // Create UUIDs for the built-in actions and objects, and store them in
+    // casbin_names. Four of the ids are referenced by the policies below.
+    let action_login_id =
+        insert_name(&db, NamePtype::InternalActionType, ACT_LOGIN, admin_id).await;
+    let action_shell_id =
+        insert_name(&db, NamePtype::InternalActionType, ACT_SHELL, admin_id).await;
+    insert_name(&db, NamePtype::InternalActionType, ACT_EXEC, admin_id).await;
+    insert_name(&db, NamePtype::InternalActionType, ACT_PTY, admin_id).await;
+    insert_name(
+        &db,
         NamePtype::InternalActionType,
-        ACT_LOGIN.to_string(),
-        true,
-        u.id,
-    );
-    let action_shell = CasbinName::new(
-        NamePtype::InternalActionType,
-        ACT_SHELL.to_string(),
-        true,
-        u.id,
-    );
-    let action_exec = CasbinName::new(
-        NamePtype::InternalActionType,
-        ACT_EXEC.to_string(),
-        true,
-        u.id,
-    );
-    let action_pty = CasbinName::new(
-        NamePtype::InternalActionType,
-        ACT_PTY.to_string(),
-        true,
-        u.id,
-    );
-    let action_tcpip = CasbinName::new(
-        NamePtype::InternalActionType,
-        ACT_DIRECT_TCPIP.to_string(),
-        true,
-        u.id,
-    );
-    let obj_login = CasbinName::new(
-        NamePtype::InternalObjectType,
-        OBJ_LOGIN.to_string(),
-        true,
-        u.id,
-    );
-    let obj_admin = CasbinName::new(
-        NamePtype::InternalObjectType,
-        OBJ_ADMIN.to_string(),
-        true,
-        u.id,
-    );
-    let obj_player = CasbinName::new(
-        NamePtype::InternalObjectType,
-        OBJ_PLAYER.to_string(),
-        true,
-        u.id,
-    );
-
-    // Ids are generated client-side by `CasbinName::new`, so capture the ones the policies
-    // below need before the values are moved into the batch.
-    let obj_login_id = obj_login.id;
-    let obj_admin_id = obj_admin.id;
-    let action_login_id = action_login.id;
-    let action_shell_id = action_shell.id;
-
-    let names = vec![
-        action_tcpip,
-        action_pty,
-        action_exec,
-        action_shell,
-        action_login,
-        obj_login,
-        obj_admin,
-        obj_player,
-    ];
-    match db.repository().create_casbin_names_batch(names).await {
-        Ok(rows) => info!("Created {} casbin_names entries", rows),
-        Err(e) => {
-            panic!("Failed to create casbin_names batch: {}", e);
-        }
-    }
-
-    // Create login_group UUID and store in casbin_names
-    let login_group = CasbinName::new(NamePtype::G1, "login_group".to_string(), true, u.id);
-    let login_group_id = match db.repository().create_casbin_name(login_group).await {
-        Ok(n) => {
-            info!("Created login_group casbin_name");
-            n.id
-        }
-        Err(e) => {
-            panic!("Failed to create login_group: {}", e);
-        }
-    };
+        ACT_DIRECT_TCPIP,
+        admin_id,
+    )
+    .await;
+    let obj_login_id = insert_name(&db, NamePtype::InternalObjectType, OBJ_LOGIN, admin_id).await;
+    let obj_admin_id = insert_name(&db, NamePtype::InternalObjectType, OBJ_ADMIN, admin_id).await;
+    insert_name(&db, NamePtype::InternalObjectType, OBJ_PLAYER, admin_id).await;
+    let login_group_id = insert_name(&db, NamePtype::G1, "login_group", admin_id).await;
 
     info!("Creating default permission policies");
+
+    // All five default rules are `p` policies differing only in subject, object,
+    // action and the serialized extend policy, and all are attributed to admin.
+    let policy = |v0: Uuid, v1: Uuid, v2: Uuid, ext: &extend_policy::ExtendPolicy| {
+        entity::casbin_rule::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            ptype: Set(Ptype::Policy),
+            v0: Set(v0),
+            v1: Set(v1),
+            v2: Set(v2),
+            v3: Set(serde_json::to_string(ext).unwrap()),
+            v4: Set(String::new()),
+            v5: Set(String::new()),
+            updated_by: Set(admin_id),
+            ..Default::default()
+        }
+    };
 
     let ipv4_localhost = "127.0.0.1/32"
         .parse()
@@ -194,16 +145,7 @@ pub async fn init_service(config: Config) {
     };
 
     // Policy: admin can login from localhost (IPv4)
-    let p = CasbinRule::new(
-        Ptype::Policy,
-        u.id,
-        obj_login_id,
-        action_login_id,
-        serde_json::to_string(&ext).unwrap(),
-        String::new(),
-        String::new(),
-        u.id,
-    );
+    let p = policy(u.id, obj_login_id, action_login_id, &ext);
     match db.repository().create_casbin_rule(p).await {
         Ok(_) => info!("Created policy: admin can login from localhost (IPv4)"),
         Err(e) => {
@@ -212,16 +154,7 @@ pub async fn init_service(config: Config) {
     }
 
     // Policy: admin can access admin panel from localhost (IPv4)
-    let p = CasbinRule::new(
-        Ptype::Policy,
-        u.id,
-        obj_admin_id,
-        action_shell_id,
-        serde_json::to_string(&ext).unwrap(),
-        String::new(),
-        String::new(),
-        u.id,
-    );
+    let p = policy(u.id, obj_admin_id, action_shell_id, &ext);
     match db.repository().create_casbin_rule(p).await {
         Ok(_) => info!("Created policy: admin can access admin panel from localhost (IPv4)"),
         Err(e) => {
@@ -243,16 +176,7 @@ pub async fn init_service(config: Config) {
     };
 
     // Policy: admin can login from localhost (IPv6)
-    let p = CasbinRule::new(
-        Ptype::Policy,
-        u.id,
-        obj_login_id,
-        action_login_id,
-        serde_json::to_string(&ext).unwrap(),
-        String::new(),
-        String::new(),
-        u.id,
-    );
+    let p = policy(u.id, obj_login_id, action_login_id, &ext);
     match db.repository().create_casbin_rule(p).await {
         Ok(_) => info!("Created policy: admin can login from localhost (IPv6)"),
         Err(e) => {
@@ -261,16 +185,7 @@ pub async fn init_service(config: Config) {
     }
 
     // Policy: admin can access admin panel from localhost (IPv6)
-    let p = CasbinRule::new(
-        Ptype::Policy,
-        u.id,
-        obj_admin_id,
-        action_shell_id,
-        serde_json::to_string(&ext).unwrap(),
-        String::new(),
-        String::new(),
-        u.id,
-    );
+    let p = policy(u.id, obj_admin_id, action_shell_id, &ext);
     match db.repository().create_casbin_rule(p).await {
         Ok(_) => info!("Created policy: admin can access admin panel from localhost (IPv6)"),
         Err(e) => {
@@ -287,16 +202,7 @@ pub async fn init_service(config: Config) {
         open_direct_tcpip_host: None,
         open_direct_tcpip_port: None,
     };
-    let p = CasbinRule::new(
-        Ptype::Policy,
-        login_group_id,
-        obj_login_id,
-        action_login_id,
-        serde_json::to_string(&ext).unwrap(),
-        String::new(),
-        String::new(),
-        u.id,
-    );
+    let p = policy(login_group_id, obj_login_id, action_login_id, &ext);
     match db.repository().create_casbin_rule(p).await {
         Ok(_) => info!("Created policy: login_group can login (no IP restriction)"),
         Err(e) => {
@@ -326,4 +232,30 @@ pub async fn init_service(config: Config) {
     eprintln!("Rustion has been initialized successfully.");
     eprintln!("A temporary password is generated for admin: {}", pass);
     eprintln!("By default admin only allowed login on localhost.");
+}
+
+/// Inserts one `casbin_names` row and returns its id.
+///
+/// One insert per name rather than `create_casbin_names_batch`: the batch writes
+/// whole rows verbatim, `updated_at` included, which is what importing a fixture
+/// wants. These rows are new, so they go through the single-row path that stamps
+/// the timestamp. Nine inserts, once, at init.
+async fn insert_name(db: &DatabaseService, ptype: NamePtype, name: &str, updated_by: Uuid) -> Uuid {
+    let n = entity::casbin_name::ActiveModel {
+        id: Set(Uuid::now_v7()),
+        ptype: Set(ptype),
+        name: Set(name.to_string()),
+        is_active: Set(true),
+        updated_by: Set(updated_by),
+        ..Default::default()
+    };
+    match db.repository().create_casbin_name(n).await {
+        Ok(n) => {
+            info!("Created casbin_name: {}", n.name);
+            n.id
+        }
+        Err(e) => {
+            panic!("Failed to create casbin_name {}: {}", name, e);
+        }
+    }
 }

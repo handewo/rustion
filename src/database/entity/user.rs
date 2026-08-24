@@ -7,8 +7,8 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     /// Bounded `varchar` rather than `text` because it carries a unique index and
-    /// MySQL cannot index `TEXT` without a prefix length. `validate()` caps
-    /// usernames at 40 characters.
+    /// MySQL cannot index `TEXT` without a prefix length. The admin form caps
+    /// usernames at `MAX_USERNAME_LEN` (40).
     #[sea_orm(column_type = "String(StringLen::N(255))", unique, indexed)]
     pub username: String,
     #[sea_orm(column_type = "String(StringLen::N(255))", nullable)]

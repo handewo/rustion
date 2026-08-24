@@ -37,30 +37,6 @@ impl User {
         }
     }
 
-    pub fn with_email(mut self, email: String) -> Self {
-        self.email = Some(email);
-        self
-    }
-
-    pub fn with_password_hash(mut self, password_hash: Option<String>) -> Self {
-        self.password_hash = password_hash;
-        self
-    }
-
-    pub fn with_authorized_keys(mut self, authorized_keys: Vec<String>) -> Self {
-        self.authorized_keys = Some(authorized_keys);
-        self
-    }
-
-    pub fn set_authorized_keys(&mut self, authorized_keys: Option<Vec<String>>) {
-        self.authorized_keys = authorized_keys
-    }
-
-    pub fn set_active(mut self, active: bool) -> Self {
-        self.is_active = active;
-        self
-    }
-
     pub fn print_authorized_keys(&self) -> String {
         if self.authorized_keys.is_none() {
             return String::new();

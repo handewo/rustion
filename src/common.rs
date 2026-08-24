@@ -7,8 +7,6 @@ lazy_static! {
         Regex::new(r"^\w+([-+.']\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*$").unwrap();
 }
 
-pub type EncryptPlainText = Box<dyn Fn(&str) -> Result<String, crate::error::Error> + Send + Sync>;
-
 pub fn gen_password(len: usize) -> String {
     let upper = b'A'..=b'Z';
     let lower = b'a'..=b'z';

@@ -1,8 +1,11 @@
+use super::super::error::AdminError;
+use super::super::validate;
 use crate::database::Uuid;
-use crate::database::models::{CasbinRule, Ptype, Role};
+use crate::database::entity::casbin_rule;
+use crate::database::models::{Ptype, Role};
 use crate::error::Error;
 use crate::server::HandlerLog;
-use crate::server::error::ServerError;
+use crate::server::app::error::AppError;
 use crate::server::widgets::{
     AdminTable, DisplayMode, FieldsToArray, Message, TableData, centered_area, render_message_popup,
 };
@@ -14,6 +17,7 @@ use ratatui::{
     style::palette::tailwind,
     widgets::Widget,
 };
+use sea_orm::ActiveValue::Set;
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
 
@@ -130,7 +134,9 @@ where
         let idx = self.role_table.state.selected().unwrap();
         let t = self.items.get_mut(idx).unwrap();
         if t.is_bound {
-            let id = t.rule_id.ok_or(Error::Server(ServerError::MissingRuleId))?;
+            let id = t.rule_id.ok_or(AppError::Admin(AdminError::Validate(
+                validate::ValidateError::MissingRuleId,
+            )))?;
             self.backend.db_repository().delete_casbin_rule(id).await?;
             info!(
                 "[{}] Role '{}({})' revoked from user_id={} by admin_id={}",
@@ -145,16 +151,18 @@ where
             )
             .await;
         } else {
-            let cr = CasbinRule::new(
-                Ptype::G1,
-                t.rid,
-                self.selected_user_id,
-                Uuid::default(),
-                String::new(),
-                String::new(),
-                String::new(),
-                self.admin_id,
-            );
+            let cr = casbin_rule::ActiveModel {
+                id: Set(Uuid::now_v7()),
+                ptype: Set(Ptype::G1),
+                v0: Set(t.rid),
+                v1: Set(self.selected_user_id),
+                v2: Set(Uuid::default()),
+                v3: Set(String::new()),
+                v4: Set(String::new()),
+                v5: Set(String::new()),
+                updated_by: Set(self.admin_id),
+                ..Default::default()
+            };
             self.backend.db_repository().create_casbin_rule(cr).await?;
             info!(
                 "[{}] Role '{}({})' granted to user_id={} by admin_id={}",

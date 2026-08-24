@@ -2,7 +2,7 @@ use super::casbin;
 use super::extend_policy::{ExtendPolicyReq, verify_extend_policy};
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
-use crate::database::entity::user;
+use crate::database::entity::{event_log, user};
 use crate::server::HandlerBackend;
 use crate::server::error::ServerError;
 use crate::utils::proxy_connect;
@@ -615,12 +615,13 @@ impl super::HandlerBackend for BastionServer {
         log_type: String,
         detail: String,
     ) {
-        let l = models::Log {
-            connection_id,
-            user_id,
-            log_type,
-            detail,
-            created_at: chrono::Utc::now().timestamp_millis(),
+        // `created_at` is stamped by the repository.
+        let l = event_log::ActiveModel {
+            connection_id: Set(connection_id),
+            user_id: Set(user_id),
+            log_type: Set(log_type),
+            detail: Set(detail),
+            ..Default::default()
         };
         if let Err(e) = self.database.repository().insert_log(l).await {
             error!("Insert log to database failed: {}", e);
@@ -755,25 +756,25 @@ impl super::HandlerBackend for BastionServer {
         self.do_load_role_manager().await
     }
 
-    fn encrypt_plain_text(&self) -> crate::common::EncryptPlainText {
-        let secret_key = self.secret_key.clone();
-        Box::new(move |text: &str| -> Result<String, Error> {
-            let mut nonce_bytes = [0u8; 12];
-            OsRng.fill_bytes(&mut nonce_bytes);
-            let nonce = Nonce::from_slice(&nonce_bytes);
+    fn encrypt_plain_text(&self, text: &str) -> Result<String, Error> {
+        let mut nonce_bytes = [0u8; 12];
+        OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
 
-            let ciphertext = secret_key.encrypt(nonce, text.as_bytes()).map_err(|e| {
+        let ciphertext = self
+            .secret_key
+            .encrypt(nonce, text.as_bytes())
+            .map_err(|e| {
                 Error::Server(ServerError::EncryptionFailed {
                     reason: e.to_string(),
                 })
             })?;
 
-            let mut blob = Vec::with_capacity(nonce_bytes.len() + ciphertext.len());
-            blob.extend_from_slice(&nonce_bytes);
-            blob.extend_from_slice(&ciphertext);
+        let mut blob = Vec::with_capacity(nonce_bytes.len() + ciphertext.len());
+        blob.extend_from_slice(&nonce_bytes);
+        blob.extend_from_slice(&ciphertext);
 
-            Ok(general_purpose::STANDARD.encode(blob))
-        })
+        Ok(general_purpose::STANDARD.encode(blob))
     }
 
     async fn get_graph(&self, rt: GroupType) -> StableDiGraph<casbin::RuleGroup, ()> {

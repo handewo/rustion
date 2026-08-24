@@ -7,7 +7,13 @@ pub(crate) mod repository;
 pub(crate) mod service;
 
 use crate::{
-    database::{entity::user, models::UserWithRole},
+    database::{
+        entity::{
+            casbin_name, casbin_rule as casbin_rule_entity, event_log, secret, session_recording,
+            target as target_entity, target_secret as target_secret_entity, user,
+        },
+        models::UserWithRole,
+    },
     error::Error,
 };
 use async_trait::async_trait;
@@ -171,7 +177,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn list_users_with_role(&self, active_only: bool) -> Result<Vec<UserWithRole>, Error>;
 
     /// Target operations
-    async fn create_target(&self, target: Target) -> Result<Target, Error>;
+    async fn create_target(&self, target: target_entity::ActiveModel) -> Result<Target, Error>;
     async fn get_target_by_id(&self, id: Uuid, active_only: bool) -> Result<Option<Target>, Error>;
     async fn get_targets_by_ids(&self, ids: &[&Uuid]) -> Result<Vec<Target>, Error>;
     async fn get_target_by_target_secret_id(
@@ -186,14 +192,14 @@ pub trait DatabaseRepository: Send + Sync {
     ) -> Result<Vec<Target>, Error>;
     async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, Error>;
     async fn get_target_by_hostname(&self, hostname: &str) -> Result<Option<Target>, Error>;
-    async fn update_target(&self, target: Target) -> Result<Target, Error>;
+    async fn update_target(&self, target: target_entity::ActiveModel) -> Result<Target, Error>;
     async fn delete_target(&self, id: Uuid) -> Result<bool, Error>;
     async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, Error>;
     async fn list_targets_info(&self) -> Result<Vec<TargetInfo>, Error>;
 
     /// Secret operations
-    async fn create_secret(&self, secret: Secret) -> Result<Secret, Error>;
-    async fn update_secret(&self, secret: Secret) -> Result<Secret, Error>;
+    async fn create_secret(&self, secret: secret::ActiveModel) -> Result<Secret, Error>;
+    async fn update_secret(&self, secret: secret::ActiveModel) -> Result<Secret, Error>;
     async fn list_secrets(&self, active_only: bool) -> Result<Vec<Secret>, Error>;
     async fn get_secret_by_id(&self, id: Uuid) -> Result<Option<Secret>, Error>;
     async fn get_secret_by_target_secret_id(
@@ -214,11 +220,11 @@ pub trait DatabaseRepository: Send + Sync {
     ) -> Result<Vec<TargetSecret>, Error>;
     async fn create_target_secret(
         &self,
-        target_secret: TargetSecret,
+        target_secret: target_secret_entity::ActiveModel,
     ) -> Result<TargetSecret, Error>;
     async fn update_target_secret(
         &self,
-        target_secret: TargetSecret,
+        target_secret: target_secret_entity::ActiveModel,
     ) -> Result<TargetSecret, Error>;
     async fn delete_target_secret(&self, id: Uuid) -> Result<bool, Error>;
     async fn upsert_target_secret(
@@ -237,8 +243,14 @@ pub trait DatabaseRepository: Send + Sync {
         ptype: Ptype,
     ) -> Result<Vec<CasbinRuleGroup>, Error>;
     async fn list_roles_by_user_id(&self, user_id: Uuid) -> Result<Vec<Role>, Error>;
-    async fn create_casbin_rule(&self, rule: CasbinRule) -> Result<CasbinRule, Error>;
-    async fn update_casbin_rule(&self, rule: CasbinRule) -> Result<CasbinRule, Error>;
+    async fn create_casbin_rule(
+        &self,
+        rule: casbin_rule_entity::ActiveModel,
+    ) -> Result<CasbinRule, Error>;
+    async fn update_casbin_rule(
+        &self,
+        rule: casbin_rule_entity::ActiveModel,
+    ) -> Result<CasbinRule, Error>;
     async fn delete_casbin_rule(&self, id: Uuid) -> Result<bool, Error>;
     /// Deletes a single group membership.
     ///
@@ -254,11 +266,14 @@ pub trait DatabaseRepository: Send + Sync {
     ) -> Result<bool, Error>;
 
     /// CasbinName operations - maps UUIDs to human-readable names
-    async fn create_casbin_name(&self, name: CasbinName) -> Result<CasbinName, Error>;
-    async fn update_casbin_name(&self, name: CasbinName) -> Result<CasbinName, Error>;
+    async fn create_casbin_name(&self, name: casbin_name::ActiveModel)
+    -> Result<CasbinName, Error>;
+    /// Rejects a rename or re-type of an internal name; see
+    /// [`error::DatabaseError::InternalTypeModification`].
+    async fn update_casbin_name(&self, name: casbin_name::ActiveModel)
+    -> Result<CasbinName, Error>;
     async fn delete_casbin_name(&self, id: Uuid) -> Result<bool, Error>;
     async fn get_casbin_name_by_name(&self, name: &str) -> Result<Option<CasbinName>, Error>;
-    async fn get_casbin_name_by_id(&self, id: Uuid) -> Result<Option<CasbinName>, Error>;
     async fn list_casbin_names_by_ptype(
         &self,
         ptype: NamePtype,
@@ -273,18 +288,20 @@ pub trait DatabaseRepository: Send + Sync {
     async fn create_casbin_names_batch(&self, names: Vec<CasbinName>) -> Result<u64, Error>;
 
     /// Log operations
-    async fn insert_log(&self, log: Log) -> Result<(), Error>;
+    ///
+    /// `created_at` is stamped by the repository, like every other write.
+    async fn insert_log(&self, log: event_log::ActiveModel) -> Result<(), Error>;
     async fn list_logs(&self) -> Result<Vec<Log>, Error>;
 
     /// Session recording operations
     async fn create_session_recording(
         &self,
-        recording: SessionRecording,
+        recording: session_recording::ActiveModel,
     ) -> Result<SessionRecording, Error>;
 
     async fn update_session_recording(
         &self,
-        recording: SessionRecording,
+        recording: session_recording::ActiveModel,
     ) -> Result<SessionRecording, Error>;
 
     async fn get_session_recording_by_id(

@@ -10,12 +10,12 @@ use sea_orm::entity::prelude::*;
 ///
 /// `detail` is a bounded `varchar` rather than `text` because MySQL cannot index
 /// a `TEXT` column in a key without a prefix length. The bound is generous:
-/// details are structurally bounded format strings — UUIDs (36) plus names that
-/// `validate()` caps at 40–50 chars — and the longest row in the production
+/// details are structurally bounded format strings — UUIDs (36) plus names the
+/// admin form caps at 40–50 chars — and the longest row in the production
 /// database is 192 characters. SQLite ignores `varchar` lengths entirely, so
 /// existing rows are unaffected either way.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-#[sea_orm(table_name = "logs")]
+#[sea_orm(table_name = "event_log")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false, indexed)]
     pub created_at: i64,

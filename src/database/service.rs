@@ -31,10 +31,8 @@ mod tests {
     use super::*;
     use crate::database::{
         CasbinName, Target, User,
-        entity::user,
         models::{CasbinRule, Secret, target_secret::TargetSecret},
     };
-    use sea_orm::ActiveValue::Set;
     use serde::{Deserialize, Serialize};
     use serde_json;
     use std::{fs::File, io::Read};
@@ -62,21 +60,17 @@ mod tests {
         let mut buffer = String::new();
         test_data.read_to_string(&mut buffer).unwrap();
         let mut raw_data: RawData = serde_json::from_str(&buffer).unwrap();
+        // One row of each kind goes in through the single-row create and the rest
+        // through the batch, so both paths are exercised. This module is inside
+        // `crate::database`, so it can reuse `into_active_model` for the whole-row
+        // conversion instead of spelling out a literal.
         let first_user = raw_data.users.pop().unwrap();
-        let active_model: user::ActiveModel = user::ActiveModel {
-            id: Set(first_user.id),
-            username: Set(first_user.username),
-            email: Set(first_user.email),
-            authorized_keys: Set(first_user.authorized_keys.map(|v| v.into())),
-            force_init_pass: Set(first_user.force_init_pass),
-            is_active: Set(first_user.is_active),
-            updated_by: Set(first_user.updated_by),
-            updated_at: Set(first_user.updated_at),
-            ..Default::default()
-        };
         // Each batch insert reports the rows the driver actually wrote; assert it matches
         // the number of entities handed in.
-        db.repository.create_user(active_model).await.unwrap();
+        db.repository
+            .create_user(first_user.into_active_model())
+            .await
+            .unwrap();
         let n = raw_data.users.len() as u64;
         assert_eq!(
             db.repository
@@ -87,7 +81,7 @@ mod tests {
         );
 
         db.repository
-            .create_target(raw_data.targets.pop().unwrap())
+            .create_target(raw_data.targets.pop().unwrap().into_active_model())
             .await
             .unwrap();
         let n = raw_data.targets.len() as u64;
@@ -100,7 +94,7 @@ mod tests {
         );
 
         db.repository
-            .create_casbin_rule(raw_data.casbin_rule.pop().unwrap())
+            .create_casbin_rule(raw_data.casbin_rule.pop().unwrap().into_active_model())
             .await
             .unwrap();
         let n = raw_data.casbin_rule.len() as u64;
@@ -113,7 +107,7 @@ mod tests {
         );
 
         db.repository
-            .create_secret(raw_data.secrets.pop().unwrap())
+            .create_secret(raw_data.secrets.pop().unwrap().into_active_model())
             .await
             .unwrap();
         let n = raw_data.secrets.len() as u64;
@@ -126,7 +120,7 @@ mod tests {
         );
 
         db.repository
-            .create_target_secret(raw_data.target_secrets.pop().unwrap())
+            .create_target_secret(raw_data.target_secrets.pop().unwrap().into_active_model())
             .await
             .unwrap();
         let n = raw_data.target_secrets.len() as u64;

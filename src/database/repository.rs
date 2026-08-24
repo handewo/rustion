@@ -8,7 +8,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use log::{debug, info};
-use sea_orm::ActiveValue::Set;
+use sea_orm::ActiveValue::{Set, Unchanged};
 use sea_orm::sea_query::ExprTrait;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait,
@@ -17,10 +17,9 @@ use sea_orm::{
 use uuid::Uuid;
 
 use crate::database::entity::{
-    casbin_names, casbin_rule, logs, secret, session_recordings, target, target_secret, user,
+    casbin_name, casbin_rule, event_log, secret, session_recording, target, target_secret, user,
 };
 use crate::database::error::DatabaseError;
-use crate::database::models::casbin_rule::ValidateError;
 use crate::database::models::{
     CasbinName, CasbinRule, CasbinRuleGroup, GroupType, Log, NamePtype, ObjectGroup,
     PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo, SessionRecording, Target,
@@ -73,9 +72,9 @@ impl SeaOrmRepository {
             && exists!(secret::Entity)
             && exists!(target_secret::Entity)
             && exists!(casbin_rule::Entity)
-            && exists!(casbin_names::Entity)
-            && exists!(logs::Entity)
-            && exists!(session_recordings::Entity)
+            && exists!(casbin_name::Entity)
+            && exists!(event_log::Entity)
+            && exists!(session_recording::Entity)
     }
 }
 
@@ -110,9 +109,9 @@ impl DatabaseRepository for SeaOrmRepository {
             .register(secret::Entity)
             .register(target_secret::Entity)
             .register(casbin_rule::Entity)
-            .register(casbin_names::Entity)
-            .register(logs::Entity)
-            .register(session_recordings::Entity)
+            .register(casbin_name::Entity)
+            .register(event_log::Entity)
+            .register(session_recording::Entity)
             .sync(&self.db)
             .await?;
 
@@ -214,10 +213,9 @@ impl DatabaseRepository for SeaOrmRepository {
 
     // -------------------------------------------------------------- targets
 
-    async fn create_target(&self, target: Target) -> Result<Target, Error> {
-        debug!("Creating target: '{}({})'", target.name, target.id);
-        let res = target.into_active_model().insert(&self.db).await?;
-        debug!("Target created successfully: '{}({})'", res.name, res.id);
+    async fn create_target(&self, mut target: target::ActiveModel) -> Result<Target, Error> {
+        target.updated_at = Set(Utc::now().timestamp_millis());
+        let res = target.insert(&self.db).await?;
         Ok(res.into())
     }
 
@@ -258,15 +256,9 @@ impl DatabaseRepository for SeaOrmRepository {
             .map(Target::from))
     }
 
-    async fn update_target(&self, mut target: Target) -> Result<Target, Error> {
-        debug!("Updating target: '{}({})'", target.name, target.id);
-        target.updated_at = Utc::now().timestamp_millis();
-
-        let res = target::Entity::update(target.into_active_model())
-            .exec(&self.db)
-            .await?;
-
-        debug!("Target updated successfully: '{}({})'", res.name, res.id);
+    async fn update_target(&self, mut target: target::ActiveModel) -> Result<Target, Error> {
+        target.updated_at = Set(Utc::now().timestamp_millis());
+        let res = target::Entity::update(target).exec(&self.db).await?;
         Ok(res.into())
     }
 
@@ -342,22 +334,15 @@ impl DatabaseRepository for SeaOrmRepository {
 
     // -------------------------------------------------------------- secrets
 
-    async fn create_secret(&self, secret: Secret) -> Result<Secret, Error> {
-        debug!("Creating secret: '{}({})'", secret.name, secret.id);
-        let res = secret.into_active_model().insert(&self.db).await?;
-        debug!("Secret created successfully: '{}({})'", res.name, res.id);
+    async fn create_secret(&self, mut secret: secret::ActiveModel) -> Result<Secret, Error> {
+        secret.updated_at = Set(Utc::now().timestamp_millis());
+        let res = secret.insert(&self.db).await?;
         Ok(res.into())
     }
 
-    async fn update_secret(&self, mut secret: Secret) -> Result<Secret, Error> {
-        debug!("Updating secret: '{}({})'", secret.name, secret.id);
-        secret.updated_at = Utc::now().timestamp_millis();
-
-        let res = secret::Entity::update(secret.into_active_model())
-            .exec(&self.db)
-            .await?;
-
-        debug!("Secret updated successfully: '{}({})'", res.name, res.id);
+    async fn update_secret(&self, mut secret: secret::ActiveModel) -> Result<Secret, Error> {
+        secret.updated_at = Set(Utc::now().timestamp_millis());
+        let res = secret::Entity::update(secret).exec(&self.db).await?;
         Ok(res.into())
     }
 
@@ -437,22 +422,21 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn create_target_secret(
         &self,
-        target_secret: TargetSecret,
+        mut target_secret: target_secret::ActiveModel,
     ) -> Result<TargetSecret, Error> {
-        let res = target_secret.into_active_model().insert(&self.db).await?;
+        target_secret.updated_at = Set(Utc::now().timestamp_millis());
+        let res = target_secret.insert(&self.db).await?;
         Ok(res.into())
     }
 
     async fn update_target_secret(
         &self,
-        mut target_secret: TargetSecret,
+        mut target_secret: target_secret::ActiveModel,
     ) -> Result<TargetSecret, Error> {
-        target_secret.updated_at = Utc::now().timestamp_millis();
-
-        let res = target_secret::Entity::update(target_secret.into_active_model())
+        target_secret.updated_at = Set(Utc::now().timestamp_millis());
+        let res = target_secret::Entity::update(target_secret)
             .exec(&self.db)
             .await?;
-
         Ok(res.into())
     }
 
@@ -474,35 +458,33 @@ impl DatabaseRepository for SeaOrmRepository {
         is_active: bool,
         updated_by: Uuid,
     ) -> Result<(), Error> {
-        debug!(
-            "Upserting target_secret binding: target_id={}, secret_id={}, is_active={}",
-            target_id, secret_id, is_active
-        );
-
-        let existing = target_secret::Entity::find()
-            .filter(target_secret::Column::TargetId.eq(target_id))
-            .filter(target_secret::Column::SecretId.eq(secret_id))
+        let existing = target_secret::Entity::find_by_target_secret((target_id, secret_id))
             .one(&self.db)
             .await?;
 
         match existing {
             Some(m) => {
-                let mut ts = TargetSecret::from(m);
-                ts.is_active = is_active;
-                self.update_target_secret(ts).await?;
-                debug!(
-                    "Target_secret binding updated: target_id={}, secret_id={}",
-                    target_id, secret_id
-                );
+                // `is_active` is the only column that moves. `updated_by` stays
+                // as it was, which is what this did before the row was expressed
+                // as an `ActiveModel` — the parameter feeds the insert only.
+                self.update_target_secret(target_secret::ActiveModel {
+                    id: Unchanged(m.id),
+                    is_active: Set(is_active),
+                    updated_by: Set(updated_by),
+                    ..Default::default()
+                })
+                .await?;
             }
             None => {
-                let mut ts = TargetSecret::new(target_id, secret_id, updated_by);
-                ts.is_active = is_active;
-                self.create_target_secret(ts).await?;
-                debug!(
-                    "Target_secret binding created: target_id={}, secret_id={}",
-                    target_id, secret_id
-                );
+                self.create_target_secret(target_secret::ActiveModel {
+                    id: Set(Uuid::now_v7()),
+                    target_id: Set(target_id),
+                    secret_id: Set(secret_id),
+                    is_active: Set(is_active),
+                    updated_by: Set(updated_by),
+                    ..Default::default()
+                })
+                .await?;
             }
         };
 
@@ -550,22 +532,21 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn create_casbin_rule(&self, rule: CasbinRule) -> Result<CasbinRule, Error> {
-        debug!("Creating casbin_rule: '({})'", rule.id);
-        let res = rule.into_active_model().insert(&self.db).await?;
-        debug!("Casbin_rule created successfully: '({})'", res.id);
+    async fn create_casbin_rule(
+        &self,
+        mut rule: casbin_rule::ActiveModel,
+    ) -> Result<CasbinRule, Error> {
+        rule.updated_at = Set(Utc::now().timestamp_millis());
+        let res = rule.insert(&self.db).await?;
         Ok(res.into())
     }
 
-    async fn update_casbin_rule(&self, mut rule: CasbinRule) -> Result<CasbinRule, Error> {
-        debug!("Updating casbin_rule: '({})'", rule.id);
-        rule.updated_at = Utc::now().timestamp_millis();
-
-        let res = casbin_rule::Entity::update(rule.into_active_model())
-            .exec(&self.db)
-            .await?;
-
-        debug!("Casbin_rule updated successfully: '({})'", res.id);
+    async fn update_casbin_rule(
+        &self,
+        mut rule: casbin_rule::ActiveModel,
+    ) -> Result<CasbinRule, Error> {
+        rule.updated_at = Set(Utc::now().timestamp_millis());
+        let res = casbin_rule::Entity::update(rule).exec(&self.db).await?;
         Ok(res.into())
     }
 
@@ -624,45 +605,51 @@ impl DatabaseRepository for SeaOrmRepository {
 
     // --------------------------------------------------------- casbin_names
 
-    async fn create_casbin_name(&self, name: CasbinName) -> Result<CasbinName, Error> {
-        let res = name.into_active_model().insert(&self.db).await?;
+    async fn create_casbin_name(
+        &self,
+        mut name: casbin_name::ActiveModel,
+    ) -> Result<CasbinName, Error> {
+        name.updated_at = Set(Utc::now().timestamp_millis());
+        let res = name.insert(&self.db).await?;
         Ok(res.into())
     }
 
-    async fn update_casbin_name(&self, mut name: CasbinName) -> Result<CasbinName, Error> {
-        // Internal types may not be renamed or re-typed.
-        if let Some(existing) = self.get_casbin_name_by_id(name.id).await?
+    async fn update_casbin_name(
+        &self,
+        mut name: casbin_name::ActiveModel,
+    ) -> Result<CasbinName, Error> {
+        // Internal types may not be renamed or re-typed. A `NotSet` column is not
+        // being written, so it cannot be a modification — only an explicit `Set`
+        // that differs from the stored row counts.
+        if let Some(id) = name.id.try_as_ref()
+            && let Some(existing) = casbin_name::Entity::find_by_id(*id)
+                .one(&self.db)
+                .await?
+                .map(CasbinName::from)
             && existing.is_internal()
-            && (existing.ptype != name.ptype || existing.name != name.name)
+            && (name.ptype.is_set() || name.name.is_set())
         {
-            return Err(Error::Database(DatabaseError::CasbinNameValidation(
-                ValidateError::InternalTypeModification,
-            )));
+            return Err(Error::Database(DatabaseError::InternalTypeModification));
         }
 
-        name.updated_at = Utc::now().timestamp_millis();
-
-        let res = casbin_names::Entity::update(name.into_active_model())
-            .exec(&self.db)
-            .await?;
-
+        name.updated_at = Set(Utc::now().timestamp_millis());
+        let res = casbin_name::Entity::update(name).exec(&self.db).await?;
         Ok(res.into())
     }
 
     async fn delete_casbin_name(&self, id: Uuid) -> Result<bool, Error> {
         debug!("Deleting casbin_name: id={}", id);
 
-        if let Some(casbin_name) = self.get_casbin_name_by_id(id).await?
+        if let Some(casbin_name) = casbin_name::Entity::find_by_id(id)
+            .one(&self.db)
+            .await?
+            .map(CasbinName::from)
             && casbin_name.is_internal()
         {
-            return Err(Error::Database(DatabaseError::CasbinNameValidation(
-                ValidateError::InternalTypeModification,
-            )));
+            return Err(Error::Database(DatabaseError::InternalTypeModification));
         }
 
-        let res = casbin_names::Entity::delete_by_id(id)
-            .exec(&self.db)
-            .await?;
+        let res = casbin_name::Entity::delete_by_id(id).exec(&self.db).await?;
         let deleted = res.rows_affected > 0;
         if deleted {
             debug!("Casbin_name deleted successfully: id={}", id);
@@ -671,15 +658,7 @@ impl DatabaseRepository for SeaOrmRepository {
     }
 
     async fn get_casbin_name_by_name(&self, name: &str) -> Result<Option<CasbinName>, Error> {
-        Ok(casbin_names::Entity::find()
-            .filter(casbin_names::Column::Name.eq(name))
-            .one(&self.db)
-            .await?
-            .map(CasbinName::from))
-    }
-
-    async fn get_casbin_name_by_id(&self, id: Uuid) -> Result<Option<CasbinName>, Error> {
-        Ok(casbin_names::Entity::find_by_id(id)
+        Ok(casbin_name::Entity::find_by_name(name)
             .one(&self.db)
             .await?
             .map(CasbinName::from))
@@ -690,9 +669,9 @@ impl DatabaseRepository for SeaOrmRepository {
         ptype: NamePtype,
         active_only: bool,
     ) -> Result<Vec<CasbinName>, Error> {
-        let mut q = casbin_names::Entity::find().filter(casbin_names::Column::Ptype.eq(ptype));
+        let mut q = casbin_name::Entity::find().filter(casbin_name::Column::Ptype.eq(ptype));
         if active_only {
-            q = q.filter(casbin_names::Column::IsActive.eq(true));
+            q = q.filter(casbin_name::Column::IsActive.eq(true));
         }
         Ok(q.all(&self.db)
             .await?
@@ -702,12 +681,12 @@ impl DatabaseRepository for SeaOrmRepository {
     }
 
     async fn list_casbin_names(&self, active_only: bool) -> Result<Vec<CasbinName>, Error> {
-        let mut q = casbin_names::Entity::find();
+        let mut q = casbin_name::Entity::find();
         if active_only {
-            q = q.filter(casbin_names::Column::IsActive.eq(true));
+            q = q.filter(casbin_name::Column::IsActive.eq(true));
         }
-        Ok(q.order_by_asc(casbin_names::Column::Ptype)
-            .order_by_asc(casbin_names::Column::Name)
+        Ok(q.order_by_asc(casbin_name::Column::Ptype)
+            .order_by_asc(casbin_name::Column::Name)
             .all(&self.db)
             .await?
             .into_iter()
@@ -719,12 +698,12 @@ impl DatabaseRepository for SeaOrmRepository {
         &self,
         active_only: bool,
     ) -> Result<Vec<CasbinName>, Error> {
-        let mut q = casbin_names::Entity::find().filter(casbin_names::Column::Ptype.is_not_in([
-            casbin_names::NamePtype::InternalActionType,
-            casbin_names::NamePtype::InternalObjectType,
+        let mut q = casbin_name::Entity::find().filter(casbin_name::Column::Ptype.is_not_in([
+            casbin_name::NamePtype::InternalActionType,
+            casbin_name::NamePtype::InternalObjectType,
         ]));
         if active_only {
-            q = q.filter(casbin_names::Column::IsActive.eq(true));
+            q = q.filter(casbin_name::Column::IsActive.eq(true));
         }
         Ok(q.all(&self.db)
             .await?
@@ -737,7 +716,7 @@ impl DatabaseRepository for SeaOrmRepository {
         if names.is_empty() {
             return Ok(0);
         }
-        let rows = casbin_names::Entity::insert_many(
+        let rows = casbin_name::Entity::insert_many(
             names
                 .into_iter()
                 .map(CasbinName::into_active_model)
@@ -750,14 +729,15 @@ impl DatabaseRepository for SeaOrmRepository {
 
     // ------------------------------------------------------------------ logs
 
-    async fn insert_log(&self, log: Log) -> Result<(), Error> {
-        log.into_active_model().insert(&self.db).await?;
+    async fn insert_log(&self, mut log: event_log::ActiveModel) -> Result<(), Error> {
+        log.created_at = Set(Utc::now().timestamp_millis());
+        log.insert(&self.db).await?;
         Ok(())
     }
 
     async fn list_logs(&self) -> Result<Vec<Log>, Error> {
-        Ok(logs::Entity::find()
-            .order_by_desc(logs::Column::CreatedAt)
+        Ok(event_log::Entity::find()
+            .order_by_desc(event_log::Column::CreatedAt)
             .all(&self.db)
             .await?
             .into_iter()
@@ -769,22 +749,19 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn create_session_recording(
         &self,
-        recording: SessionRecording,
+        mut recording: session_recording::ActiveModel,
     ) -> Result<SessionRecording, Error> {
-        debug!(
-            "Creating session_recording: user_id={}, target_id={}",
-            recording.user_id, recording.target_id
-        );
-        let res = recording.into_active_model().insert(&self.db).await?;
+        // `started_at` is this table's write stamp; the others use `updated_at`.
+        recording.started_at = Set(Utc::now().timestamp_millis());
+        let res = recording.insert(&self.db).await?;
         Ok(res.into())
     }
 
     async fn update_session_recording(
         &self,
-        recording: SessionRecording,
+        recording: session_recording::ActiveModel,
     ) -> Result<SessionRecording, Error> {
-        debug!("Updating session_recording: id={}", recording.id);
-        let res = session_recordings::Entity::update(recording.into_active_model())
+        let res = session_recording::Entity::update(recording)
             .exec(&self.db)
             .await?;
         Ok(res.into())
@@ -794,7 +771,7 @@ impl DatabaseRepository for SeaOrmRepository {
         &self,
         id: Uuid,
     ) -> Result<Option<SessionRecording>, Error> {
-        Ok(session_recordings::Entity::find_by_id(id)
+        Ok(session_recording::Entity::find_by_id(id)
             .one(&self.db)
             .await?
             .map(SessionRecording::from))
@@ -805,7 +782,7 @@ impl DatabaseRepository for SeaOrmRepository {
         limit: Option<i64>,
     ) -> Result<Vec<SessionRecording>, Error> {
         let mut q =
-            session_recordings::Entity::find().order_by_desc(session_recordings::Column::StartedAt);
+            session_recording::Entity::find().order_by_desc(session_recording::Column::StartedAt);
         if let Some(l) = limit {
             q = q.limit(l as u64);
         }
@@ -820,9 +797,9 @@ impl DatabaseRepository for SeaOrmRepository {
         &self,
         user_id: Uuid,
     ) -> Result<Vec<SessionRecording>, Error> {
-        Ok(session_recordings::Entity::find()
-            .filter(session_recordings::Column::UserId.eq(user_id))
-            .order_by_desc(session_recordings::Column::StartedAt)
+        Ok(session_recording::Entity::find()
+            .filter(session_recording::Column::UserId.eq(user_id))
+            .order_by_desc(session_recording::Column::StartedAt)
             .all(&self.db)
             .await?
             .into_iter()
@@ -834,9 +811,9 @@ impl DatabaseRepository for SeaOrmRepository {
         &self,
         target_id: Uuid,
     ) -> Result<Vec<SessionRecording>, Error> {
-        Ok(session_recordings::Entity::find()
-            .filter(session_recordings::Column::TargetId.eq(target_id))
-            .order_by_desc(session_recordings::Column::StartedAt)
+        Ok(session_recording::Entity::find()
+            .filter(session_recording::Column::TargetId.eq(target_id))
+            .order_by_desc(session_recording::Column::StartedAt)
             .all(&self.db)
             .await?
             .into_iter()
@@ -1026,7 +1003,7 @@ mod tests {
             .count();
 
         // Composite primary key, and the widest legacy `detail` values.
-        let logs = logs::Entity::find().all(&db).await.expect("read logs");
+        let logs = event_log::Entity::find().all(&db).await.expect("read logs");
 
         // `ptype` is deliberately excluded from both casbin reads below.
         //
@@ -1052,7 +1029,7 @@ mod tests {
             assert!(!v0.is_nil() || !v1.is_nil(), "rule uuids decoded as nil");
         }
 
-        session_recordings::Entity::find()
+        session_recording::Entity::find()
             .all(&db)
             .await
             .expect("read session_recordings");
@@ -1061,9 +1038,9 @@ mod tests {
             .all(&db)
             .await
             .expect("read target_secrets");
-        let names: Vec<(Uuid, String)> = casbin_names::Entity::find()
+        let names: Vec<(Uuid, String)> = casbin_name::Entity::find()
             .select_only()
-            .columns([casbin_names::Column::Id, casbin_names::Column::Name])
+            .columns([casbin_name::Column::Id, casbin_name::Column::Name])
             .into_tuple()
             .all(&db)
             .await

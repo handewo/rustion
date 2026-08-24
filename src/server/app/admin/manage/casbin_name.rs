@@ -1,10 +1,13 @@
-use crate::database::error::DatabaseError;
-use crate::database::models::casbin_rule::ValidateError;
+use super::super::error::AdminError;
+use super::super::validate;
+use crate::database::entity::casbin_name;
 use crate::database::models::{CasbinName, NamePtype};
 use crate::error::Error;
+use crate::server::app::error::AppError;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use sea_orm::ActiveValue::{Set, Unchanged};
 
 // Radio button options for ptype selection (static for RadioButtons widget)
 const PTYPE_OPTIONS: [RadioOption; 3] = [
@@ -21,14 +24,15 @@ const F_IS_ACTIVE: usize = 2;
 #[derive(Debug)]
 pub struct CasbinNameEditor {
     pub casbin_name: CasbinName,
+    pub active_model: casbin_name::ActiveModel,
     pub form: FormEditor,
 }
 
 impl CasbinNameEditor {
-    pub fn new(casbin_name: CasbinName, add_new: bool) -> Self {
+    pub fn new(casbin_name: CasbinName, is_new: bool) -> Self {
         let mut type_radio =
             FormField::radio("*Type*", &PTYPE_OPTIONS, casbin_name.ptype.as_str(), 5);
-        if !add_new {
+        if !is_new {
             type_radio = type_radio.readonly()
         }
         let form = FormEditor::new(vec![
@@ -36,7 +40,28 @@ impl CasbinNameEditor {
             FormField::text("*Name*", Some(casbin_name.name.clone())),
             FormField::checkbox("Is Active", casbin_name.is_active),
         ]);
-        Self { casbin_name, form }
+
+        let active_model = if is_new {
+            casbin_name::ActiveModel {
+                id: Set(casbin_name.id),
+                ptype: Set(casbin_name.ptype),
+                is_active: Set(casbin_name.is_active),
+                updated_by: Set(casbin_name.updated_by),
+                ..Default::default()
+            }
+        } else {
+            casbin_name::ActiveModel {
+                id: Unchanged(casbin_name.id),
+                updated_by: Set(casbin_name.updated_by),
+                ..Default::default()
+            }
+        };
+
+        Self {
+            casbin_name,
+            active_model,
+            form,
+        }
     }
 
     pub fn handle_paste_event(&mut self, paste: &str) -> bool {
@@ -61,19 +86,32 @@ impl CasbinNameEditor {
     }
 
     fn save_casbin_name(&mut self) -> Result<(), Error> {
-        // The radio carries the name, not the stored value. Unreachable in
-        // practice — `PTYPE_OPTIONS` only offers g1/g2/g3 — but it hands back a
-        // plain `&str`, so the mismatch has to be handled somewhere.
-        self.casbin_name.ptype =
-            NamePtype::from_name(self.form.get_radio(F_PTYPE)).ok_or(Error::Database(
-                DatabaseError::CasbinNameValidation(ValidateError::PtypeInvalid),
-            ))?;
-        self.casbin_name.name = self.form.get_text(F_NAME).trim().into();
-        self.casbin_name.is_active = self.form.get_checkbox(F_IS_ACTIVE);
+        // The radio carries the name, not the stored value. Both failures are
+        // unreachable in practice — `PTYPE_OPTIONS` only offers g1/g2/g3, and the
+        // radio is read-only on edit — but it hands back a plain `&str`, so an
+        // unknown or internal name has to be rejected somewhere.
+        let ptype = NamePtype::from_name(self.form.get_radio(F_PTYPE))
+            .filter(|p| !p.is_internal())
+            .ok_or(AppError::Admin(AdminError::Validate(
+                validate::ValidateError::PtypeInvalid,
+            )))?;
+        if self.casbin_name.ptype != ptype {
+            self.active_model.ptype = Set(ptype);
+        }
 
-        self.casbin_name
-            .validate()
-            .map_err(|e| Error::Database(DatabaseError::CasbinNameValidation(e)))
+        let name = self.form.get_text(F_NAME).trim().to_string();
+        if self.casbin_name.name != name || self.casbin_name.name.is_empty() {
+            validate::varify_group_name(&name)
+                .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            self.active_model.name = Set(name.clone());
+        }
+
+        let is_active = self.form.get_checkbox(F_IS_ACTIVE);
+        if self.casbin_name.is_active != is_active {
+            self.active_model.is_active = Set(is_active);
+        }
+
+        Ok(())
     }
 }
 

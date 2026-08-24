@@ -1,6 +1,7 @@
 use super::LOG_TYPE;
 use crate::database::Uuid;
-use crate::database::models::{CasbinRule, GroupType, ObjectGroup};
+use crate::database::entity::casbin_rule;
+use crate::database::models::{GroupType, ObjectGroup};
 use crate::error::Error;
 use crate::server::HandlerLog;
 use crate::server::widgets::tree;
@@ -17,6 +18,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     widgets::{Block, BorderType, Clear, Scrollbar, ScrollbarOrientation},
 };
+use sea_orm::ActiveValue::Set;
 use std::sync::Arc;
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 
@@ -419,16 +421,18 @@ where
                 );
                 "Unknown".to_string()
             });
-        let cr = CasbinRule::new(
-            self.group_type.into(),
-            obj.id,
-            iden.rid,
-            Uuid::default(),
-            String::new(),
-            String::new(),
-            String::new(),
-            self.admin_id,
-        );
+        let cr = casbin_rule::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            ptype: Set(self.group_type.into()),
+            v0: Set(obj.id),
+            v1: Set(iden.rid),
+            v2: Set(Uuid::default()),
+            v3: Set(String::new()),
+            v4: Set(String::new()),
+            v5: Set(String::new()),
+            updated_by: Set(self.admin_id),
+            ..Default::default()
+        };
         let t_type = if obj.is_group {
             String::from("Group")
         } else {

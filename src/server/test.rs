@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::database::common::OBJ_LOGIN;
-    use crate::database::entity::user;
+    use crate::database::entity::{casbin_name, casbin_rule, secret, target, target_secret, user};
     use crate::database::models::{
         CasbinRule, Ptype, Secret, Target, TargetSecretName, User, casbin_rule::CasbinName,
         target_secret::TargetSecret,
@@ -30,6 +30,76 @@ mod tests {
         casbin_rule: Vec<CasbinRule>,
     }
 
+    // Whole-row conversions for the fixtures below. `models::*::into_active_model`
+    // is `pub(in crate::database)` — this module is outside it, which is the same
+    // position the server code is in — so these spell the rows out. Every column is
+    // `Set`, including `updated_at`, though the repository overwrites that one.
+
+    fn user_active_model(mut u: User) -> user::ActiveModel {
+        user::ActiveModel {
+            id: Set(u.id),
+            username: Set(u.username.clone()),
+            email: Set(u.email.clone()),
+            authorized_keys: Set(u.take_authorized_keys().map(|v| v.into())),
+            force_init_pass: Set(u.force_init_pass),
+            is_active: Set(u.is_active),
+            updated_by: Set(u.updated_by),
+            updated_at: Set(u.updated_at),
+            ..Default::default()
+        }
+    }
+
+    fn target_active_model(t: Target) -> target::ActiveModel {
+        target::ActiveModel {
+            id: Set(t.id),
+            name: Set(t.name),
+            hostname: Set(t.hostname),
+            port: Set(t.port.into()),
+            server_public_key: Set(t.server_public_key),
+            description: Set(t.description),
+            proxy: Set(t.proxy),
+            is_active: Set(t.is_active),
+            updated_by: Set(t.updated_by),
+            updated_at: Set(t.updated_at),
+        }
+    }
+
+    fn secret_active_model(mut s: Secret) -> secret::ActiveModel {
+        secret::ActiveModel {
+            id: Set(s.id),
+            name: Set(s.name.clone()),
+            user: Set(s.user.clone()),
+            password: Set(s.take_password()),
+            private_key: Set(s.take_private_key()),
+            public_key: Set(s.take_public_key()),
+            is_active: Set(s.is_active),
+            updated_by: Set(s.updated_by),
+            updated_at: Set(s.updated_at),
+        }
+    }
+
+    fn target_secret_active_model(ts: TargetSecret) -> target_secret::ActiveModel {
+        target_secret::ActiveModel {
+            id: Set(ts.id),
+            target_id: Set(ts.target_id),
+            secret_id: Set(ts.secret_id),
+            is_active: Set(ts.is_active),
+            updated_by: Set(ts.updated_by),
+            updated_at: Set(ts.updated_at),
+        }
+    }
+
+    fn casbin_name_active_model(n: CasbinName) -> casbin_name::ActiveModel {
+        casbin_name::ActiveModel {
+            id: Set(n.id),
+            ptype: Set(n.ptype),
+            name: Set(n.name),
+            is_active: Set(n.is_active),
+            updated_by: Set(n.updated_by),
+            updated_at: Set(n.updated_at),
+        }
+    }
+
     #[tokio::test]
     async fn test_bastion_server() {
         let temp_dir = tempdir().unwrap();
@@ -47,26 +117,18 @@ mod tests {
         let mut raw_data: RawData = serde_json::from_str(&buffer).unwrap();
 
         // Create users first (needed as updated_by reference)
-        let mut first_user = raw_data.users.pop().unwrap();
-        let active_model: user::ActiveModel = user::ActiveModel {
-            id: Set(first_user.id),
-            username: Set(first_user.username.clone()),
-            email: Set(first_user.email.clone()),
-            authorized_keys: Set(first_user.take_authorized_keys().map(|v| v.into())),
-            force_init_pass: Set(first_user.force_init_pass),
-            is_active: Set(first_user.is_active),
-            updated_by: Set(first_user.updated_by),
-            updated_at: Set(first_user.updated_at),
-            ..Default::default()
-        };
-        db.repository().create_user(active_model).await.unwrap();
+        let first_user = raw_data.users.pop().unwrap();
+        db.repository()
+            .create_user(user_active_model(first_user))
+            .await
+            .unwrap();
         db.repository()
             .create_users_batch(raw_data.users)
             .await
             .unwrap();
 
         db.repository()
-            .create_target(raw_data.targets.pop().unwrap())
+            .create_target(target_active_model(raw_data.targets.pop().unwrap()))
             .await
             .unwrap();
         db.repository()
@@ -75,7 +137,7 @@ mod tests {
             .unwrap();
 
         db.repository()
-            .create_secret(raw_data.secrets.pop().unwrap())
+            .create_secret(secret_active_model(raw_data.secrets.pop().unwrap()))
             .await
             .unwrap();
         db.repository()
@@ -84,7 +146,9 @@ mod tests {
             .unwrap();
 
         db.repository()
-            .create_target_secret(raw_data.target_secrets.pop().unwrap())
+            .create_target_secret(target_secret_active_model(
+                raw_data.target_secrets.pop().unwrap(),
+            ))
             .await
             .unwrap();
         db.repository()
@@ -95,7 +159,10 @@ mod tests {
         // Create internal objects first
 
         for cn in raw_data.casbin_names {
-            db.repository().create_casbin_name(cn).await.unwrap();
+            db.repository()
+                .create_casbin_name(casbin_name_active_model(cn))
+                .await
+                .unwrap();
         }
 
         db.repository()
@@ -353,8 +420,17 @@ mod tests {
             .find(|v| v.id.to_string() == "749bed7e-67a5-4749-9371-ec7df959438e")
             .unwrap()
             .clone();
-        r.v2 = exec_uuid;
-        r = db.repository().update_casbin_rule(r).await.unwrap();
+        // Only the column under test is `Set`; the update returns the whole row,
+        // so `r` stays current for the next case.
+        r = db
+            .repository()
+            .update_casbin_rule(casbin_rule::ActiveModel {
+                id: Unchanged(r.id),
+                v2: Set(exec_uuid),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert!(
             !server
                 .enforce(
@@ -397,7 +473,7 @@ mod tests {
                 .await
                 .unwrap()
         );
-        let mut io = db
+        let io = db
             .repository()
             .list_casbin_names(true)
             .await
@@ -406,8 +482,14 @@ mod tests {
             .rfind(|v| v.name == OBJ_LOGIN)
             .unwrap()
             .clone();
-        io.is_active = false;
-        db.repository().update_casbin_name(io).await.unwrap();
+        db.repository()
+            .update_casbin_name(casbin_name::ActiveModel {
+                id: Unchanged(io.id),
+                is_active: Set(false),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert!(
             !server
                 .enforce(alice.id, obj_login, login_uuid, ExtendPolicyReq::default(),)
@@ -433,8 +515,15 @@ mod tests {
             open_direct_tcpip_host: Some(HostPolicy::Deny("192.168.1.0/24".into())),
             open_direct_tcpip_port: Some(PortPolicy::Allow(vec![2222, 22])),
         };
-        r.v3 = serde_json::to_string(&ep).unwrap();
-        r = db.repository().update_casbin_rule(r).await.unwrap();
+        r = db
+            .repository()
+            .update_casbin_rule(casbin_rule::ActiveModel {
+                id: Unchanged(r.id),
+                v3: Set(serde_json::to_string(&ep).unwrap()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert!(
             !server
                 .enforce(
@@ -537,8 +626,15 @@ mod tests {
             open_direct_tcpip_host: Some(HostPolicy::Allow("10.10.10.0/24".to_string())),
             open_direct_tcpip_port: None,
         };
-        r.v3 = serde_json::to_string(&ep).unwrap();
-        r = db.repository().update_casbin_rule(r).await.unwrap();
+        r = db
+            .repository()
+            .update_casbin_rule(casbin_rule::ActiveModel {
+                id: Unchanged(r.id),
+                v3: Set(serde_json::to_string(&ep).unwrap()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert!(
             !server
                 .enforce(
@@ -639,8 +735,14 @@ mod tests {
             open_direct_tcpip_host: None,
             open_direct_tcpip_port: None,
         };
-        r.v3 = serde_json::to_string(&ep).unwrap();
-        db.repository().update_casbin_rule(r).await.unwrap();
+        db.repository()
+            .update_casbin_rule(casbin_rule::ActiveModel {
+                id: Unchanged(r.id),
+                v3: Set(serde_json::to_string(&ep).unwrap()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert!(
             !server
                 .enforce(
@@ -687,13 +789,19 @@ mod tests {
                 .await
                 .unwrap()
         );
-        let mut ts = target_secrets
+        let ts = target_secrets
             .iter()
             .find(|v| v.id == Uuid::from_str("7f003584-21ed-4963-a7a1-892810f74e66").unwrap())
             .unwrap()
             .clone();
-        ts.is_active = false;
-        db.repository().update_target_secret(ts).await.unwrap();
+        db.repository()
+            .update_target_secret(target_secret::ActiveModel {
+                id: Unchanged(ts.id),
+                is_active: Set(false),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert!(
             !server
                 .enforce(
@@ -717,13 +825,19 @@ mod tests {
                 .await
                 .unwrap()
         );
-        let mut t = targets
+        let t = targets
             .iter()
             .find(|v| v.id.to_string() == "328ed0d0-8f40-4711-be0e-86a5cea44046")
             .unwrap()
             .clone();
-        t.is_active = false;
-        db.repository().update_target(t).await.unwrap();
+        db.repository()
+            .update_target(target::ActiveModel {
+                id: Unchanged(t.id),
+                is_active: Set(false),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert!(
             !server
                 .enforce(
@@ -775,13 +889,19 @@ mod tests {
                 .await
                 .unwrap()
         );
-        let mut s = secrets
+        let s = secrets
             .iter()
             .find(|v| v.id.to_string() == "986aed01-172c-4fcd-9686-bb812e86cf0e")
             .unwrap()
             .clone();
-        s.is_active = false;
-        db.repository().update_secret(s).await.unwrap();
+        db.repository()
+            .update_secret(secret::ActiveModel {
+                id: Unchanged(s.id),
+                is_active: Set(false),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert!(
             !server
                 .enforce(
@@ -840,26 +960,18 @@ mod tests {
         let mut raw_data: RawData = serde_json::from_str(&buffer).unwrap();
 
         // Create users first
-        let mut first_user = raw_data.users.pop().unwrap();
-        let active_model: user::ActiveModel = user::ActiveModel {
-            id: Set(first_user.id),
-            username: Set(first_user.username.clone()),
-            email: Set(first_user.email.clone()),
-            authorized_keys: Set(first_user.take_authorized_keys().map(|v| v.into())),
-            force_init_pass: Set(first_user.force_init_pass),
-            is_active: Set(first_user.is_active),
-            updated_by: Set(first_user.updated_by),
-            updated_at: Set(first_user.updated_at),
-            ..Default::default()
-        };
-        db.repository().create_user(active_model).await.unwrap();
+        let first_user = raw_data.users.pop().unwrap();
+        db.repository()
+            .create_user(user_active_model(first_user))
+            .await
+            .unwrap();
         db.repository()
             .create_users_batch(raw_data.users)
             .await
             .unwrap();
 
         db.repository()
-            .create_target(raw_data.targets.pop().unwrap())
+            .create_target(target_active_model(raw_data.targets.pop().unwrap()))
             .await
             .unwrap();
         db.repository()
@@ -868,7 +980,7 @@ mod tests {
             .unwrap();
 
         db.repository()
-            .create_secret(raw_data.secrets.pop().unwrap())
+            .create_secret(secret_active_model(raw_data.secrets.pop().unwrap()))
             .await
             .unwrap();
         db.repository()
@@ -877,7 +989,9 @@ mod tests {
             .unwrap();
 
         db.repository()
-            .create_target_secret(raw_data.target_secrets.pop().unwrap())
+            .create_target_secret(target_secret_active_model(
+                raw_data.target_secrets.pop().unwrap(),
+            ))
             .await
             .unwrap();
         db.repository()
@@ -886,7 +1000,10 @@ mod tests {
             .unwrap();
 
         for cn in raw_data.casbin_names {
-            db.repository().create_casbin_name(cn).await.unwrap();
+            db.repository()
+                .create_casbin_name(casbin_name_active_model(cn))
+                .await
+                .unwrap();
         }
 
         db.repository()
@@ -994,8 +1111,14 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let t = t.set_active(false);
-        db.repository().update_target(t).await.unwrap();
+        db.repository()
+            .update_target(target::ActiveModel {
+                id: Unchanged(t.id),
+                is_active: Set(false),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         assert!(
             !server
                 .enforce(
@@ -1026,16 +1149,18 @@ mod tests {
             .unwrap()
             .id;
 
-        let r = CasbinRule::new(
-            Ptype::Policy,
-            admin.id,
-            obj_login,
-            all_req_uuid,
-            String::from("{}"),
-            String::new(),
-            String::new(),
-            admin.id,
-        );
+        let r = casbin_rule::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            ptype: Set(Ptype::Policy),
+            v0: Set(admin.id),
+            v1: Set(obj_login),
+            v2: Set(all_req_uuid),
+            v3: Set(String::from("{}")),
+            v4: Set(String::new()),
+            v5: Set(String::new()),
+            updated_by: Set(admin.id),
+            ..Default::default()
+        };
         db.repository().create_casbin_rule(r).await.unwrap();
         server.load_role_manager().await.unwrap();
         assert!(

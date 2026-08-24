@@ -1,6 +1,9 @@
-use crate::database::error::DatabaseError;
+use super::super::error::AdminError;
+use super::super::validate;
+use crate::database::entity::casbin_rule;
 use crate::database::models::{ObjectGroup, PermissionPolicy};
 use crate::error::Error;
+use crate::server::app::error::AppError;
 use crate::server::error::ServerError;
 use crate::server::extend_policy::ExtendPolicy;
 use crate::server::widgets::{
@@ -15,6 +18,7 @@ use ratatui::{
     style::palette::tailwind,
     widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
+use sea_orm::ActiveValue::{Set, Unchanged};
 use std::sync::Arc;
 
 pub const HELP_TABLE: [&str; 2] = [
@@ -55,6 +59,7 @@ impl InputField {
 
 pub(super) struct PermissionEditor {
     pub perm: PermissionPolicy,
+    pub active_model: casbin_rule::ActiveModel,
     user_items: Vec<ObjectGroup>,
     target_items: Vec<ObjectGroup>,
     action_items: Vec<ObjectGroup>,
@@ -75,7 +80,7 @@ pub(super) struct PermissionEditor {
 }
 
 impl PermissionEditor {
-    pub async fn new<B>(perm: PermissionPolicy, backend: Arc<B>) -> Self
+    pub async fn new<B>(perm: PermissionPolicy, is_new: bool, backend: Arc<B>) -> Self
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
@@ -109,8 +114,33 @@ impl PermissionEditor {
         let longest_action_lens = table_object_group_len_calculator(&action_items);
 
         let extend_policy_text = SingleLineText::new(Some(perm.rule.v3.clone()));
+
+        // Every column of a new rule is pre-seeded: an insert needs all of them,
+        // and each `v*` is `NOT NULL`. Picking a row overwrites the placeholder,
+        // and `varify_permission_labels` is what refuses to save while one of the
+        // three is still unpicked.
+        let active_model = if is_new {
+            casbin_rule::ActiveModel {
+                id: Set(perm.rule.id),
+                // A permission policy is a `p` rule by definition.
+                ptype: Set(perm.rule.ptype),
+                v3: Set(perm.rule.v3.clone()),
+                v4: Set(perm.rule.v4.clone()),
+                v5: Set(perm.rule.v5.clone()),
+                updated_by: Set(perm.rule.updated_by),
+                ..Default::default()
+            }
+        } else {
+            casbin_rule::ActiveModel {
+                id: Unchanged(perm.rule.id),
+                updated_by: Set(perm.rule.updated_by),
+                ..Default::default()
+            }
+        };
+
         Self {
             perm,
+            active_model,
             user_table: AdminTable::new(&user_items, &tailwind::BLUE),
             target_table: AdminTable::new(&target_items, &tailwind::BLUE),
             action_table: AdminTable::new(&action_items, &tailwind::BLUE),
@@ -236,19 +266,25 @@ impl PermissionEditor {
                                 let idx = self.user_table.state.selected().unwrap();
                                 let t = self.user_items.get(idx).unwrap();
                                 self.perm.user_role = t.name.clone();
-                                self.perm.rule.v0 = t.id;
+                                if self.perm.rule.v0 != t.id {
+                                    self.active_model.v0 = Set(t.id);
+                                }
                             }
                             InputField::Target => {
                                 let idx = self.target_table.state.selected().unwrap();
                                 let t = self.target_items.get(idx).unwrap();
                                 self.perm.target_group = t.name.clone();
-                                self.perm.rule.v1 = t.id;
+                                if self.perm.rule.v1 != t.id {
+                                    self.active_model.v1 = Set(t.id);
+                                }
                             }
                             InputField::Action => {
                                 let idx = self.action_table.state.selected().unwrap();
                                 let t = self.action_items.get(idx).unwrap();
                                 self.perm.action_group = t.name.clone();
-                                self.perm.rule.v2 = t.id;
+                                if self.perm.rule.v2 != t.id {
+                                    self.active_model.v2 = Set(t.id);
+                                }
                             }
                             InputField::ExtendPolicy => {
                                 unreachable!()
@@ -335,14 +371,22 @@ impl PermissionEditor {
     }
 
     fn verify_permission(&mut self) -> Result<(), Error> {
-        let extend_policy = self.extend_policy_text.get_input();
-        self.perm.rule.v3 = extend_policy.trim().into();
-        let ext: ExtendPolicy = serde_json::from_str(&self.perm.rule.v3)?;
+        // Parsed on every save, not only when it changed: `verify_extend_policy`
+        // parses `v3` again at enforcement time, so an unparseable one must never
+        // reach the column — including the empty string a new rule starts with.
+        let extend_policy = self.extend_policy_text.get_input().trim().to_string();
+        let ext: ExtendPolicy = serde_json::from_str(&extend_policy)?;
         ext.validate().map_err(ServerError::ExtendPolicy)?;
+        if self.perm.rule.v3 != extend_policy {
+            self.active_model.v3 = Set(extend_policy.clone());
+        }
 
-        self.perm
-            .verify()
-            .map_err(|e| Error::Database(DatabaseError::PermissionPolicyValidation(e)))?;
+        validate::varify_permission_labels(
+            &self.perm.user_role,
+            &self.perm.target_group,
+            &self.perm.action_group,
+        )
+        .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
         Ok(())
     }
 

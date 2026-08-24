@@ -107,8 +107,7 @@ impl UserEditor {
         if self.user.username != username || self.user.username.is_empty() {
             validate::varify_username(&username)
                 .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
-            self.active_model.username = Set(username.clone());
-            self.user.username = username
+            self.active_model.username = Set(username);
         }
 
         let email = self.form.get_text(F_EMAIL).trim().to_string();
@@ -117,8 +116,7 @@ impl UserEditor {
             if let Some(e) = email.as_ref() {
                 validate::varify_email(e).map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
             }
-            self.active_model.email = Set(email.clone());
-            self.user.email = email
+            self.active_model.email = Set(email);
         }
 
         self.generate_password = self.form.get_checkbox(F_PASSWORD);
@@ -126,12 +124,10 @@ impl UserEditor {
         let force_init_pass = self.form.get_checkbox(F_FORCE_INIT_PASS);
         if self.user.force_init_pass != force_init_pass {
             self.active_model.force_init_pass = Set(force_init_pass);
-            self.user.force_init_pass = force_init_pass
         }
         let is_active = self.form.get_checkbox(F_IS_ACTIVE);
         if self.user.is_active != is_active {
             self.active_model.is_active = Set(is_active);
-            self.user.is_active = force_init_pass
         }
 
         let authorized_keys = self

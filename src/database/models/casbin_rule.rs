@@ -1,8 +1,7 @@
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub(crate) use crate::database::entity::casbin_names::NamePtype;
+pub(crate) use crate::database::entity::casbin_name::NamePtype;
 pub(crate) use crate::database::entity::casbin_rule::Ptype;
 
 /// Which of the three role hierarchies a group membership belongs to.
@@ -82,9 +81,8 @@ impl CasbinRule {
         v5: String,
         updated_by: Uuid,
     ) -> Self {
-        let now = Utc::now();
         Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             ptype,
             v0,
             v1,
@@ -93,7 +91,8 @@ impl CasbinRule {
             v4,
             v5,
             updated_by,
-            updated_at: now.timestamp_millis(),
+            // Stamped by the repository on write.
+            updated_at: 0,
         }
     }
 }
@@ -112,49 +111,20 @@ pub struct CasbinName {
 
 impl CasbinName {
     pub fn new(ptype: NamePtype, name: String, is_active: bool, updated_by: Uuid) -> Self {
-        let now = Utc::now().timestamp_millis();
         Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             ptype,
             name,
             is_active,
             updated_by,
-            updated_at: now,
+            // Stamped by the repository on write.
+            updated_at: 0,
         }
     }
 
     pub fn is_internal(&self) -> bool {
         self.ptype.is_internal()
     }
-
-    pub fn validate(&self) -> Result<(), ValidateError> {
-        // `NamePtype` makes the empty case unrepresentable, but `act` and the two
-        // internal markers are still values a user must not pick.
-        if !matches!(self.ptype, NamePtype::G1 | NamePtype::G2 | NamePtype::G3) {
-            return Err(ValidateError::PtypeInvalid);
-        }
-        if self.name.trim().is_empty() {
-            return Err(ValidateError::NameEmpty);
-        }
-        if self.name.starts_with('_') {
-            return Err(ValidateError::NameStartsWithUnderscore);
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ValidateError {
-    // `PtypeEmpty` used to live here. `NamePtype` has no empty state, so it
-    // became unconstructible.
-    #[error("Ptype must be one of g1, g2, g3")]
-    PtypeInvalid,
-    #[error("Name cannot be empty")]
-    NameEmpty,
-    #[error("Name cannot start with underscore")]
-    NameStartsWithUnderscore,
-    #[error("Cannot modify internal types")]
-    InternalTypeModification,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
@@ -194,7 +164,7 @@ impl PermissionPolicy {
                 Uuid::default(),
                 Uuid::default(),
                 Uuid::default(),
-                String::new(),
+                String::from("{}"),
                 String::new(),
                 String::new(),
                 updated_by,
@@ -204,46 +174,8 @@ impl PermissionPolicy {
             action_group: String::new(),
         }
     }
-
-    pub fn verify(&self) -> Result<(), PermissionPolicyEmptyError> {
-        if self.user_role == String::new() {
-            return Err(PermissionPolicyEmptyError::UserRole);
-        }
-
-        if self.target_group == String::new() {
-            return Err(PermissionPolicyEmptyError::TargetGroup);
-        }
-
-        if self.action_group == String::new() {
-            return Err(PermissionPolicyEmptyError::ActionGroup);
-        }
-        Ok(())
-    }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum PermissionPolicyEmptyError {
-    UserRole,
-    TargetGroup,
-    ActionGroup,
-}
-
-impl std::fmt::Display for PermissionPolicyEmptyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use PermissionPolicyEmptyError::*;
-        match self {
-            UserRole => {
-                write!(f, "User/Role cannot be empty")
-            }
-            TargetGroup => {
-                write!(f, "Target/Group cannot be empty")
-            }
-            ActionGroup => {
-                write!(f, "Action/Group cannot be empty")
-            }
-        }
-    }
-}
 #[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
 pub struct ObjectGroup {
     pub id: Uuid,
@@ -288,8 +220,8 @@ impl CasbinRule {
     }
 }
 
-impl From<crate::database::entity::casbin_names::Model> for CasbinName {
-    fn from(m: crate::database::entity::casbin_names::Model) -> Self {
+impl From<crate::database::entity::casbin_name::Model> for CasbinName {
+    fn from(m: crate::database::entity::casbin_name::Model) -> Self {
         Self {
             id: m.id,
             ptype: m.ptype,
@@ -304,9 +236,9 @@ impl From<crate::database::entity::casbin_names::Model> for CasbinName {
 impl CasbinName {
     pub(in crate::database) fn into_active_model(
         self,
-    ) -> crate::database::entity::casbin_names::ActiveModel {
+    ) -> crate::database::entity::casbin_name::ActiveModel {
         use sea_orm::ActiveValue::Set;
-        crate::database::entity::casbin_names::ActiveModel {
+        crate::database::entity::casbin_name::ActiveModel {
             id: Set(self.id),
             ptype: Set(self.ptype),
             name: Set(self.name),

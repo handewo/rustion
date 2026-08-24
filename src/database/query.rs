@@ -24,10 +24,10 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
-use crate::database::entity::casbin_names::NamePtype;
+use crate::database::entity::casbin_name::NamePtype;
 use crate::database::entity::casbin_rule::Ptype;
 use crate::database::entity::{
-    casbin_names, casbin_rule, secret, session_recordings, target, target_secret, user,
+    casbin_name, casbin_rule, secret, session_recording, target, target_secret, user,
 };
 use crate::database::models::{
     CasbinName, CasbinRule, CasbinRuleGroup, ObjectGroup, PermissionPolicy, RecordingView, Role,
@@ -101,7 +101,7 @@ async fn parts_by_id(db: &DatabaseConnection) -> Result<HashMap<Uuid, TargetSecr
 
 /// `casbin_names` keyed by id, for resolving group/action labels.
 async fn casbin_name_map(db: &DatabaseConnection) -> Result<HashMap<Uuid, CasbinName>, Error> {
-    Ok(casbin_names::Entity::find()
+    Ok(casbin_name::Entity::find()
         .all(db)
         .await?
         .into_iter()
@@ -306,10 +306,10 @@ pub(super) async fn check_object_active(db: &DatabaseConnection, id: Uuid) -> Re
         return Ok(true);
     }
 
-    Ok(casbin_names::Entity::find()
-        .filter(casbin_names::Column::Id.eq(id))
-        .filter(casbin_names::Column::Ptype.eq(NamePtype::InternalObjectType))
-        .filter(casbin_names::Column::IsActive.eq(true))
+    Ok(casbin_name::Entity::find()
+        .filter(casbin_name::Column::Id.eq(id))
+        .filter(casbin_name::Column::Ptype.eq(NamePtype::InternalObjectType))
+        .filter(casbin_name::Column::IsActive.eq(true))
         .one(db)
         .await?
         .is_some())
@@ -325,9 +325,9 @@ pub(super) async fn list_roles_by_user_id(
     db: &DatabaseConnection,
     user_id: Uuid,
 ) -> Result<Vec<Role>, Error> {
-    let roles = casbin_names::Entity::find()
-        .filter(casbin_names::Column::Ptype.eq(NamePtype::G1))
-        .order_by_asc(casbin_names::Column::Name)
+    let roles = casbin_name::Entity::find()
+        .filter(casbin_name::Column::Ptype.eq(NamePtype::G1))
+        .order_by_asc(casbin_name::Column::Name)
         .all(db)
         .await?;
 
@@ -713,9 +713,9 @@ pub(super) async fn list_user_group(db: &DatabaseConnection) -> Result<Vec<Objec
         .collect();
 
     out.extend(
-        casbin_names::Entity::find()
-            .filter(casbin_names::Column::Ptype.eq(NamePtype::G1))
-            .order_by_asc(casbin_names::Column::Name)
+        casbin_name::Entity::find()
+            .filter(casbin_name::Column::Ptype.eq(NamePtype::G1))
+            .order_by_asc(casbin_name::Column::Name)
             .all(db)
             .await?
             .into_iter()
@@ -743,13 +743,13 @@ pub(super) async fn list_target_group(db: &DatabaseConnection) -> Result<Vec<Obj
         .collect();
 
     out.extend(
-        casbin_names::Entity::find()
+        casbin_name::Entity::find()
             .filter(
-                casbin_names::Column::Ptype
+                casbin_name::Column::Ptype
                     .eq("g2")
-                    .or(casbin_names::Column::Ptype.eq(NamePtype::InternalObjectType)),
+                    .or(casbin_name::Column::Ptype.eq(NamePtype::InternalObjectType)),
             )
-            .order_by_asc(casbin_names::Column::Name)
+            .order_by_asc(casbin_name::Column::Name)
             .all(db)
             .await?
             .into_iter()
@@ -765,13 +765,13 @@ pub(super) async fn list_target_group(db: &DatabaseConnection) -> Result<Vec<Obj
 
 /// `g3` groups and internal actions.
 pub(super) async fn list_action_group(db: &DatabaseConnection) -> Result<Vec<ObjectGroup>, Error> {
-    Ok(casbin_names::Entity::find()
+    Ok(casbin_name::Entity::find()
         .filter(
-            casbin_names::Column::Ptype
+            casbin_name::Column::Ptype
                 .eq(NamePtype::G3)
-                .or(casbin_names::Column::Ptype.eq(NamePtype::InternalActionType)),
+                .or(casbin_name::Column::Ptype.eq(NamePtype::InternalActionType)),
         )
-        .order_by_asc(casbin_names::Column::Name)
+        .order_by_asc(casbin_name::Column::Name)
         .all(db)
         .await?
         .into_iter()
@@ -803,25 +803,25 @@ pub(super) async fn list_recording_view_for_user(
 
     // LEFT JOINs: a recording whose target or secret has since been deleted
     // still lists, with an empty label — same as the original.
-    let rows = session_recordings::Entity::find()
+    let rows = session_recording::Entity::find()
         .select_only()
-        .column(session_recordings::Column::Id)
-        .column(session_recordings::Column::StartedAt)
-        .column(session_recordings::Column::EndedAt)
-        .column(session_recordings::Column::Status)
+        .column(session_recording::Column::Id)
+        .column(session_recording::Column::StartedAt)
+        .column(session_recording::Column::EndedAt)
+        .column(session_recording::Column::Status)
         .column_as(secret::Column::User, "secret_user")
         .column_as(target::Column::Name, "target_name")
         .column_as(target::Column::Port, "port")
         .join(
             JoinType::LeftJoin,
-            session_recordings::Relation::Secret.def(),
+            session_recording::Relation::Secret.def(),
         )
         .join(
             JoinType::LeftJoin,
-            session_recordings::Relation::Target.def(),
+            session_recording::Relation::Target.def(),
         )
-        .filter(session_recordings::Column::UserId.eq(user_id))
-        .order_by_desc(session_recordings::Column::StartedAt)
+        .filter(session_recording::Column::UserId.eq(user_id))
+        .order_by_desc(session_recording::Column::StartedAt)
         .into_model::<Row>()
         .all(db)
         .await?;

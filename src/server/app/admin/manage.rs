@@ -234,19 +234,22 @@ where
                 )))
             }
             SelectedTab::Targets => {
-                self.editor = Editor::Target(Box::new(target::TargetEditor::new(Target::new(
-                    self.admin_id,
-                ))))
+                self.editor = Editor::Target(Box::new(target::TargetEditor::new(
+                    Target::new(self.admin_id),
+                    true,
+                )))
             }
             SelectedTab::Secrets => {
-                self.editor = Editor::Secret(Box::new(secret::SecretEditor::new(Secret::new(
-                    self.admin_id,
-                ))))
+                self.editor = Editor::Secret(Box::new(secret::SecretEditor::new(
+                    Secret::new(self.admin_id),
+                    true,
+                    self.backend.clone(),
+                )))
             }
             SelectedTab::Permissions => {
                 let perm = PermissionPolicy::new(self.admin_id);
                 self.editor = Editor::Permission(Box::new(
-                    permission::PermissionEditor::new(perm, self.backend.clone()).await,
+                    permission::PermissionEditor::new(perm, true, self.backend.clone()).await,
                 ))
             }
             SelectedTab::CasbinNames => {
@@ -302,44 +305,53 @@ where
             }
             SelectedTab::Targets => {
                 let idx = self.table.state.selected().unwrap();
-                let target = match self.items.get_target(idx) {
+                let mut target = match self.items.get_target(idx) {
                     Some(u) => u,
                     None => {
                         return false;
                     }
                 };
-                self.editor = Editor::Target(Box::new(target::TargetEditor::new(target)));
+                target.updated_by = self.admin_id;
+                self.editor = Editor::Target(Box::new(target::TargetEditor::new(target, false)));
             }
             SelectedTab::Secrets => {
                 let idx = self.table.state.selected().unwrap();
-                let secret = match self.items.get_secret(idx) {
+                let mut secret = match self.items.get_secret(idx) {
                     Some(s) => s,
                     None => {
                         return false;
                     }
                 };
-                self.editor = Editor::Secret(Box::new(secret::SecretEditor::new(secret)));
+                secret.updated_by = self.admin_id;
+                self.editor = Editor::Secret(Box::new(secret::SecretEditor::new(
+                    secret,
+                    false,
+                    self.backend.clone(),
+                )));
             }
             SelectedTab::Permissions => {
                 let idx = self.table.state.selected().unwrap();
-                let permission = match self.items.get_permission(idx) {
+                let mut permission = match self.items.get_permission(idx) {
                     Some(s) => s,
                     None => {
                         return false;
                     }
                 };
+                permission.rule.updated_by = self.admin_id;
                 self.editor = Editor::Permission(Box::new(
-                    permission::PermissionEditor::new(permission, self.backend.clone()).await,
+                    permission::PermissionEditor::new(permission, false, self.backend.clone())
+                        .await,
                 ));
             }
             SelectedTab::CasbinNames => {
                 let idx = self.table.state.selected().unwrap();
-                let casbin_name = match self.items.get_casbin_name(idx) {
+                let mut casbin_name = match self.items.get_casbin_name(idx) {
                     Some(c) => c,
                     None => {
                         return false;
                     }
                 };
+                casbin_name.updated_by = self.admin_id;
                 self.editor = Editor::CasbinName(Box::new(casbin_name::CasbinNameEditor::new(
                     casbin_name,
                     false,
@@ -739,16 +751,22 @@ where
             Editor::Target(ref mut e) => {
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
                     if !e.form.show_cancel_confirmation {
-                        let target = e.target.to_owned();
+                        let active_model = e.active_model.to_owned();
 
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
-                                self.backend.db_repository().create_target(target).await,
+                                self.backend
+                                    .db_repository()
+                                    .create_target(active_model)
+                                    .await,
                             ),
                             Popup::Edit => (
                                 "updated",
-                                self.backend.db_repository().update_target(target).await,
+                                self.backend
+                                    .db_repository()
+                                    .update_target(active_model)
+                                    .await,
                             ),
                             _ => unreachable!(),
                         };
@@ -787,21 +805,21 @@ where
             Editor::Secret(ref mut e) => {
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
                     if !e.form.show_cancel_confirmation {
-                        let mut secret = e.secret.to_owned();
-                        if e.private_key_updated {
-                            secret.encrypt_private_key(self.backend.encrypt_plain_text())?;
-                        }
-                        if e.password_updated {
-                            secret.encrypt_password(self.backend.encrypt_plain_text())?;
-                        };
+                        let active_model = e.active_model.to_owned();
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
-                                self.backend.db_repository().create_secret(secret).await,
+                                self.backend
+                                    .db_repository()
+                                    .create_secret(active_model)
+                                    .await,
                             ),
                             Popup::Edit => (
                                 "updated",
-                                self.backend.db_repository().update_secret(secret).await,
+                                self.backend
+                                    .db_repository()
+                                    .update_secret(active_model)
+                                    .await,
                             ),
                             _ => unreachable!(),
                         };
@@ -839,21 +857,20 @@ where
             Editor::Permission(ref mut e) => {
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
                     if !e.show_cancel_confirmation {
-                        let mut perm = e.perm.to_owned();
-                        perm.rule.updated_by = self.admin_id;
+                        let active_model = e.active_model.to_owned();
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
                                 self.backend
                                     .db_repository()
-                                    .create_casbin_rule(perm.rule)
+                                    .create_casbin_rule(active_model)
                                     .await,
                             ),
                             Popup::Edit => (
                                 "updated",
                                 self.backend
                                     .db_repository()
-                                    .update_casbin_rule(perm.rule)
+                                    .update_casbin_rule(active_model)
                                     .await,
                             ),
                             _ => unreachable!(),
@@ -902,21 +919,21 @@ where
             Editor::CasbinName(ref mut e) => {
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
                     if !e.form.show_cancel_confirmation {
-                        let casbin_name = e.casbin_name.to_owned();
+                        let active_model = e.active_model.to_owned();
 
                         let (action, result) = match self.popup {
                             Popup::Add => (
                                 "added",
                                 self.backend
                                     .db_repository()
-                                    .create_casbin_name(casbin_name)
+                                    .create_casbin_name(active_model)
                                     .await,
                             ),
                             Popup::Edit => (
                                 "updated",
                                 self.backend
                                     .db_repository()
-                                    .update_casbin_name(casbin_name)
+                                    .update_casbin_name(active_model)
                                     .await,
                             ),
                             _ => unreachable!(),
@@ -1717,7 +1734,7 @@ where
 {
     User(Box<user::UserEditor>),
     Target(Box<target::TargetEditor>),
-    Secret(Box<secret::SecretEditor>),
+    Secret(Box<secret::SecretEditor<B>>),
     Bind(Box<bind::BindEditor<B>>),
     Permission(Box<permission::PermissionEditor>),
     CasbinGroup(Box<casbin_group::CasbinGroupEditor<B>>),
