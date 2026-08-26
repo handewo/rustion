@@ -21,6 +21,10 @@ pub struct Model {
     pub is_active: bool,
     pub updated_by: Uuid,
     pub updated_at: i64,
+    #[sea_orm(has_many, relation_enum = "RoleGroupV0", via_rel = "RoleGroupV0")]
+    pub role_group_v0: HasMany<super::casbin_rule::Entity>,
+    #[sea_orm(has_many, relation_enum = "RoleGroupV1", via_rel = "RoleGroupV1")]
+    pub role_group_v1: HasMany<super::casbin_rule::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

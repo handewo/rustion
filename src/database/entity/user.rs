@@ -1,3 +1,4 @@
+use sea_orm::FromQueryResult;
 use sea_orm::entity::prelude::*;
 
 #[sea_orm::model]
@@ -22,6 +23,15 @@ pub struct Model {
     pub is_active: bool,
     pub updated_by: Uuid,
     pub updated_at: i64,
+    #[sea_orm(has_many)]
+    pub role: HasMany<super::casbin_rule::Entity>,
+}
+
+#[derive(FromQueryResult)]
+pub struct UserWithRole {
+    #[sea_orm(nested)]
+    pub user: Model,
+    pub role: Option<String>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 /// - `ptype`: see [`Ptype`]
 /// - `v0`: subject, `v1`: object, `v2`: action
 /// - `v3`–`v5`: extended policy data (IP ranges, time constraints)
+#[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "casbin_rule")]
 pub struct Model {
@@ -35,10 +36,13 @@ pub struct Model {
     pub v5: String,
     pub updated_by: Uuid,
     pub updated_at: i64,
+    #[sea_orm(belongs_to, relation_enum = "RoleGroupV0", from = "v0", to = "id")]
+    pub role_group_v0: BelongsTo<super::casbin_name::Entity>,
+    #[sea_orm(belongs_to, relation_enum = "RoleGroupV1", from = "v1", to = "id")]
+    pub role_group_v1: BelongsTo<super::casbin_name::Entity>,
+    #[sea_orm(belongs_to, from = "v1", to = "id")]
+    pub role_user: BelongsTo<super::user::Entity>,
 }
-
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 

@@ -17,10 +17,10 @@
 
 use std::collections::HashMap;
 
-use sea_orm::sea_query::{Condition, ExprTrait, JoinType};
+use sea_orm::sea_query::{Condition, Expr, ExprTrait, IntoCondition, JoinType};
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
-    QuerySelect, RelationTrait,
+    ColumnTrait, DatabaseConnection, DbBackend, EntityTrait, FromQueryResult, QueryFilter,
+    QueryOrder, QuerySelect, RelationTrait,
 };
 use uuid::Uuid;
 
@@ -31,7 +31,7 @@ use crate::database::entity::{
 };
 use crate::database::models::{
     CasbinName, CasbinRule, CasbinRuleGroup, ObjectGroup, PermissionPolicy, RecordingView, Role,
-    Secret, SecretInfo, Target, TargetSecret, TargetSecretName, User, UserWithRole,
+    Secret, SecretInfo, Target, TargetSecret, TargetSecretName, UserWithRole,
 };
 use crate::error::Error;
 
@@ -113,61 +113,60 @@ async fn casbin_name_map(db: &DatabaseConnection) -> Result<HashMap<Uuid, Casbin
 
 /// Users with their roles as a comma-separated string.
 ///
-/// Replaces a `GROUP_CONCAT` over a `LEFT JOIN` by folding the rule→name rows
-/// into a map. `GROUP_CONCAT` skips NULLs, so only rules whose `v0` resolves to
-/// a `casbin_name` contribute — reproduced here by looking each `v0` up in the
-/// name map and ignoring misses.
-///
-/// Note: like the query it replaces, this does **not** filter on `ptype = 'g1'`.
-/// Any rule whose `v1` equals a user id contributes its `v0` label.
+/// TODO: Replace `Expr::cust` with sea_orm API in future
 pub(super) async fn list_users_with_role(
     db: &DatabaseConnection,
     active_only: bool,
 ) -> Result<Vec<UserWithRole>, Error> {
-    #[derive(FromQueryResult)]
-    struct RuleV0V1 {
-        v0: Uuid,
-        v1: Uuid,
-    }
-
-    let user_models = user::Entity::find()
-        .filter(user::Column::IsActive.eq(active_only))
-        .order_by_asc(user::Column::Username)
-        .all(db)
-        .await?;
-
-    let rules = casbin_rule::Entity::find()
+    let group_concat = match db.get_database_backend() {
+        DbBackend::MySql | DbBackend::Sqlite => "GROUP_CONCAT(casbin_name.name, ', ')",
+        DbBackend::Postgres => "STRING_AGG(casbin_name.name, ', ' ORDER BY casbin_name.name)",
+        _ => unreachable!(),
+    };
+    let mut q = user::Entity::find()
         .select_only()
-        .column(casbin_rule::Column::V0)
-        .column(casbin_rule::Column::V1)
-        .into_model::<RuleV0V1>()
-        .all(db)
-        .await?;
+        .column(user::Column::Id)
+        .column(user::Column::Username)
+        .column(user::Column::Email)
+        .column(user::Column::PasswordHash)
+        .column(user::Column::AuthorizedKeys)
+        .column(user::Column::ForceInitPass)
+        .column(user::Column::IsActive)
+        .column(user::Column::UpdatedBy)
+        .column(user::Column::UpdatedAt)
+        .column_as(Expr::cust(group_concat), "role")
+        .left_join(casbin_rule::Entity)
+        .join(
+            JoinType::LeftJoin,
+            casbin_rule::Relation::RoleGroupV0
+                .def()
+                .on_condition(|left, _right| {
+                    Expr::col((left, casbin_rule::Column::Ptype))
+                        .eq(Ptype::G1)
+                        .into_condition()
+                }),
+        )
+        .group_by(user::Column::Id)
+        .group_by(user::Column::Username)
+        .group_by(user::Column::Email)
+        .group_by(user::Column::PasswordHash)
+        .group_by(user::Column::AuthorizedKeys)
+        .group_by(user::Column::ForceInitPass)
+        .group_by(user::Column::IsActive)
+        .group_by(user::Column::UpdatedBy)
+        .group_by(user::Column::UpdatedAt);
 
-    let names = casbin_name_map(db).await?;
-
-    // v1 (member) -> labels of the v0s it belongs to, in row order.
-    let mut roles_by_member: HashMap<Uuid, Vec<String>> = HashMap::new();
-    for r in rules {
-        if let Some(name) = names.get(&r.v0) {
-            roles_by_member
-                .entry(r.v1)
-                .or_default()
-                .push(name.name.clone());
-        }
+    if active_only {
+        q = q.having(user::Column::IsActive.eq(true));
     }
 
-    Ok(user_models
+    let res: Vec<user::UserWithRole> = q.into_model().all(db).await?;
+
+    Ok(res
         .into_iter()
-        .map(|m| {
-            let role = roles_by_member
-                .get(&m.id)
-                .map(|v| v.join(", "))
-                .unwrap_or_default();
-            UserWithRole {
-                user: User::from(m),
-                role,
-            }
+        .map(|v| UserWithRole {
+            user: v.user.into(),
+            role: v.role.unwrap_or_default(),
         })
         .collect())
 }
@@ -746,7 +745,7 @@ pub(super) async fn list_target_group(db: &DatabaseConnection) -> Result<Vec<Obj
         casbin_name::Entity::find()
             .filter(
                 casbin_name::Column::Ptype
-                    .eq("g2")
+                    .eq(NamePtype::G2)
                     .or(casbin_name::Column::Ptype.eq(NamePtype::InternalObjectType)),
             )
             .order_by_asc(casbin_name::Column::Name)
