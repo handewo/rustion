@@ -44,6 +44,11 @@ pub enum ConfigError {
     #[error("Failed to create encryption key from secret token: {reason}")]
     SecretTokenKeyError { reason: String },
 
+    /// `url` is expected to be redacted by the caller — it normally carries the
+    /// database password.
+    #[error("Invalid database URL '{url}': {reason}")]
+    InvalidDatabaseUrl { url: String, reason: String },
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

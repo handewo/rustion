@@ -45,7 +45,7 @@ main.rs → cli.rs (clap) → Config (TOML) → BastionServer::with_config()
 
 ### Key Traits
 
-- **`DatabaseRepository`** (`database/mod.rs`) — Async trait for all DB operations, and the seam `HandlerBackend` hands to the rest of the app. Adding a database sea-orm already supports means adding a `DatabaseConfig` variant with a connection URL, not a new impl.
+- **`DatabaseRepository`** (`database/mod.rs`) — Async trait for all DB operations, and the seam `HandlerBackend` hands to the rest of the app. Using a database sea-orm already supports means pointing the `database` URL at it, not a new impl.
 - **`HandlerBackend`** (`server/mod.rs`) — Abstraction over server operations (auth, target connections, RBAC enforcement, encryption). Implemented by `BastionServer`.
 
 ### Error Handling
@@ -66,21 +66,21 @@ Several dependencies use git forks (not crates.io): `russh`, `crossterm`, `reedl
 
 Runtime config is in `rustion.toml` (TOML format). Key settings: listen address, server key path, auth rate limits, connection pooling, database config, session recording. See `src/config/mod.rs` for the `Config` struct.
 
-The `[database]` table is tagged by `type`:
+`database` is a sea-orm connection URL, passed to sea-orm verbatim. The scheme
+selects the driver, so it is the whole of the backend choice
+(`database::SUPPORTED_SCHEMES` is validated at config load; everything past the
+scheme is sea-orm's to parse):
 
 ```toml
-[database]
-type = "sqlite"
-path = "rustion.db"
-
-# type = "postgres"        # port defaults to 5432
-# host = "localhost"
-# database = "rustion"
-# username = "rustion"
-# password = "..."
-
-# type = "mysql"           # port defaults to 3306
+database = "sqlite://rustion.db?mode=rwc"   # mode=rwc creates the file if missing
+# database = "sqlite::memory:"
+# database = "postgres://rustion:password@localhost:5432/rustion"
+# database = "mysql://rustion:password@localhost:3306/rustion"
 ```
+
+Reserved characters in a password must be percent-encoded (`@` → `%40`). The URL
+is never logged raw — `database::redact_url()` masks the password for the startup
+banner, the connect log, and config errors.
 
 ## Testing
 

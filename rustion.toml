@@ -70,6 +70,14 @@ record_input = false
 # Default: ./record
 record_path = "./record"
 
-[database]
-type = "sqlite"
-path = "rustion.db"
+# Database connection URL, in sea-orm form. The scheme selects the backend.
+# Supported schemes: sqlite, postgres, postgresql, mysql
+#
+# SQLite needs `?mode=rwc` for the file to be created when it doesn't exist yet.
+# Percent-encode any reserved character in a password (`@` -> %40, `:` -> %3A).
+#
+# database = "sqlite://rustion.db?mode=rwc"
+# database = "sqlite::memory:"
+# database = "postgres://rustion:password@localhost:5432/rustion"
+# database = "mysql://rustion:password@localhost:3306/rustion"
+database = "sqlite://rustion.db?mode=rwc"

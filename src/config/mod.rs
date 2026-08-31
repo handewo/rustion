@@ -1,7 +1,7 @@
 pub mod error;
 
 use crate::config::error::ConfigError;
-use crate::database::DatabaseConfig;
+use crate::database::{DEFAULT_DATABASE_URL, SUPPORTED_SCHEMES, redact_url};
 use crate::error::Error;
 use aes_gcm::KeyInit;
 use base64::{Engine as _, engine::general_purpose};
@@ -87,6 +87,10 @@ fn default_client_id() -> String {
     format!("SSH-2.0-rustion_{}", env!("CARGO_PKG_VERSION"))
 }
 
+fn default_database() -> String {
+    DEFAULT_DATABASE_URL.to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub listen: ListenConfig,
@@ -117,8 +121,10 @@ pub struct Config {
     pub inactivity_timeout: Option<Duration>,
     #[serde(default)]
     pub log_level: LogLevel,
-    #[serde(default)]
-    pub database: DatabaseConfig,
+    /// sea-orm connection URL. The scheme picks the backend, so this is the
+    /// whole of the database choice — see [`SUPPORTED_SCHEMES`].
+    #[serde(default = "default_database")]
+    pub database: String,
     pub enable_record: bool,
     pub record_input: bool,
     #[serde(default = "default_record_path")]
@@ -173,7 +179,7 @@ impl Config {
             target_cache_duration: default_cache_idle_time(),
             inactivity_timeout: None,
             log_level: LogLevel::default(),
-            database: DatabaseConfig::default(),
+            database: default_database(),
             enable_record: false,
             record_input: false,
             record_path: default_record_path(),
@@ -276,7 +282,37 @@ impl Config {
             })
         })?;
 
+        self.validate_database_url()?;
+
         Ok(())
+    }
+
+    /// Reject a `database` URL whose scheme no driver in this build handles.
+    ///
+    /// sea-orm would only report this when the first connection is attempted, by
+    /// which point the message is about a parse failure rather than the typo
+    /// that caused it. Everything past the scheme is sea-orm's to validate.
+    fn validate_database_url(&self) -> Result<(), Error> {
+        let scheme = self
+            .database
+            .split_once(':')
+            .map(|(scheme, _)| scheme)
+            .unwrap_or(&self.database);
+
+        if SUPPORTED_SCHEMES.contains(&scheme) {
+            return Ok(());
+        }
+
+        Err(Error::Config(ConfigError::InvalidDatabaseUrl {
+            // The URL carries the password, so it cannot go into an error
+            // verbatim — errors reach the log too.
+            url: redact_url(&self.database),
+            reason: format!(
+                "unsupported scheme '{}', expected one of: {}",
+                scheme,
+                SUPPORTED_SCHEMES.join(", ")
+            ),
+        }))
     }
 }
 
@@ -325,7 +361,7 @@ impl std::fmt::Display for Config {
                 .map_or("None".to_string(), |v| humantime::format_duration(v)
                     .to_string()),
             self.log_level,
-            self.database,
+            redact_url(&self.database),
             self.enable_record,
             self.record_input,
             self.record_path,
@@ -354,7 +390,7 @@ mod tests {
             target_cache_duration: Duration::from_secs(600),
             inactivity_timeout: None,
             log_level: LogLevel::Info,
-            database: DatabaseConfig::default(),
+            database: default_database(),
             enable_record: false,
             record_input: false,
             record_path: default_record_path(),
@@ -376,7 +412,7 @@ mod tests {
             target_cache_duration: Duration::from_secs(600),
             inactivity_timeout: None,
             log_level: LogLevel::Info,
-            database: DatabaseConfig::default(),
+            database: default_database(),
             enable_record: false,
             record_input: false,
             record_path: default_record_path(),
@@ -399,7 +435,7 @@ mod tests {
             target_cache_duration: Duration::from_secs(600),
             inactivity_timeout: None,
             log_level: LogLevel::Info,
-            database: DatabaseConfig::default(),
+            database: default_database(),
             enable_record: false,
             record_input: false,
             record_path: default_record_path(),
@@ -428,7 +464,7 @@ mod tests {
             target_cache_duration: Duration::from_secs(600),
             inactivity_timeout: None,
             log_level: LogLevel::Info,
-            database: DatabaseConfig::default(),
+            database: default_database(),
             enable_record: false,
             record_input: false,
             record_path: default_record_path(),

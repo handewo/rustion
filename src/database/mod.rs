@@ -24,144 +24,52 @@ use models::{
 };
 pub use uuid::Uuid;
 
-//TODO: Replace with database URL.
-/// Database configuration enum to support multiple database backends
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum DatabaseConfig {
-    Sqlite {
-        path: String,
-    },
-    Postgres {
-        host: String,
-        #[serde(default = "default_postgres_port")]
-        port: u16,
-        database: String,
-        username: String,
-        #[serde(default)]
-        password: String,
-    },
-    Mysql {
-        host: String,
-        #[serde(default = "default_mysql_port")]
-        port: u16,
-        database: String,
-        username: String,
-        #[serde(default)]
-        password: String,
-    },
-}
+/// Connection URL used when `database` is omitted from the config file.
+///
+/// `mode=rwc` is read/write/create, which is what makes a missing file be
+/// created instead of erroring — sqlx's `create_if_missing(true)` in URL form.
+pub const DEFAULT_DATABASE_URL: &str = "sqlite://rustion.db?mode=rwc";
 
-fn default_postgres_port() -> u16 {
-    5432
-}
+/// URL schemes sea-orm can dispatch on with the drivers this build enables.
+///
+/// The scheme is the whole of the backend choice: one
+/// [`repository::SeaOrmRepository`] serves all of them.
+pub const SUPPORTED_SCHEMES: [&str; 4] = ["sqlite", "postgres", "postgresql", "mysql"];
 
-fn default_mysql_port() -> u16 {
-    3306
-}
-
-impl DatabaseConfig {
-    /// Build the connection URL sea-orm dispatches its backend on.
-    ///
-    /// The scheme selects the driver, so this is the only place the backend
-    /// choice is made — the repository implementation is identical for all three.
-    pub fn connection_url(&self) -> String {
-        match self {
-            // `mode=rwc` = read/write/create, replacing sqlx's
-            // `create_if_missing(true)`.
-            DatabaseConfig::Sqlite { path } => format!("sqlite://{}?mode=rwc", path),
-            DatabaseConfig::Postgres {
-                host,
-                port,
-                database,
-                username,
-                password,
-            } => format!(
-                "postgres://{}:{}@{}:{}/{}",
-                encode_userinfo(username),
-                encode_userinfo(password),
-                host,
-                port,
-                database
-            ),
-            DatabaseConfig::Mysql {
-                host,
-                port,
-                database,
-                username,
-                password,
-            } => format!(
-                "mysql://{}:{}@{}:{}/{}",
-                encode_userinfo(username),
-                encode_userinfo(password),
-                host,
-                port,
-                database
-            ),
-        }
-    }
-}
-
-/// Percent-encode the reserved characters that would otherwise terminate the
-/// userinfo section of the URL, so passwords containing `@`, `:`, `/` and
-/// friends connect instead of producing a confusing parse error.
-fn encode_userinfo(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
-}
-
-impl std::fmt::Display for DatabaseConfig {
-    /// Credentials are deliberately omitted: this is printed in the startup
-    /// banner (`config/mod.rs`).
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DatabaseConfig::Sqlite { path } => {
-                write!(f, "sqlite({})", path)
-            }
-            DatabaseConfig::Postgres {
-                host,
-                port,
-                database,
-                username,
-                ..
-            } => {
-                write!(f, "postgres({}@{}:{}/{})", username, host, port, database)
-            }
-            DatabaseConfig::Mysql {
-                host,
-                port,
-                database,
-                username,
-                ..
-            } => {
-                write!(f, "mysql({}@{}:{}/{})", username, host, port, database)
-            }
-        }
-    }
-}
-
-impl Default for DatabaseConfig {
-    fn default() -> Self {
-        DatabaseConfig::Sqlite {
-            path: "rustion.db".to_string(),
-        }
+/// Replace the password in a connection URL with `****` so the URL can be logged.
+///
+/// Both the startup banner ([`crate::config::Config`]'s `Display`) and the
+/// connect log in [`repository::SeaOrmRepository::new`] print the URL, and for
+/// PostgreSQL and MySQL it carries the credential. Anything without a
+/// `user:pass@` userinfo section — `sqlite://rustion.db`, `sqlite::memory:` — is
+/// returned unchanged.
+pub fn redact_url(url: &str) -> String {
+    // Only the `scheme://authority` form has a userinfo section at all.
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    // The authority ends at the first `/`, `?` or `#`, so a `@` further along in
+    // a path or query string is not mistaken for a credential separator.
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(authority_end);
+    // An unencoded password may itself contain `@`, so the host is whatever
+    // follows the last one.
+    let Some((userinfo, host)) = authority.rsplit_once('@') else {
+        return url.to_string();
+    };
+    match userinfo.split_once(':') {
+        Some((user, _)) => format!("{scheme}://{user}:****@{host}{tail}"),
+        // Userinfo with no password: nothing to hide.
+        None => url.to_string(),
     }
 }
 
 /// Every database operation the rest of the program is allowed to perform.
 ///
 /// One implementation, [`repository::SeaOrmRepository`], serves SQLite,
-/// PostgreSQL and MySQL — sea-orm resolves the driver from the connection URL,
-/// so adding a backend it already supports means adding a [`DatabaseConfig`]
-/// variant, not another impl. This is also the seam
+/// PostgreSQL and MySQL — sea-orm resolves the driver from the connection URL's
+/// scheme, so a backend it already supports needs only a different `database`
+/// URL in the config file, not another impl. This is also the seam
 /// [`crate::server::HandlerBackend`] hands to the application layer.
 ///
 /// Three conventions hold across the whole trait, so they are not repeated on
@@ -703,10 +611,8 @@ pub trait DatabaseRepository: Send + Sync {
 
 /// Database factory. sea-orm resolves the backend from the URL scheme, so a
 /// single [`repository::SeaOrmRepository`] serves SQLite, PostgreSQL and MySQL.
-pub async fn create_repository(
-    config: &DatabaseConfig,
-) -> Result<Box<dyn DatabaseRepository>, Error> {
-    let repo = repository::SeaOrmRepository::new(config).await?;
+pub async fn create_repository(url: &str) -> Result<Box<dyn DatabaseRepository>, Error> {
+    let repo = repository::SeaOrmRepository::new(url).await?;
     Ok(Box::new(repo))
 }
 
@@ -714,90 +620,49 @@ pub async fn create_repository(
 mod tests {
     use super::*;
 
+    /// The default must still create the file when it is missing — `mode=rwc` is
+    /// what replaces sqlx's `create_if_missing(true)`.
     #[test]
-    fn sqlite_url_creates_missing_file() {
-        let cfg = DatabaseConfig::Sqlite {
-            path: "rustion.db".into(),
-        };
-        // `mode=rwc` is what replaces sqlx's `create_if_missing(true)`.
-        assert_eq!(cfg.connection_url(), "sqlite://rustion.db?mode=rwc");
+    fn default_url_creates_missing_sqlite_file() {
+        assert!(DEFAULT_DATABASE_URL.starts_with("sqlite://"));
+        assert!(DEFAULT_DATABASE_URL.contains("mode=rwc"));
     }
 
+    /// `redact_url` reaches the startup banner and the connect log, so it must
+    /// never leave the password behind.
     #[test]
-    fn postgres_and_mysql_urls() {
-        let pg = DatabaseConfig::Postgres {
-            host: "db.internal".into(),
-            port: 5432,
-            database: "rustion".into(),
-            username: "svc".into(),
-            password: "hunter2".into(),
-        };
+    fn redact_hides_password() {
         assert_eq!(
-            pg.connection_url(),
-            "postgres://svc:hunter2@db.internal:5432/rustion"
+            redact_url("postgres://svc:topsecret@db.internal:5432/rustion"),
+            "postgres://svc:****@db.internal:5432/rustion"
         );
-
-        let my = DatabaseConfig::Mysql {
-            host: "db.internal".into(),
-            port: 3306,
-            database: "rustion".into(),
-            username: "svc".into(),
-            password: "hunter2".into(),
-        };
         assert_eq!(
-            my.connection_url(),
-            "mysql://svc:hunter2@db.internal:3306/rustion"
+            redact_url("mysql://svc:topsecret@localhost:3306/rustion"),
+            "mysql://svc:****@localhost:3306/rustion"
         );
     }
 
-    /// A password containing URL-reserved characters must not corrupt the URL.
+    /// An unencoded `@` in the password must not be taken for the host
+    /// separator, or the tail of the password survives into the log.
     #[test]
-    fn credentials_are_percent_encoded() {
-        let cfg = DatabaseConfig::Postgres {
-            host: "localhost".into(),
-            port: 5432,
-            database: "rustion".into(),
-            username: "user@corp".into(),
-            password: "p@ss:w/rd?#".into(),
-        };
-        assert_eq!(
-            cfg.connection_url(),
-            "postgres://user%40corp:p%40ss%3Aw%2Frd%3F%23@localhost:5432/rustion"
-        );
+    fn redact_hides_password_containing_at() {
+        let shown = redact_url("postgres://user:p@ss@word@localhost:5432/rustion");
+        assert_eq!(shown, "postgres://user:****@localhost:5432/rustion");
+        assert!(!shown.contains("ss@word"), "password leaked: {shown}");
     }
 
-    /// `Display` reaches the startup banner, so it must never leak the password.
+    /// URLs with nothing to hide must survive verbatim, including the
+    /// hostless SQLite forms and a `@` that belongs to the path.
     #[test]
-    fn display_redacts_password() {
-        let cfg = DatabaseConfig::Mysql {
-            host: "localhost".into(),
-            port: 3306,
-            database: "rustion".into(),
-            username: "svc".into(),
-            password: "topsecret".into(),
-        };
-        let shown = cfg.to_string();
-        assert!(!shown.contains("topsecret"), "password leaked: {shown}");
-        assert_eq!(shown, "mysql(svc@localhost:3306/rustion)");
-    }
-
-    #[test]
-    fn existing_sqlite_toml_still_parses() {
-        let cfg: DatabaseConfig =
-            toml::from_str("type = \"sqlite\"\npath = \"rustion.db\"").unwrap();
-        assert!(matches!(cfg, DatabaseConfig::Sqlite { path } if path == "rustion.db"));
-    }
-
-    #[test]
-    fn backend_ports_default_when_omitted() {
-        let pg: DatabaseConfig =
-            toml::from_str("type = \"postgres\"\nhost = \"h\"\ndatabase = \"d\"\nusername = \"u\"")
-                .unwrap();
-        assert!(matches!(pg, DatabaseConfig::Postgres { port, .. } if port == 5432));
-
-        let my: DatabaseConfig =
-            toml::from_str("type = \"mysql\"\nhost = \"h\"\ndatabase = \"d\"\nusername = \"u\"")
-                .unwrap();
-        assert!(matches!(my, DatabaseConfig::Mysql { port, .. } if port == 3306));
+    fn redact_leaves_credentialless_urls_alone() {
+        for url in [
+            "sqlite://rustion.db?mode=rwc",
+            "sqlite::memory:",
+            "postgres://localhost:5432/rustion",
+            // No userinfo, so the `@` is part of the path.
+            "sqlite:///var/lib/rustion@2/rustion.db",
+        ] {
+            assert_eq!(redact_url(url), url);
+        }
     }
 }

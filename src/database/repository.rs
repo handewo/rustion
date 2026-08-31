@@ -24,7 +24,7 @@ use crate::database::models::{
     PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo, SessionRecording, Target,
     TargetInfo, TargetSecret, TargetSecretName, User, UserWithRole,
 };
-use crate::database::{DatabaseConfig, DatabaseRepository};
+use crate::database::{DatabaseRepository, redact_url};
 use crate::error::Error;
 
 /// Matches the sqlx pool default. sea-orm defaults SQLite to a single
@@ -36,10 +36,11 @@ pub struct SeaOrmRepository {
 }
 
 impl SeaOrmRepository {
-    pub async fn new(config: &DatabaseConfig) -> Result<Self, Error> {
-        info!("Connecting to database: {}", config);
+    /// `url` is handed to sea-orm verbatim; its scheme picks the driver.
+    pub async fn new(url: &str) -> Result<Self, Error> {
+        info!("Connecting to database: {}", redact_url(url));
 
-        let mut options = ConnectOptions::new(config.connection_url());
+        let mut options = ConnectOptions::new(url);
         options
             .max_connections(MAX_CONNECTIONS)
             // Statements are logged through our own `debug!` calls; sea-orm's

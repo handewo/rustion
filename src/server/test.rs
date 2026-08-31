@@ -6,7 +6,7 @@ mod tests {
         CasbinRule, Ptype, Secret, Target, TargetSecretName, User, casbin_rule::CasbinName,
         target_secret::TargetSecret,
     };
-    use crate::database::{DatabaseConfig, common, service::DatabaseService};
+    use crate::database::{common, service::DatabaseService};
     use crate::server::extend_policy::{
         ExtendPolicy, ExtendPolicyReq, HostPolicy, IpPolicy, PortPolicy, TimeWithOffset,
     };
@@ -106,10 +106,7 @@ mod tests {
         let db_path = temp_dir.path().join("test.db");
         let _ = File::create(&db_path).unwrap();
         let mut config = crate::config::Config::default().gen_secret_token();
-        let db = DatabaseConfig::Sqlite {
-            path: db_path.to_string_lossy().into(),
-        };
-        config.database = db;
+        config.database = format!("sqlite://{}?mode=rwc", db_path.to_string_lossy());
         let db = DatabaseService::new(&config.database).await.unwrap();
         let mut test_data = File::open("mock_data.json").unwrap();
         let mut buffer = String::new();
@@ -949,10 +946,7 @@ mod tests {
         let db_path = temp_dir.path().join("test.db");
         let _ = File::create(&db_path).unwrap();
         let mut config = crate::config::Config::default().gen_secret_token();
-        let db = DatabaseConfig::Sqlite {
-            path: db_path.to_string_lossy().into(),
-        };
-        config.database = db;
+        config.database = format!("sqlite://{}?mode=rwc", db_path.to_string_lossy());
         let db = DatabaseService::new(&config.database).await.unwrap();
         let mut test_data = File::open("mock_data.json").unwrap();
         let mut buffer = String::new();

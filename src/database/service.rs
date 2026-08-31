@@ -1,7 +1,7 @@
 use log::info;
 use std::sync::Arc;
 
-use crate::database::{DatabaseConfig, DatabaseRepository, create_repository};
+use crate::database::{DatabaseRepository, create_repository};
 use crate::error::Error;
 
 /// Database service that provides high-level operations
@@ -11,10 +11,10 @@ pub struct DatabaseService {
 }
 
 impl DatabaseService {
-    /// Create a new database service with the given configuration
-    pub async fn new(config: &DatabaseConfig) -> Result<Self, Error> {
+    /// Create a new database service from a sea-orm connection URL
+    pub async fn new(url: &str) -> Result<Self, Error> {
         info!("Initializing database service");
-        let repository = create_repository(config).await?;
+        let repository = create_repository(url).await?;
         Ok(Self {
             repository: Arc::new(repository),
         })
@@ -52,10 +52,8 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test.db");
         let _ = File::create(&db_path).unwrap();
-        let config = DatabaseConfig::Sqlite {
-            path: db_path.to_string_lossy().to_string(),
-        };
-        let db = DatabaseService::new(&config).await.unwrap();
+        let url = format!("sqlite://{}?mode=rwc", db_path.to_string_lossy());
+        let db = DatabaseService::new(&url).await.unwrap();
         let mut test_data = File::open("mock_data.json").unwrap();
         let mut buffer = String::new();
         test_data.read_to_string(&mut buffer).unwrap();
