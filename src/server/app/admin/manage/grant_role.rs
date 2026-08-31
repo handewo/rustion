@@ -1,11 +1,8 @@
-use super::super::error::AdminError;
-use super::super::validate;
 use crate::database::Uuid;
 use crate::database::entity::casbin_rule;
 use crate::database::models::{Ptype, Role};
 use crate::error::Error;
 use crate::server::HandlerLog;
-use crate::server::app::error::AppError;
 use crate::server::widgets::{
     AdminTable, DisplayMode, FieldsToArray, Message, TableData, centered_area, render_message_popup,
 };
@@ -133,51 +130,55 @@ where
     async fn save_bindings(&mut self) -> Result<(), Error> {
         let idx = self.role_table.state.selected().unwrap();
         let t = self.items.get_mut(idx).unwrap();
-        if t.is_bound {
-            let id = t.rule_id.ok_or(AppError::Admin(AdminError::Validate(
-                validate::ValidateError::MissingRuleId,
-            )))?;
-            self.backend.db_repository().delete_casbin_rule(id).await?;
-            info!(
-                "[{}] Role '{}({})' revoked from user_id={} by admin_id={}",
-                self.handler_id, t.role, t.rid, self.selected_user_id, self.admin_id
-            );
-            (self.log)(
-                LOG_TYPE.into(),
-                format!(
-                    "Role '{}({})' revoked from user_id={}",
-                    t.role, t.rid, self.selected_user_id
-                ),
-            )
-            .await;
-        } else {
-            let cr = casbin_rule::ActiveModel {
-                id: Set(Uuid::now_v7()),
-                ptype: Set(Ptype::G1),
-                v0: Set(t.rid),
-                v1: Set(self.selected_user_id),
-                v2: Set(Uuid::default()),
-                v3: Set(String::new()),
-                v4: Set(String::new()),
-                v5: Set(String::new()),
-                updated_by: Set(self.admin_id),
-                ..Default::default()
-            };
-            self.backend.db_repository().create_casbin_rule(cr).await?;
-            info!(
-                "[{}] Role '{}({})' granted to user_id={} by admin_id={}",
-                self.handler_id, t.role, t.rid, self.selected_user_id, self.admin_id
-            );
-            (self.log)(
-                LOG_TYPE.into(),
-                format!(
-                    "Role '{}({})' granted to user_id={}",
-                    t.role, t.rid, self.selected_user_id
-                ),
-            )
-            .await;
+        match t.casbin_rule_id {
+            Some(casbin_rule_id) => {
+                self.backend
+                    .db_repository()
+                    .delete_casbin_rule(casbin_rule_id)
+                    .await?;
+                info!(
+                    "[{}] Role '{}({})' revoked from user_id={} by admin_id={}",
+                    self.handler_id, t.role, t.casbin_name_id, self.selected_user_id, self.admin_id
+                );
+                (self.log)(
+                    LOG_TYPE.into(),
+                    format!(
+                        "Role '{}({})' revoked from user_id={}",
+                        t.role, t.casbin_name_id, self.selected_user_id
+                    ),
+                )
+                .await;
+                t.casbin_rule_id = None;
+            }
+            None => {
+                let cr = casbin_rule::ActiveModel {
+                    id: Set(Uuid::now_v7()),
+                    ptype: Set(Ptype::G1),
+                    v0: Set(t.casbin_name_id),
+                    v1: Set(self.selected_user_id),
+                    v2: Set(Uuid::default()),
+                    v3: Set(String::new()),
+                    v4: Set(String::new()),
+                    v5: Set(String::new()),
+                    updated_by: Set(self.admin_id),
+                    ..Default::default()
+                };
+                let cr = self.backend.db_repository().create_casbin_rule(cr).await?;
+                info!(
+                    "[{}] Role '{}({})' granted to user_id={} by admin_id={}",
+                    self.handler_id, t.role, t.casbin_name_id, self.selected_user_id, self.admin_id
+                );
+                (self.log)(
+                    LOG_TYPE.into(),
+                    format!(
+                        "Role '{}({})' granted to user_id={}",
+                        t.role, t.casbin_name_id, self.selected_user_id
+                    ),
+                )
+                .await;
+                t.casbin_rule_id = Some(cr.id);
+            }
         }
-        t.is_bound = !t.is_bound;
         self.backend.load_role_manager().await?;
         Ok(())
     }
@@ -234,7 +235,7 @@ impl FieldsToArray for Role {
             }
             DisplayMode::Manage => {
                 vec![
-                    if self.is_bound {
+                    if self.casbin_rule_id.is_some() {
                         "[X]".to_string()
                     } else {
                         "[ ]".to_string()

@@ -1096,7 +1096,7 @@ where
 
                     self.backend
                         .db_repository()
-                        .list_secrets_for_target(targets[0].id)
+                        .list_secrets_by_target_id(targets[0].id)
                         .await
                         .unwrap_or_default()
                 } else {

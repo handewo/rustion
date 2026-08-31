@@ -19,8 +19,8 @@ use std::collections::HashMap;
 
 use sea_orm::sea_query::{Condition, Expr, ExprTrait, IntoCondition, JoinType};
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, DbBackend, EntityTrait, FromQueryResult, QueryFilter,
-    QueryOrder, QuerySelect, RelationTrait,
+    ColumnTrait, DatabaseConnection, DbBackend, DeriveIden, EntityTrait, FromQueryResult,
+    QueryFilter, QueryOrder, QuerySelect, RelationTrait,
 };
 use uuid::Uuid;
 
@@ -31,7 +31,7 @@ use crate::database::entity::{
 };
 use crate::database::models::{
     CasbinName, CasbinRule, CasbinRuleGroup, ObjectGroup, PermissionPolicy, RecordingView, Role,
-    Secret, SecretInfo, Target, TargetSecret, TargetSecretName, UserWithRole,
+    Secret, SecretInfo, Target, TargetSecretName, UserWithRole,
 };
 use crate::error::Error;
 
@@ -100,9 +100,15 @@ async fn parts_by_id(db: &DatabaseConnection) -> Result<HashMap<Uuid, TargetSecr
 }
 
 /// `casbin_names` keyed by id, for resolving group/action labels.
-async fn casbin_name_map(db: &DatabaseConnection) -> Result<HashMap<Uuid, CasbinName>, Error> {
-    Ok(casbin_name::Entity::find()
-        .all(db)
+async fn casbin_name_map(
+    db: &DatabaseConnection,
+    ptype: Option<NamePtype>,
+) -> Result<HashMap<Uuid, CasbinName>, Error> {
+    let mut q = casbin_name::Entity::find();
+    if let Some(ptype) = ptype {
+        q = q.filter(casbin_name::Column::Ptype.eq(ptype));
+    }
+    Ok(q.all(db)
         .await?
         .into_iter()
         .map(|m| (m.id, CasbinName::from(m)))
@@ -178,14 +184,16 @@ pub(super) async fn get_target_by_target_secret_id(
     id: Uuid,
     active_only: bool,
 ) -> Result<Option<Target>, Error> {
-    let mut q = target::Entity::find()
-        .join(JoinType::InnerJoin, target::Relation::TargetSecret.def())
-        .filter(target_secret::Column::Id.eq(id));
+    let mut ts_cond = Condition::all().add(target_secret::Column::Id.eq(id));
 
     if active_only {
-        q = q
-            .filter(target_secret::Column::IsActive.eq(true))
-            .filter(target::Column::IsActive.eq(true));
+        ts_cond = ts_cond.add(target_secret::Column::IsActive.eq(true));
+    }
+
+    let mut q = target::Entity::find().has_related(target_secret::Entity, ts_cond);
+
+    if active_only {
+        q = q.filter(target::Column::IsActive.eq(true));
     }
 
     Ok(q.one(db).await?.map(Target::from))
@@ -193,26 +201,26 @@ pub(super) async fn get_target_by_target_secret_id(
 
 pub(super) async fn get_targets_by_target_secret_ids(
     db: &DatabaseConnection,
-    ids: &[Uuid],
+    ids: Vec<Uuid>,
     active_only: bool,
 ) -> Result<Vec<Target>, Error> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
 
-    Ok(target::Entity::find()
-        .has_related(
-            target_secret::Entity,
-            Condition::all()
-                .add(target_secret::Column::IsActive.eq(active_only))
-                .add(target_secret::Column::Id.is_in(ids.iter().copied())),
-        )
-        .filter(target::Column::IsActive.eq(active_only))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(Target::from)
-        .collect())
+    let mut ts_cond = Condition::all().add(target_secret::Column::Id.is_in(ids));
+
+    if active_only {
+        ts_cond = ts_cond.add(target_secret::Column::IsActive.eq(true));
+    }
+
+    let mut q = target::Entity::find().has_related(target_secret::Entity, ts_cond);
+
+    if active_only {
+        q = q.filter(target::Column::IsActive.eq(true));
+    }
+
+    Ok(q.all(db).await?.into_iter().map(Target::from).collect())
 }
 
 pub(super) async fn get_secret_by_target_secret_id(
@@ -220,39 +228,19 @@ pub(super) async fn get_secret_by_target_secret_id(
     id: Uuid,
     active_only: bool,
 ) -> Result<Option<Secret>, Error> {
-    let mut q = secret::Entity::find()
-        .join(JoinType::InnerJoin, secret::Relation::TargetSecret.def())
-        .filter(target_secret::Column::Id.eq(id));
+    let mut ts_cond = Condition::all().add(target_secret::Column::Id.eq(id));
 
     if active_only {
-        q = q
-            .filter(target_secret::Column::IsActive.eq(true))
-            .filter(secret::Column::IsActive.eq(true));
+        ts_cond = ts_cond.add(target_secret::Column::IsActive.eq(true));
+    }
+
+    let mut q = secret::Entity::find().has_related(target_secret::Entity, ts_cond);
+
+    if active_only {
+        q = q.filter(secret::Column::IsActive.eq(true));
     }
 
     Ok(q.one(db).await?.map(Secret::from))
-}
-
-pub(super) async fn list_target_secrets_by_target_id(
-    db: &DatabaseConnection,
-    target_id: Uuid,
-    active_only: bool,
-) -> Result<Vec<TargetSecret>, Error> {
-    let mut q = target_secret::Entity::find()
-        .join(JoinType::InnerJoin, target_secret::Relation::Target.def())
-        .filter(target_secret::Column::TargetId.eq(target_id));
-
-    if active_only {
-        q = q
-            .filter(target_secret::Column::IsActive.eq(true))
-            .filter(target::Column::IsActive.eq(true));
-    }
-
-    Ok(q.all(db)
-        .await?
-        .into_iter()
-        .map(TargetSecret::from)
-        .collect())
 }
 
 /// All secrets, flagged with whether they're bound to `target_id`.
@@ -263,28 +251,30 @@ pub(super) async fn list_secrets_for_target(
     db: &DatabaseConnection,
     target_id: Uuid,
 ) -> Result<Vec<SecretInfo>, Error> {
-    let all = secret::Entity::find()
+    Ok(secret::Entity::find()
+        .select_only()
+        .column(secret::Column::Id)
+        .column(secret::Column::Name)
+        .column(secret::Column::User)
+        .column_as(
+            Expr::col((target_secret::Entity, target_secret::Column::Id)).is_not_null(),
+            "is_bound",
+        )
+        .join(
+            JoinType::LeftJoin,
+            target_secret::Relation::Secret
+                .def()
+                .rev()
+                .on_condition(move |_left, right| {
+                    Condition::all()
+                        .add(Expr::col((right.clone(), target_secret::Column::IsActive)).eq(true))
+                        .add(Expr::col((right, target_secret::Column::TargetId)).eq(target_id))
+                }),
+        )
         .order_by_asc(secret::Column::Name)
+        .into_model()
         .all(db)
-        .await?;
-
-    let bound: HashMap<Uuid, bool> = target_secret::Entity::find()
-        .filter(target_secret::Column::TargetId.eq(target_id))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|ts| (ts.secret_id, ts.is_active))
-        .collect();
-
-    Ok(all
-        .into_iter()
-        .map(|s| SecretInfo {
-            is_bound: bound.get(&s.id).copied().unwrap_or(false),
-            id: s.id,
-            name: s.name,
-            user: s.user,
-        })
-        .collect())
+        .await?)
 }
 
 /// True when `id` is an active `target_secret` (with active target and secret)
@@ -324,34 +314,26 @@ pub(super) async fn list_roles_by_user_id(
     db: &DatabaseConnection,
     user_id: Uuid,
 ) -> Result<Vec<Role>, Error> {
-    let roles = casbin_name::Entity::find()
+    let q = casbin_name::Entity::find()
+        .select_only()
+        .column_as(casbin_name::Column::Id, "casbin_name_id")
+        .column_as(casbin_rule::Column::Id, "casbin_rule_id")
+        .column_as(casbin_name::Column::Name, "role")
+        .join(
+            JoinType::LeftJoin,
+            casbin_rule::Relation::RoleGroupV0
+                .def()
+                .rev()
+                .on_condition(move |_left, right| {
+                    Condition::all()
+                        .add(Expr::col((right.clone(), casbin_rule::Column::Ptype)).eq(Ptype::G1))
+                        .add(Expr::col((right, casbin_rule::Column::V1)).eq(user_id))
+                }),
+        )
         .filter(casbin_name::Column::Ptype.eq(NamePtype::G1))
-        .order_by_asc(casbin_name::Column::Name)
-        .all(db)
-        .await?;
+        .order_by_asc(casbin_name::Column::Name);
 
-    // v0 (role) -> rule id, for this user's g1 bindings.
-    let bindings: HashMap<Uuid, Uuid> = casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq(Ptype::G1))
-        .filter(casbin_rule::Column::V1.eq(user_id))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|r| (r.v0, r.id))
-        .collect();
-
-    Ok(roles
-        .into_iter()
-        .map(|cn| {
-            let rule_id = bindings.get(&cn.id).copied();
-            Role {
-                rid: cn.id,
-                rule_id,
-                role: cn.name,
-                is_bound: rule_id.is_some(),
-            }
-        })
-        .collect())
+    Ok(q.into_model().all(db).await?)
 }
 
 /// Group-membership rules of one `ptype`, with human-readable labels on both
@@ -370,256 +352,139 @@ pub(super) async fn list_casbin_rule_group_by_ptype(
     db: &DatabaseConnection,
     ptype: Ptype,
 ) -> Result<Vec<CasbinRuleGroup>, Error> {
-    let rules = casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq(ptype))
-        .all(db)
-        .await?;
-
-    let names = casbin_name_map(db).await?;
+    #[derive(DeriveIden, Clone, Copy)]
+    pub enum Alias {
+        V0,
+        V1,
+    }
 
     match ptype {
         Ptype::G1 => {
-            let usernames: HashMap<Uuid, String> = user::Entity::find()
-                .all(db)
-                .await?
-                .into_iter()
-                .map(|u| (u.id, u.username))
-                .collect();
+            let q =
+                casbin_rule::Entity::find()
+                    .select_only()
+                    .column(casbin_rule::Column::Id)
+                    .column(casbin_rule::Column::V0)
+                    .column_as(Expr::null(), "v0_object_label")
+                    .tbl_col_as((Alias::V0, casbin_name::Column::Name), "v0_group_label")
+                    .column(casbin_rule::Column::V1)
+                    .column_as(user::Column::Username, "v1_object_label")
+                    .tbl_col_as((Alias::V1, casbin_name::Column::Name), "v1_group_label")
+                    .join(JoinType::LeftJoin, casbin_rule::Relation::User.def())
+                    .join_as(
+                        JoinType::LeftJoin,
+                        casbin_name::Relation::RoleGroupV0.def().rev().on_condition(
+                            |_left, right| {
+                                Expr::col((right, casbin_name::Column::Ptype))
+                                    .eq(NamePtype::G1)
+                                    .into_condition()
+                            },
+                        ),
+                        Alias::V0,
+                    )
+                    .join_as(
+                        JoinType::LeftJoin,
+                        casbin_name::Relation::RoleGroupV1.def().rev().on_condition(
+                            |_left, right| {
+                                Expr::col((right, casbin_name::Column::Ptype))
+                                    .eq(NamePtype::G1)
+                                    .into_condition()
+                            },
+                        ),
+                        Alias::V1,
+                    )
+                    .filter(casbin_rule::Column::Ptype.eq(Ptype::G1));
 
-            Ok(rules
-                .into_iter()
-                .map(|r| CasbinRuleGroup {
-                    id: r.id,
-                    v0: r.v0,
-                    v0_object_label: None,
-                    v0_group_label: names.get(&r.v0).map(|n| n.name.clone()),
-                    v1: r.v1,
-                    v1_object_label: usernames.get(&r.v1).cloned(),
-                    v1_group_label: names.get(&r.v1).map(|n| n.name.clone()),
-                })
-                .collect())
+            Ok(q.into_model().all(db).await?)
         }
         Ptype::G2 => {
+            // TODO: replace with one query
             let parts = parts_by_id(db).await?;
+            let rules = casbin_rule::Entity::find()
+                .filter(casbin_rule::Column::Ptype.eq(Ptype::G2))
+                .all(db)
+                .await?;
+            let internal_object_names =
+                casbin_name_map(db, Some(NamePtype::InternalObjectType)).await?;
+            let target_group_names = casbin_name_map(db, Some(NamePtype::G2)).await?;
 
             Ok(rules
                 .into_iter()
                 .map(|r| {
                     // The original unioned target_secret labels with internal
                     // object names into a single id->name mapping.
-                    let v0_object_label = parts.get(&r.v0).map(|p| p.short_label()).or_else(|| {
-                        names
-                            .get(&r.v0)
-                            .filter(|n| n.ptype == NamePtype::InternalObjectType)
-                            .map(|n| n.name.clone())
-                    });
+                    let v0_object_label = parts
+                        .get(&r.v0)
+                        .map(|p| p.short_label())
+                        .or_else(|| internal_object_names.get(&r.v0).map(|n| n.name.clone()));
                     CasbinRuleGroup {
                         id: r.id,
                         v0: r.v0,
                         v0_object_label,
-                        v0_group_label: names.get(&r.v0).map(|n| n.name.clone()),
+                        v0_group_label: target_group_names.get(&r.v0).map(|n| n.name.clone()),
                         v1: r.v1,
                         v1_object_label: None,
-                        v1_group_label: names.get(&r.v1).map(|n| n.name.clone()),
+                        v1_group_label: target_group_names.get(&r.v1).map(|n| n.name.clone()),
                     }
                 })
                 .collect())
         }
-        Ptype::G3 => Ok(rules
-            .into_iter()
-            .map(|r| {
-                // Internal actions land in the object label, everything else in
-                // the group label — the two disjoint joins in the original.
-                let v0 = names.get(&r.v0);
-                let is_internal_action = v0.map(|n| n.ptype == NamePtype::InternalActionType);
-                CasbinRuleGroup {
-                    id: r.id,
-                    v0: r.v0,
-                    v0_object_label: v0
-                        .filter(|_| is_internal_action == Some(true))
-                        .map(|n| n.name.clone()),
-                    v0_group_label: v0
-                        .filter(|_| is_internal_action == Some(false))
-                        .map(|n| n.name.clone()),
-                    v1: r.v1,
-                    v1_object_label: None,
-                    v1_group_label: names
-                        .get(&r.v1)
-                        .filter(|n| n.ptype != NamePtype::InternalActionType)
-                        .map(|n| n.name.clone()),
-                }
-            })
-            .collect()),
+        Ptype::G3 => {
+            let q =
+                casbin_rule::Entity::find()
+                    .select_only()
+                    .column(casbin_rule::Column::Id)
+                    .column(casbin_rule::Column::V0)
+                    .column_as(casbin_name::Column::Name, "v0_object_label")
+                    .tbl_col_as((Alias::V0, casbin_name::Column::Name), "v0_group_label")
+                    .column(casbin_rule::Column::V1)
+                    .column_as(Expr::null(), "v1_object_label")
+                    .tbl_col_as((Alias::V1, casbin_name::Column::Name), "v1_group_label")
+                    .join(
+                        JoinType::LeftJoin,
+                        casbin_name::Relation::RoleGroupV0.def().rev().on_condition(
+                            |_left, right| {
+                                Expr::col((right, casbin_name::Column::Ptype))
+                                    .eq(NamePtype::InternalActionType)
+                                    .into_condition()
+                            },
+                        ),
+                    )
+                    .join_as(
+                        JoinType::LeftJoin,
+                        casbin_name::Relation::RoleGroupV0.def().rev().on_condition(
+                            |_left, right| {
+                                Expr::col((right, casbin_name::Column::Ptype))
+                                    .eq(NamePtype::G3)
+                                    .into_condition()
+                            },
+                        ),
+                        Alias::V0,
+                    )
+                    .join_as(
+                        JoinType::LeftJoin,
+                        casbin_name::Relation::RoleGroupV1.def().rev().on_condition(
+                            |_left, right| {
+                                Expr::col((right, casbin_name::Column::Ptype))
+                                    .eq(NamePtype::G3)
+                                    .into_condition()
+                            },
+                        ),
+                        Alias::V1,
+                    )
+                    .filter(casbin_rule::Column::Ptype.eq(Ptype::G3));
+
+            Ok(q.into_model().all(db).await?)
+        }
         // Now exhaustive: `p` is the only other variant, and a permission policy
         // is not a group membership.
         Ptype::Policy => unreachable!("list_casbin_rule_group_by_ptype called with `p`"),
     }
 }
 
-// ---------------------------------------------------------------- policies
-
-/// The `p` rules that apply to `user_id`, as `(rule id, object id)` pairs.
-///
-/// Mirrors the former `all_policy` CTE: rules naming the user directly, plus
-/// rules whose subject comes out of the `g1` sub-select.
-///
-/// ## Pre-existing bug, reproduced verbatim
-///
-/// The sub-select is `SELECT v1 FROM casbin_rule WHERE v0 = <user> AND ptype = 'g1'`.
-/// In `g1`, `v0` is the group and `v1` the member, so this asks "who are the
-/// members of the group whose id is this user's id" — which is empty for a real
-/// user. The intent was evidently the reverse (`SELECT v0 .. WHERE v1 = <user>`,
-/// i.e. the groups this user belongs to).
-///
-/// Effect: policies granted via group membership are missed. Measured against
-/// the checked-in `rustion.db`, `user1` resolves 199 target_secrets as written
-/// versus 298 with the sub-select inverted; the other seven users are unaffected.
-/// This is under-permissive, not a privilege escalation — and *enforcement* is
-/// unaffected, because `RoleManage` walks the `g1` graph member→group
-/// (`casbin.rs` `build_graph` adds `v1 -> v0`) and resolves groups correctly.
-/// So the symptom is a user seeing fewer targets in the selector than they are
-/// entitled to.
-///
-/// Kept as-is because changing it would alter access-control results, which is
-/// out of scope for this refactor. Inverting the two field names below is the
-/// whole fix.
-async fn resolve_policy_objects(
-    db: &DatabaseConnection,
-    user_id: Uuid,
-) -> Result<Vec<(Uuid, Uuid)>, Error> {
-    #[derive(FromQueryResult)]
-    struct PolicyRow {
-        id: Uuid,
-        v1: Uuid,
-    }
-
-    // BUG-COMPATIBLE: `V0.eq(user)` selecting `v1`. See the note above.
-    let group_subjects: Vec<Uuid> = casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq(Ptype::G1))
-        .filter(casbin_rule::Column::V0.eq(user_id))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|r| r.v1)
-        .collect();
-
-    let mut subjects = vec![user_id];
-    subjects.extend(group_subjects);
-
-    let policies = casbin_rule::Entity::find()
-        .select_only()
-        .column(casbin_rule::Column::Id)
-        .column(casbin_rule::Column::V1)
-        .filter(casbin_rule::Column::Ptype.eq(Ptype::Policy))
-        .filter(casbin_rule::Column::V0.is_in(subjects))
-        .into_model::<PolicyRow>()
-        .all(db)
-        .await?;
-
-    // g2 group -> member object ids.
-    let mut g2_members: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
-    for r in casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq(Ptype::G2))
-        .all(db)
-        .await?
-    {
-        g2_members.entry(r.v1).or_default().push(r.v0);
-    }
-
-    // Expand group objects to their members; use the object directly otherwise.
-    // This is the original's INNER JOIN plus the `WHERE c.v1 IS NULL` branch.
-    let mut out = Vec::new();
-    for p in policies {
-        match g2_members.get(&p.v1) {
-            Some(members) => out.extend(members.iter().map(|m| (p.id, *m))),
-            None => out.push((p.id, p.v1)),
-        }
-    }
-
-    Ok(out)
-}
-
-pub(super) async fn get_policies_for_user(
-    db: &DatabaseConnection,
-    user_id: Uuid,
-) -> Result<Vec<CasbinRule>, Error> {
-    // Same subject resolution as `resolve_policy_objects`, including the
-    // sub-select direction documented there.
-    let group_subjects: Vec<Uuid> = casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq(Ptype::G1))
-        .filter(casbin_rule::Column::V0.eq(user_id))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|r| r.v1)
-        .collect();
-
-    let mut subjects = vec![user_id];
-    subjects.extend(group_subjects);
-
-    Ok(casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq(Ptype::Policy))
-        .filter(casbin_rule::Column::V0.is_in(subjects))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(CasbinRule::from)
-        .collect())
-}
-
-/// The action groups containing `policy_act`, or the action itself when it
-/// belongs to none.
-pub(super) async fn get_actions_for_policy(
-    db: &DatabaseConnection,
-    policy_act: Uuid,
-) -> Result<Vec<Uuid>, Error> {
-    let rules = casbin_rule::Entity::find()
-        .filter(casbin_rule::Column::Ptype.eq(Ptype::G3))
-        .filter(casbin_rule::Column::V1.eq(policy_act))
-        .all(db)
-        .await?;
-
-    if rules.is_empty() {
-        return Ok(vec![policy_act]);
-    }
-
-    Ok(rules.into_iter().map(|r| r.v0).collect())
-}
-
-/// Target/secret pairs a user may reach, one row per (policy, target_secret).
-pub(super) async fn list_targets_for_user(
-    db: &DatabaseConnection,
-    user_id: Uuid,
-    active_only: bool,
-) -> Result<Vec<TargetSecretName>, Error> {
-    let pairs = resolve_policy_objects(db, user_id).await?;
-    if pairs.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let ids: Vec<Uuid> = pairs.iter().map(|(_, id)| *id).collect();
-    let rows = target_secret_rows(db, &ids, active_only).await?;
-
-    // One output row per (policy, target_secret), matching the original join.
-    // Ids that aren't target_secrets (internal objects) simply don't match.
-    Ok(pairs
-        .into_iter()
-        .filter_map(|(pid, id)| {
-            rows.get(&id).map(|r| TargetSecretName {
-                pid,
-                id: r.id,
-                target_id: r.target_id,
-                target_name: r.target_name.clone(),
-                secret_id: r.secret_id,
-                secret_user: r.secret_user.clone(),
-            })
-        })
-        .collect())
-}
-
 pub(super) async fn list_targets_by_ids(
     db: &DatabaseConnection,
-    ids: &[&Uuid],
+    ids: Vec<Uuid>,
     pid: Uuid,
     active_only: bool,
 ) -> Result<Vec<TargetSecretName>, Error> {
@@ -627,11 +492,10 @@ pub(super) async fn list_targets_by_ids(
         return Ok(Vec::new());
     }
 
-    let owned: Vec<Uuid> = ids.iter().map(|i| **i).collect();
-    let rows = target_secret_rows(db, &owned, active_only).await?;
+    let rows = target_secret_rows(db, &ids, active_only).await?;
 
     // Preserve the requested id order rather than the database's.
-    Ok(owned
+    Ok(ids
         .iter()
         .filter_map(|id| {
             rows.get(id).map(|r| TargetSecretName {
@@ -856,12 +720,13 @@ pub(super) async fn list_recording_view_for_user(
 pub(super) async fn list_permission_polices(
     db: &DatabaseConnection,
 ) -> Result<Vec<PermissionPolicy>, Error> {
+    // TODO: Replace with one query
     let rules = casbin_rule::Entity::find()
         .filter(casbin_rule::Column::Ptype.eq(Ptype::Policy))
         .all(db)
         .await?;
 
-    let names = casbin_name_map(db).await?;
+    let names = casbin_name_map(db, None).await?;
     let parts = parts_by_id(db).await?;
     let usernames: HashMap<Uuid, String> = user::Entity::find()
         .all(db)
@@ -878,16 +743,16 @@ pub(super) async fn list_permission_polices(
                 .get(&r.v0)
                 .map(|n| n.name.clone())
                 .or_else(|| usernames.get(&r.v0).cloned())
-                .unwrap_or_default();
+                .unwrap();
 
             // target_secret labels first, then `casbin_names`.
             let target_group = parts
                 .get(&r.v1)
                 .map(|p| p.full_label())
                 .or_else(|| names.get(&r.v1).map(|n| n.name.clone()))
-                .unwrap_or_default();
+                .unwrap();
 
-            let action_group = names.get(&r.v2).map(|n| n.name.clone()).unwrap_or_default();
+            let action_group = names.get(&r.v2).map(|n| n.name.clone()).unwrap();
 
             PermissionPolicy {
                 rule: CasbinRule::from(r),

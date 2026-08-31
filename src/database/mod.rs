@@ -179,7 +179,6 @@ pub trait DatabaseRepository: Send + Sync {
     /// Target operations
     async fn create_target(&self, target: target_entity::ActiveModel) -> Result<Target, Error>;
     async fn get_target_by_id(&self, id: Uuid, active_only: bool) -> Result<Option<Target>, Error>;
-    async fn get_targets_by_ids(&self, ids: &[&Uuid]) -> Result<Vec<Target>, Error>;
     async fn get_target_by_target_secret_id(
         &self,
         id: Uuid,
@@ -187,11 +186,9 @@ pub trait DatabaseRepository: Send + Sync {
     ) -> Result<Option<Target>, Error>;
     async fn get_targets_by_target_secret_ids(
         &self,
-        ids: &[Uuid],
+        ids: Vec<Uuid>,
         active_only: bool,
     ) -> Result<Vec<Target>, Error>;
-    async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, Error>;
-    async fn get_target_by_hostname(&self, hostname: &str) -> Result<Option<Target>, Error>;
     async fn update_target(&self, target: target_entity::ActiveModel) -> Result<Target, Error>;
     async fn delete_target(&self, id: Uuid) -> Result<bool, Error>;
     async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, Error>;
@@ -207,17 +204,11 @@ pub trait DatabaseRepository: Send + Sync {
         id: Uuid,
         active_only: bool,
     ) -> Result<Option<Secret>, Error>;
-    async fn get_secrets_by_ids(&self, ids: &[&Uuid]) -> Result<Vec<Secret>, Error>;
     async fn delete_secret(&self, id: Uuid) -> Result<bool, Error>;
-    async fn list_secrets_for_target(&self, target_id: Uuid) -> Result<Vec<SecretInfo>, Error>;
+    async fn list_secrets_by_target_id(&self, target_id: Uuid) -> Result<Vec<SecretInfo>, Error>;
 
     /// TargetSecret operations
     async fn list_target_secrets(&self, active_only: bool) -> Result<Vec<TargetSecret>, Error>;
-    async fn list_target_secrets_by_target_id(
-        &self,
-        target_id: Uuid,
-        active_only: bool,
-    ) -> Result<Vec<TargetSecret>, Error>;
     async fn create_target_secret(
         &self,
         target_secret: target_secret_entity::ActiveModel,
@@ -329,10 +320,6 @@ pub trait DatabaseRepository: Send + Sync {
         target_id: Uuid,
     ) -> Result<Vec<SessionRecording>, Error>;
 
-    /// casbin operations
-    async fn get_policies_for_user(&self, user_id: Uuid) -> Result<Vec<CasbinRule>, Error>;
-    async fn get_actions_for_policy(&self, policy_act: Uuid) -> Result<Vec<Uuid>, Error>;
-
     /// Batch operations
     ///
     /// Each returns the number of rows inserted, as reported by the driver.
@@ -345,17 +332,9 @@ pub trait DatabaseRepository: Send + Sync {
     ) -> Result<u64, Error>;
     async fn create_casbin_rules_batch(&self, rules: Vec<CasbinRule>) -> Result<u64, Error>;
 
-    /// Search operations
-    async fn search_users(&self, query: &str) -> Result<Vec<User>, Error>;
-    async fn search_targets(&self, query: &str) -> Result<Vec<Target>, Error>;
-    async fn list_targets_for_user(
-        &self,
-        user_id: Uuid,
-        active_only: bool,
-    ) -> Result<Vec<TargetSecretName>, Error>;
     async fn list_targets_by_ids(
         &self,
-        ids: &[&Uuid],
+        ids: Vec<Uuid>,
         pid: Uuid,
         active_only: bool,
     ) -> Result<Vec<TargetSecretName>, Error>;
@@ -365,12 +344,6 @@ pub trait DatabaseRepository: Send + Sync {
     async fn list_action_group(&self) -> Result<Vec<ObjectGroup>, Error>;
 
     async fn check_object_active(&self, id: Uuid) -> Result<bool, Error>;
-
-    /// Statistics
-    async fn count_users(&self) -> Result<i64, Error>;
-    async fn count_targets(&self) -> Result<i64, Error>;
-    async fn count_active_users(&self) -> Result<i64, Error>;
-    async fn count_active_targets(&self) -> Result<i64, Error>;
 
     async fn list_permission_polices(&self) -> Result<Vec<PermissionPolicy>, Error>;
 }

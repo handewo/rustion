@@ -36,11 +36,23 @@ pub struct Model {
     pub v5: String,
     pub updated_by: Uuid,
     pub updated_at: i64,
-    #[sea_orm(belongs_to, relation_enum = "RoleGroupV0", from = "v0", to = "id")]
+    #[sea_orm(
+        belongs_to,
+        relation_enum = "RoleGroupV0",
+        from = "v0",
+        to = "id",
+        skip_fk
+    )]
     pub role_group_v0: BelongsTo<super::casbin_name::Entity>,
-    #[sea_orm(belongs_to, relation_enum = "RoleGroupV1", from = "v1", to = "id")]
+    #[sea_orm(
+        belongs_to,
+        relation_enum = "RoleGroupV1",
+        from = "v1",
+        to = "id",
+        skip_fk
+    )]
     pub role_group_v1: BelongsTo<super::casbin_name::Entity>,
-    #[sea_orm(belongs_to, from = "v1", to = "id")]
+    #[sea_orm(belongs_to, from = "v1", to = "id", skip_fk)]
     pub role_user: BelongsTo<super::user::Entity>,
 }
 

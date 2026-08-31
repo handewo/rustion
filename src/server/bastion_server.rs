@@ -149,7 +149,7 @@ impl BastionServer {
                 .list_casbin_rule_group_by_ptype(Ptype::G3)
                 .await?;
 
-            casbin::RoleManage::new(&g1, &g2, &g3)?
+            casbin::RoleManage::new(g1, g2, g3)?
         };
 
         // Initialize global internal UUIDs (only once)
@@ -279,7 +279,7 @@ impl BastionServer {
             .await?;
 
         let mut m = self.role_manager.write().await;
-        *m = casbin::RoleManage::new(&g1, &g2, &g3)?;
+        *m = casbin::RoleManage::new(g1, g2, g3)?;
         Ok(())
     }
 
@@ -455,21 +455,20 @@ impl super::HandlerBackend for BastionServer {
         for pol in allowed_policies {
             // Get all role IDs from object group
             let role_manager = self.role_manager.read().await;
-            let role_ids = role_manager.fetch_role_from_start(pol.v1, GroupType::Object);
+            let group_ids = role_manager.fetch_role_from_start(pol.v1, GroupType::Object);
             drop(role_manager); // Release the lock before awaiting database
-            let role_ids_ref: Vec<&Uuid> = role_ids.iter().collect();
 
             let ts = self
                 .database
                 .repository()
-                .list_targets_by_ids(&role_ids_ref, pol.id, active_only)
+                .list_targets_by_ids(group_ids, pol.id, active_only)
                 .await?;
             if ts.is_empty() {
                 // Try pol.v1 directly as a target_secret ID
                 let t = self
                     .database
                     .repository()
-                    .list_targets_by_ids(&[&pol.v1], pol.id, active_only)
+                    .list_targets_by_ids(vec![pol.v1], pol.id, active_only)
                     .await?;
                 if !t.is_empty() {
                     res.extend_from_slice(&t);
@@ -777,7 +776,7 @@ impl super::HandlerBackend for BastionServer {
         Ok(general_purpose::STANDARD.encode(blob))
     }
 
-    async fn get_graph(&self, rt: GroupType) -> StableDiGraph<casbin::RuleGroup, ()> {
+    async fn get_graph(&self, rt: GroupType) -> StableDiGraph<casbin::RuleNode, ()> {
         self.role_manager.read().await.get_group(rt)
     }
 }

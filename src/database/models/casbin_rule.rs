@@ -140,10 +140,9 @@ pub struct CasbinRuleGroup {
 
 #[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
 pub struct Role {
-    pub rid: Uuid,
-    pub rule_id: Option<Uuid>,
+    pub casbin_name_id: Uuid,
+    pub casbin_rule_id: Option<Uuid>,
     pub role: String,
-    pub is_bound: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -11,7 +11,7 @@ mod tty;
 mod widgets;
 
 pub use bastion_server::BastionServer;
-pub use casbin::{Label, RuleGroup};
+pub use casbin::{RuleNode, RuleType};
 
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
@@ -121,5 +121,5 @@ pub(super) trait HandlerBackend: Send + Clone {
     fn get_graph(
         &self,
         rt: GroupType,
-    ) -> impl Future<Output = StableDiGraph<casbin::RuleGroup, ()>> + Send;
+    ) -> impl Future<Output = StableDiGraph<casbin::RuleNode, ()>> + Send;
 }

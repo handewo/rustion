@@ -1,6 +1,5 @@
 use crate::database::models::ObjectGroup;
-use crate::server::casbin::Type;
-use crate::server::{Label, RuleGroup};
+use crate::server::{RuleNode, RuleType};
 use petgraph::Direction::Outgoing;
 use petgraph::graph::NodeIndex;
 use petgraph::stable_graph::StableDiGraph;
@@ -13,11 +12,11 @@ use tui_tree_widget::TreeItem;
 pub struct Identifier {
     pub uid: uuid::Uuid,
     pub rid: uuid::Uuid,
-    pub r_type: Type,
+    pub r_type: RuleType,
 }
 
 fn build_tree_item(
-    graph: &StableDiGraph<RuleGroup, ()>,
+    graph: &StableDiGraph<RuleNode, ()>,
     node: NodeIndex,
 ) -> Result<TreeItem<'static, Identifier>, std::io::Error> {
     let mut children = Vec::new();
@@ -38,20 +37,23 @@ fn build_tree_item(
     })
 }
 
-fn set_style(rg: &RuleGroup) -> Span<'static> {
+fn set_style(rg: &RuleNode) -> Span<'static> {
     match rg {
-        RuleGroup::V0(v) => {
-            if let Label::Object(_) = v.label {
-                return rg.label().set_style(Style::default());
+        RuleNode::V0(v) => {
+            if v.v_type == RuleType::Object {
+                rg.label().set_style(Style::default())
+            } else {
+                rg.label().set_style(Style::default().bold())
             }
         }
-        RuleGroup::V1(v) => {
-            if let Label::Object(_) = v.label {
-                return rg.label().set_style(Style::default());
+        RuleNode::V1(v) => {
+            if v.v_type == RuleType::Object {
+                rg.label().set_style(Style::default())
+            } else {
+                rg.label().set_style(Style::default().bold())
             }
         }
     }
-    rg.label().set_style(Style::default().bold())
 }
 
 pub fn empty_group_item(
@@ -61,7 +63,7 @@ pub fn empty_group_item(
     let iden = Identifier {
         uid: uuid::Uuid::new_v4(),
         rid,
-        r_type: Type::Group,
+        r_type: RuleType::Group,
     };
     TreeItem::new(
         iden,
@@ -74,7 +76,7 @@ pub fn empty_group_item(
 }
 
 pub fn build_tree(
-    graph: &StableDiGraph<RuleGroup, ()>,
+    graph: &StableDiGraph<RuleNode, ()>,
     all_groups: Vec<&ObjectGroup>,
 ) -> Result<Vec<TreeItem<'static, Identifier>>, std::io::Error> {
     let roots: Vec<_> = graph

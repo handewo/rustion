@@ -9,10 +9,9 @@ use async_trait::async_trait;
 use chrono::Utc;
 use log::{debug, info};
 use sea_orm::ActiveValue::{Set, Unchanged};
-use sea_orm::sea_query::ExprTrait;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Schema,
+    QueryFilter, QueryOrder, QuerySelect, Schema,
 };
 use uuid::Uuid;
 
@@ -180,22 +179,6 @@ impl DatabaseRepository for SeaOrmRepository {
         super::query::list_users_with_role(&self.db, active_only).await
     }
 
-    async fn search_users(&self, query: &str) -> Result<Vec<User>, Error> {
-        let pattern = format!("%{}%", query);
-        Ok(user::Entity::find()
-            .filter(
-                user::Column::Username
-                    .like(&pattern)
-                    .or(user::Column::Email.like(&pattern)),
-            )
-            .order_by_asc(user::Column::Username)
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(User::from)
-            .collect())
-    }
-
     async fn create_users_batch(&self, users: Vec<User>) -> Result<u64, Error> {
         if users.is_empty() {
             return Ok(0);
@@ -225,35 +208,6 @@ impl DatabaseRepository for SeaOrmRepository {
             q = q.filter(target::Column::IsActive.eq(true));
         }
         Ok(q.one(&self.db).await?.map(Target::from))
-    }
-
-    async fn get_targets_by_ids(&self, ids: &[&Uuid]) -> Result<Vec<Target>, Error> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        Ok(target::Entity::find()
-            .filter(target::Column::Id.is_in(ids.iter().map(|i| **i)))
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(Target::from)
-            .collect())
-    }
-
-    async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, Error> {
-        Ok(target::Entity::find()
-            .filter(target::Column::Name.eq(name))
-            .one(&self.db)
-            .await?
-            .map(Target::from))
-    }
-
-    async fn get_target_by_hostname(&self, hostname: &str) -> Result<Option<Target>, Error> {
-        Ok(target::Entity::find()
-            .filter(target::Column::Hostname.eq(hostname))
-            .one(&self.db)
-            .await?
-            .map(Target::from))
     }
 
     async fn update_target(&self, mut target: target::ActiveModel) -> Result<Target, Error> {
@@ -298,23 +252,6 @@ impl DatabaseRepository for SeaOrmRepository {
             .into_model::<TargetInfo>()
             .all(&self.db)
             .await?)
-    }
-
-    async fn search_targets(&self, query: &str) -> Result<Vec<Target>, Error> {
-        let pattern = format!("%{}%", query);
-        Ok(target::Entity::find()
-            .filter(
-                target::Column::Name
-                    .like(&pattern)
-                    .or(target::Column::Hostname.like(&pattern))
-                    .or(target::Column::Description.like(&pattern)),
-            )
-            .order_by_asc(target::Column::Name)
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(Target::from)
-            .collect())
     }
 
     async fn create_targets_batch(&self, targets: Vec<Target>) -> Result<u64, Error> {
@@ -364,19 +301,6 @@ impl DatabaseRepository for SeaOrmRepository {
             .one(&self.db)
             .await?
             .map(Secret::from))
-    }
-
-    async fn get_secrets_by_ids(&self, ids: &[&Uuid]) -> Result<Vec<Secret>, Error> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        Ok(secret::Entity::find()
-            .filter(secret::Column::Id.is_in(ids.iter().map(|i| **i)))
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(Secret::from)
-            .collect())
     }
 
     async fn delete_secret(&self, id: Uuid) -> Result<bool, Error> {
@@ -821,30 +745,6 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    // ------------------------------------------------------------ statistics
-
-    async fn count_users(&self) -> Result<i64, Error> {
-        Ok(user::Entity::find().count(&self.db).await? as i64)
-    }
-
-    async fn count_targets(&self) -> Result<i64, Error> {
-        Ok(target::Entity::find().count(&self.db).await? as i64)
-    }
-
-    async fn count_active_users(&self) -> Result<i64, Error> {
-        Ok(user::Entity::find()
-            .filter(user::Column::IsActive.eq(true))
-            .count(&self.db)
-            .await? as i64)
-    }
-
-    async fn count_active_targets(&self) -> Result<i64, Error> {
-        Ok(target::Entity::find()
-            .filter(target::Column::IsActive.eq(true))
-            .count(&self.db)
-            .await? as i64)
-    }
-
     // ------------------------------------- queries with joins / aggregation
     // Delegated to `super::query`, which builds them through sea-query so the
     // emitted SQL is valid on every backend.
@@ -859,7 +759,7 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn get_targets_by_target_secret_ids(
         &self,
-        ids: &[Uuid],
+        ids: Vec<Uuid>,
         active_only: bool,
     ) -> Result<Vec<Target>, Error> {
         super::query::get_targets_by_target_secret_ids(&self.db, ids, active_only).await
@@ -873,16 +773,8 @@ impl DatabaseRepository for SeaOrmRepository {
         super::query::get_secret_by_target_secret_id(&self.db, id, active_only).await
     }
 
-    async fn list_secrets_for_target(&self, target_id: Uuid) -> Result<Vec<SecretInfo>, Error> {
+    async fn list_secrets_by_target_id(&self, target_id: Uuid) -> Result<Vec<SecretInfo>, Error> {
         super::query::list_secrets_for_target(&self.db, target_id).await
-    }
-
-    async fn list_target_secrets_by_target_id(
-        &self,
-        target_id: Uuid,
-        active_only: bool,
-    ) -> Result<Vec<TargetSecret>, Error> {
-        super::query::list_target_secrets_by_target_id(&self.db, target_id, active_only).await
     }
 
     async fn list_roles_by_user_id(&self, user_id: Uuid) -> Result<Vec<Role>, Error> {
@@ -896,25 +788,9 @@ impl DatabaseRepository for SeaOrmRepository {
         super::query::list_casbin_rule_group_by_ptype(&self.db, ptype).await
     }
 
-    async fn get_policies_for_user(&self, user_id: Uuid) -> Result<Vec<CasbinRule>, Error> {
-        super::query::get_policies_for_user(&self.db, user_id).await
-    }
-
-    async fn get_actions_for_policy(&self, policy_act: Uuid) -> Result<Vec<Uuid>, Error> {
-        super::query::get_actions_for_policy(&self.db, policy_act).await
-    }
-
-    async fn list_targets_for_user(
-        &self,
-        user_id: Uuid,
-        active_only: bool,
-    ) -> Result<Vec<TargetSecretName>, Error> {
-        super::query::list_targets_for_user(&self.db, user_id, active_only).await
-    }
-
     async fn list_targets_by_ids(
         &self,
-        ids: &[&Uuid],
+        ids: Vec<Uuid>,
         pid: Uuid,
         active_only: bool,
     ) -> Result<Vec<TargetSecretName>, Error> {

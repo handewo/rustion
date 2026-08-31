@@ -22,6 +22,9 @@ pub struct Model {
     pub is_active: bool,
     pub updated_by: Uuid,
     pub updated_at: i64,
+    /// Many-to-many to targets through the junction table.
+    #[sea_orm(has_many, via = "target_secret")]
+    pub secrets: HasMany<super::secret::Entity>,
     /// Reverse of [`super::target_secret::Model::target`]. A compound field, so
     /// it declares the relation and the `Related` impl without adding a column —
     /// the junction table owns the foreign key.

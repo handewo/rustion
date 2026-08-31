@@ -5,7 +5,7 @@ use crate::server::HandlerLog;
 use crate::server::app::admin::error::AdminError;
 use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData};
 use crate::server::widgets::{Message, centered_area, render_message_popup};
-use ::log::info;
+use ::log::{error, info};
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
@@ -225,11 +225,17 @@ where
             let result = self
                 .backend
                 .db_repository()
-                .list_secrets_for_target(t.id)
+                .list_secrets_by_target_id(t.id)
                 .await;
             match result {
                 Ok(res) => self.secrets = res,
-                Err(e) => self.save_error = Some(e),
+                Err(e) => {
+                    error!(
+                        "[{}] List secrets by target_id failed: {}",
+                        self.handler_id, e
+                    );
+                    self.save_error = Some(e)
+                }
             }
         }
     }
