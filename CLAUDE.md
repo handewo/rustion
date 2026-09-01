@@ -87,6 +87,13 @@ banner, the connect log, and config errors.
 Tests are inline (`#[cfg(test)]` modules) in:
 - `config/mod.rs` — Config parsing/validation
 - `server/casbin.rs` — Casbin policy matching
-- `server/test.rs` — Integration tests (uses `mock_data.json`)
-- `database/service.rs` — Database service integration tests
+- `database/fixture.rs` — The shared test dataset, built in Rust from the types in
+  `database/models/`. `fixture::seed()` gives a temp-file SQLite database with the
+  whole set written to it, plus name → id lookups (`user()`, `target()`,
+  `secret()`, `name()`, `binding()`, `policy()`). Replaces the former
+  `mock_data.json`.
+- `database/test.rs` — Every `DatabaseRepository` method, against the fixture
+- `database/service.rs` — `DatabaseService` construction and `Clone` sharing
+- `server/test.rs` — Integration tests. Both are `#[ignore]`d: they still read the
+  deleted `mock_data.json` and need porting onto the fixture.
 - `server/app/change_password.rs` — Password change logic

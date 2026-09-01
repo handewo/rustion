@@ -253,6 +253,47 @@ mod tests {
     use super::*;
     use chrono::{NaiveDate, NaiveTime, TimeZone};
 
+    /// The test fixture embeds a serialized [`ExtendPolicy`] as a string literal,
+    /// because `crate::database` cannot depend on this module. Nothing else
+    /// connects the two, so this is what catches the literal going stale if a
+    /// field here is renamed or its format changes.
+    #[test]
+    fn fixture_extend_policy_still_parses() {
+        let raw = crate::database::fixture::VENDOR_EXTEND_POLICY;
+        // `casbin_rule.v3` is a `varchar(256)`, which MySQL enforces.
+        assert!(raw.len() <= 256, "too long for v3: {}", raw.len());
+
+        let policy: ExtendPolicy =
+            serde_json::from_str(raw).expect("fixture extended policy no longer parses");
+        policy.validate().expect("fixture extended policy invalid");
+
+        let offset = FixedOffset::east_opt(8 * 3600).unwrap();
+        assert!(
+            matches!(policy.ip_policy, Some(IpPolicy::Allow(ref ip)) if ip == &IpNetwork::from_str("10.20.0.0/16").unwrap())
+        );
+        let start = policy.start_time.expect("start_time");
+        let end = policy.end_time.expect("end_time");
+        assert_eq!(start.time, NaiveTime::from_hms_opt(8, 0, 0).unwrap());
+        assert_eq!(end.time, NaiveTime::from_hms_opt(20, 0, 0).unwrap());
+        assert_eq!(start.offset, offset);
+        assert_eq!(end.offset, offset);
+        assert_eq!(
+            policy.expire_date,
+            Some(
+                offset
+                    .from_local_datetime(
+                        &NaiveDate::from_ymd_opt(2030, 1, 1)
+                            .unwrap()
+                            .and_hms_opt(0, 0, 0)
+                            .unwrap()
+                    )
+                    .unwrap()
+            )
+        );
+        assert!(policy.open_direct_tcpip_host.is_none());
+        assert!(policy.open_direct_tcpip_port.is_none());
+    }
+
     #[test]
     fn test_parse_extend_policy() {
         let input = r#"{"ip_policy":{"Deny":"192.168.0.0/16"},"start_time":"11:30 +08:00","end_time":"17:30 +0800","expire_date":"2025-09-10 16:30:00 +0800"}"#;

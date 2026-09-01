@@ -41,8 +41,8 @@ impl ActiveModelBehavior for ActiveModel {}
 /// two enums overlap (`g1`/`g2`/`g3`), and `0` is left unused because it means
 /// `p` there — a value a name cannot hold.
 ///
-/// Serde stays on the wire names, matching `Ptype`; `mock_data.json` spells
-/// `ptype` as a string.
+/// Serde stays on the wire names, matching `Ptype`, where `ptype` is spelled as
+/// a string.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Hash, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
 )]

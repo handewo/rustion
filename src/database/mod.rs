@@ -1,10 +1,18 @@
 pub mod common;
 pub(crate) mod entity;
 pub mod error;
+/// The test dataset. `pub(crate)` rather than private to this module so
+/// `server::extend_policy`'s tests can check the extended policy the fixture
+/// embeds still parses — the fixture itself has to live in here, because the
+/// `into_active_model` conversions it writes through are `pub(in crate::database)`.
+#[cfg(test)]
+pub(crate) mod fixture;
 pub(crate) mod models;
 pub(crate) mod query;
 pub(crate) mod repository;
 pub(crate) mod service;
+#[cfg(test)]
+mod test;
 
 use crate::{
     database::{

@@ -64,9 +64,9 @@ impl ActiveModelBehavior for ActiveModel {}
 /// never be renumbered — a database written by this version reads its `ptype`
 /// column back through these exact discriminants.
 ///
-/// Serde deliberately stays on the wire names (`"p"`, `"g1"`, …): `mock_data.json`
-/// and any exported fixture spell `ptype` as a string, and that is a separate
-/// concern from how the column is stored.
+/// Serde deliberately stays on the wire names (`"p"`, `"g1"`, …): an exported or
+/// imported ruleset spells `ptype` as a string, and that is a separate concern
+/// from how the column is stored.
 ///
 /// `casbin_names.ptype` is deliberately *not* this type: it carries a wider set
 /// (`act` and the two `__internal_*` types) that has no meaning here.
