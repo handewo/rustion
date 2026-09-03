@@ -42,12 +42,16 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
     async fn channel_open_session(
         &mut self,
         channel: Channel<ru_server::Msg>,
+        reply: ru_server::ChannelOpenHandle,
         _session: &mut ru_server::Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         let user = self.user.as_ref().ok_or(ServerError::UserNotInit)?;
         let mut channel_session = ChannelSession::new();
         if !self.init_session(user).await? {
-            return Ok(false);
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
         }
 
         let app = if !user.force_init_pass {
@@ -99,7 +103,8 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 e.insert(channel_session);
             }
         };
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
 
     async fn auth_password(
@@ -318,18 +323,25 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         port_to_connect: u32,
         originator_address: &str,
         originator_port: u32,
+        reply: ru_server::ChannelOpenHandle,
         session: &mut ru_server::Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         let mut channel_session = ChannelSession::new();
         let user = self.user.as_ref().ok_or(ServerError::UserNotInit)?;
         let channel_id = channel.id();
 
         if user.force_init_pass {
-            return Ok(false);
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
         }
 
         if !self.init_session(user).await? {
-            return Ok(false);
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
         }
         match self
             .login_parse
@@ -365,7 +377,10 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     )
                     .await?
                 {
-                    return Ok(false);
+                    reply
+                        .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                        .await;
+                    return Ok(());
                 };
                 channel_session.app = Application::ConnectTarget(app);
                 match self.channel_session.entry(channel_id) {
@@ -377,9 +392,15 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                         e.insert(channel_session);
                     }
                 };
-                Ok(true)
+                reply.accept().await;
+                Ok(())
             }
-            _ => Ok(false),
+            _ => {
+                reply
+                    .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                    .await;
+                Ok(())
+            }
         }
     }
 

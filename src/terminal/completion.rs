@@ -1,6 +1,6 @@
 use nu_ansi_term::Style;
 
-use reedline::{Completer, Span, Suggestion};
+use reedline::{Completer, CompletionResult, Span, Suggestion};
 use std::{
     collections::{BTreeMap, BTreeSet},
     str::Chars,
@@ -52,7 +52,7 @@ impl Completer for BastionCompleter {
     ///         Suggestion {value: "batmobile".into(), description: None, style: None, extra: None, span: Span { start: 8, end: 11 }, append_whitespace: false},
     ///     ]);
     /// ```
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
         let mut span_line_whitespaces = 0;
         let mut completions = vec![];
         // Trimming in case someone passes in text containing stuff after the cursor, if
@@ -134,7 +134,7 @@ impl Completer for BastionCompleter {
             );
         }
         completions.dedup();
-        completions
+        CompletionResult::fresh(completions)
     }
 }
 

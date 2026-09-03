@@ -1,6 +1,7 @@
 use crate::error::Error;
 use log::{debug, warn};
 use russh::client as ru_client;
+use russh::keys::PublicKeyOrCertificate;
 use russh::keys::ssh_key::{self, PublicKey};
 use russh::{Preferred, SshId, keys::Algorithm};
 use serde::{Deserialize, Serialize};
@@ -86,18 +87,18 @@ impl ru_client::Handler for Target {
     type Error = crate::error::Error;
     async fn check_server_key(
         &mut self,
-        server_public_key: &ssh_key::PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         let target_public_key = ssh_key::PublicKey::from_openssh(self.server_public_key.as_str())
             .map_err(russh::keys::Error::from)?;
-        if target_public_key.key_data() == server_public_key.key_data() {
+        if target_public_key.key_data() == server_public_key.public_key().key_data() {
             return Ok(true);
         }
         warn!(
             "The public key of target: {}({}) doesn't match: {}",
             self.name,
             self.id,
-            server_public_key.to_string()
+            server_public_key.public_key().to_string()
         );
         Ok(false)
     }

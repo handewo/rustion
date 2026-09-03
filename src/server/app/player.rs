@@ -136,6 +136,8 @@ where
     terminal.flush().await?;
     tokio::spawn(async move {
         let _ = app.run(tty, &mut terminal, send_status).await;
+        let _ = terminal.show_cursor().await;
+        let _ = terminal.flush().await;
     });
 
     (log)(LOG_TYPE.into(), "User login to player".to_string()).await;
