@@ -268,8 +268,8 @@ async fn user_reads_resolve_ids_names_and_roles() {
         .map(|u| (u.user.username.clone(), u.role))
         .collect();
     assert_eq!(roles.len(), USERS);
-    assert_eq!(roles[ADMIN], R_OPS_LEAD);
-    assert_eq!(roles[JOHN], R_OPS);
+    assert_eq!(roles[ADMIN], R_MANAGER);
+    assert_eq!(&roles[JOHN], &[R_OPS, ", ", R_DEV].concat());
     assert_eq!(roles[MIKE], R_DEV_LEAD);
     assert_eq!(roles[LUKA], R_DEV);
     // `daisy` is granted by a policy naming her directly, but her *role* is only
@@ -840,7 +840,7 @@ async fn rule_reads_group_by_ptype_and_resolve_roles() {
     assert_eq!(
         names,
         vec![
-            R_AUDIT, R_DEV, R_DEV_LEAD, R_EVERYONE, R_OPS, R_OPS_LEAD, R_STAFF, R_VENDOR
+            R_AUDIT, R_DEV, R_DEV_LEAD, R_MANAGER, R_OPS, R_OPS_LEAD, R_STAFF, R_VENDOR
         ]
     );
     let held: Vec<&str> = admin_roles
@@ -850,7 +850,7 @@ async fn rule_reads_group_by_ptype_and_resolve_roles() {
         .collect();
     assert_eq!(
         held,
-        vec![R_OPS_LEAD],
+        vec![R_MANAGER],
         "only the direct membership, not the inherited chain"
     );
     assert_eq!(admin_roles[5].casbin_name_id, f.name(R_OPS_LEAD));
@@ -890,9 +890,12 @@ async fn rule_group_labels_hold_exactly_one_label_per_side() {
             )
         })
         .collect();
-    assert_eq!(nesting.len(), 7);
-    assert!(nesting.contains(&(R_STAFF.to_string(), R_EVERYONE.to_string())));
-    assert!(nesting.contains(&(R_OPS_LEAD.to_string(), R_OPS.to_string())));
+    assert_eq!(nesting.len(), 8);
+    // `(v0, v1)` is `(containing role, nested role)`, the same way round as a
+    // membership row. `server::casbin` builds the edge `v1 → v0`, so this is what
+    // makes a user walk *up* to their ancestors.
+    assert!(nesting.contains(&(R_AUDIT.to_string(), R_MANAGER.to_string())));
+    assert!(nesting.contains(&(R_STAFF.to_string(), R_OPS.to_string())));
 
     let members: HashSet<(String, String)> = g1
         .iter()
@@ -905,8 +908,8 @@ async fn rule_group_labels_hold_exactly_one_label_per_side() {
             )
         })
         .collect();
-    assert_eq!(members.len(), 5);
-    assert!(members.contains(&(R_OPS_LEAD.to_string(), ADMIN.to_string())));
+    assert_eq!(members.len(), 6);
+    assert!(members.contains(&(R_MANAGER.to_string(), ADMIN.to_string())));
     assert!(members.contains(&(R_VENDOR.to_string(), DAISY.to_string())));
     assert!(!members.iter().any(|(_, u)| u == JOE), "joe holds no role");
 
@@ -1091,7 +1094,7 @@ async fn rule_writes_and_group_scoped_delete() {
     );
     let roles = repo.list_users_with_role(false).await.unwrap();
     let john = roles.iter().find(|u| u.user.username == JOHN).unwrap();
-    assert_eq!(john.role, "", "john's role survived the revoke");
+    assert_eq!(john.role, R_DEV, "john's role survived the revoke");
 
     // Arguments the other way round match nothing: direction is load-bearing.
     assert!(
@@ -1745,7 +1748,7 @@ async fn permission_policies_resolve_every_column_source() {
 
     let expected = [
         // subject,     object,          action
-        (R_EVERYONE, OBJ_LOGIN, ACT_LOGIN),
+        (R_MANAGER, OBJ_LOGIN, ACT_LOGIN),
         (R_OPS_LEAD, OBJ_ADMIN, AG_INTERACTIVE),
         (R_OPS, TG_CORE, AG_ALL),
         (R_DEV, TG_MARS_WEB, AG_INTERACTIVE),

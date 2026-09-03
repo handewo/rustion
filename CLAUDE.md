@@ -94,6 +94,7 @@ Tests are inline (`#[cfg(test)]` modules) in:
   `mock_data.json`.
 - `database/test.rs` — Every `DatabaseRepository` method, against the fixture
 - `database/service.rs` — `DatabaseService` construction and `Clone` sharing
-- `server/test.rs` — Integration tests. Both are `#[ignore]`d: they still read the
-  deleted `mock_data.json` and need porting onto the fixture.
+- `server/test.rs` — `HandlerBackend` integration tests against the fixture:
+  `enforce` and `list_targets_for_user`, built on a real `BastionServer` opened on
+  the fixture's SQLite file (`TestDb::url`).
 - `server/app/change_password.rs` — Password change logic

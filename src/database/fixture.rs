@@ -20,28 +20,28 @@
 //!   `s_dev` on mars3-8, saturn1-7, venus1-10; `s_oper` on mars5-10,
 //!   saturn1-10, venus3-9.
 //! * **4-level role tree** (`g1`), **4-level object-group tree** (`g2`),
-//!   **2-level action groups** (`g3`), and **9 policies** (`p`) — drawn below.
+//!   **2-level action groups** (`g3`), and **10 policies** (`p`) — drawn below.
 //!
 //! # Role tree (`g1`)
 //!
 //! Parentheses hold the role's own members; the right-hand column is the policy
-//! that role carries. A role with no policy still matters, because a user
-//! inherits every policy above them.
+//! that role carries.
 //!
 //! ```text
-//! r_everyone                      p0  ACT_LOGIN      on OBJ_LOGIN
-//! ├── r_staff                     p8  ag_all         on tg_selfservice
-//! │   ├── r_ops (john)            p2  ag_all         on tg_core
-//! │   │   └── r_ops_lead (admin)  p1  ag_interactive on OBJ_ADMIN
-//! │   └── r_dev (luka)            p3  ag_interactive on tg_mars_web
-//! │       └── r_dev_lead (mike)   p4  ag_batch       on tg_lab
-//! └── r_vendor (daisy)            p7  ag_interactive on tg_venus
-//!     └── r_audit (no members)    p5  ACT_EXEC       on tg_jupiter
+//! r_manager(admin)                p1  ag_interactive on OBJ_ADMIN
+//! ├── r_ops_lead (no members)     p9  ag_interactive on tg_lab
+//! │   └── r_ops (john)            p2  ag_all         on tg_core
+//! │       └── r_staff             p8  ag_all         on tg_selfservice
+//! ├── r_dev_lead (mike)           p4  ag_batch       on tg_lab
+//! │   └── r_dev (luka, john)      p3  ag_interactive on tg_mars_web
+//! │       └── r_staff             p8  ag_all         on tg_selfservice
+//! └── r_audit (no members)        p5  ACT_EXEC       on tg_jupiter
+//!     └── r_vendor (daisy)        p7  ag_interactive on tg_venus
 //! ```
 //!
-//! So `admin` inherits `p1`, `p2`, `p8` and `p0`, while `luka` gets `p3`, `p8`
-//! and `p0` but not `p4`. `joe` holds no role and so reaches nothing, not even
-//! login. Two deliberate edge cases: `r_audit`'s name is inactive and has no
+//! So `admin` inherits all, while `luka` gets `p3` and `p8`.
+//! `joe` holds no role and so reaches nothing, not even login.
+//! Two deliberate edge cases: `r_audit`'s name is inactive and has no
 //! members, and `p7` is the only policy carrying a non-empty `v3`
 //! ([`VENDOR_EXTEND_POLICY`]).
 //!
@@ -83,16 +83,6 @@
 //!
 //! [`ACT_LOGIN`] hangs off the root rather than either leaf, so a policy naming
 //! `ag_interactive` grants a shell without granting login.
-//!
-//! # Rule direction
-//!
-//! `server::casbin` builds its graph with the edge running `v1 → v0`, then walks
-//! *up* from a user for `g1` and *down* from a group for `g2`/`g3`. So a `g1` row
-//! is `(v0 = containing role, v1 = member)` while a `g2`/`g3` row is
-//! `(v0 = member, v1 = containing group)` — inverted between the two. The
-//! `subject_rule`/`group_rule` helpers below both take `(parent, child)` and
-//! place the columns per `ptype`, so the tables above read the same way
-//! regardless of which side the flip lands on.
 
 use std::collections::HashMap;
 
@@ -118,11 +108,11 @@ pub const ACTIVE_TARGETS: usize = 34;
 pub const SECRETS: usize = 4;
 pub const TARGET_SECRETS: usize = 85;
 pub const CASBIN_NAMES: usize = 30;
-pub const CASBIN_RULES: usize = 123;
+pub const CASBIN_RULES: usize = 126;
 /// `p` rules. One per entry in [`Fixture::policies`].
-pub const POLICIES: usize = 9;
-/// `g1`: 7 nestings + 5 memberships.
-pub const G1_RULES: usize = 12;
+pub const POLICIES: usize = 10;
+/// `g1`: 8 nestings + 6 memberships.
+pub const G1_RULES: usize = 14;
 /// `g2`: 9 nestings + 85 bindings + 2 self-service objects.
 pub const G2_RULES: usize = 96;
 /// `g3`: 2 nestings + 4 actions.
@@ -170,7 +160,7 @@ pub const S_OPER: &str = "s_oper";
 pub const S_MON: &str = "s_mon";
 
 // Roles (`g1`), four levels deep.
-pub const R_EVERYONE: &str = "r_everyone";
+pub const R_MANAGER: &str = "r_manager";
 pub const R_STAFF: &str = "r_staff";
 pub const R_VENDOR: &str = "r_vendor";
 pub const R_OPS: &str = "r_ops";
@@ -192,6 +182,28 @@ pub const TG_MARS_WEB: &str = "tg_mars_web";
 pub const TG_MARS_DB: &str = "tg_mars_db";
 pub const TG_SELFSERVICE: &str = "tg_selfservice";
 
+// Object group counts
+pub const S_MON_TG_MARS_WEB: usize = 5;
+pub const S_MON_TG_MARS_DB: usize = 5;
+pub const S_MON_TG_SATURN: usize = 10;
+pub const S_MON_TG_VENUS: usize = 10;
+pub const S_MON_TG_JUPITER: usize = 5;
+pub const S_ALL_SUN: usize = 4;
+pub const S_OPER_TG_MARS_WEB: usize = 1;
+pub const S_OPER_TG_MARS_DB: usize = 5;
+pub const S_OPER_TG_SATURN: usize = 10;
+pub const S_OPER_TG_VENUS: usize = 7;
+pub const S_DEV_TG_MARS_WEB: usize = 3;
+pub const S_DEV_TG_MARS_DB: usize = 3;
+pub const S_DEV_TG_SATURN: usize = 7;
+pub const S_DEV_TG_VENUS: usize = 10;
+pub const TG_MARS_WEB_BINDING: usize = S_MON_TG_MARS_WEB + S_OPER_TG_MARS_WEB + S_DEV_TG_MARS_WEB;
+pub const TG_MARS_DB_BINDING: usize = S_MON_TG_MARS_DB + S_OPER_TG_MARS_DB + S_DEV_TG_MARS_DB;
+pub const TG_MARS_BINDING: usize = TG_MARS_WEB_BINDING + TG_MARS_DB_BINDING;
+pub const TG_SATURN_BINDING: usize = S_MON_TG_SATURN + S_DEV_TG_SATURN + S_OPER_TG_SATURN;
+pub const TG_VENUS_BINDING: usize = S_MON_TG_VENUS + S_DEV_TG_VENUS + S_OPER_TG_VENUS;
+pub const TG_CORE_BINDING: usize = TG_MARS_BINDING + TG_SATURN_BINDING + S_ALL_SUN;
+pub const TG_LAB_BINDING: usize = TG_VENUS_BINDING + S_MON_TG_JUPITER;
 // Action groups (`g3`), two levels deep.
 pub const AG_ALL: &str = "ag_all";
 pub const AG_INTERACTIVE: &str = "ag_interactive";
@@ -460,7 +472,7 @@ pub fn build() -> (Fixture, Data) {
 
     // Roles. `r_audit` is inactive, and is also the one role with no members.
     for role in [
-        R_EVERYONE, R_STAFF, R_VENDOR, R_OPS, R_DEV, R_OPS_LEAD, R_DEV_LEAD,
+        R_MANAGER, R_STAFF, R_VENDOR, R_OPS, R_DEV, R_OPS_LEAD, R_DEV_LEAD,
     ] {
         push_name(NamePtype::G1, role, true);
     }
@@ -517,7 +529,7 @@ pub fn build() -> (Fixture, Data) {
 
     // 0: everyone may log in. The grant every other policy assumes.
     policy(
-        name_ids[R_EVERYONE],
+        name_ids[R_MANAGER],
         name_ids[OBJ_LOGIN],
         name_ids[ACT_LOGIN],
         "{}",
@@ -575,6 +587,13 @@ pub fn build() -> (Fixture, Data) {
         name_ids[AG_ALL],
         "{}",
     );
+    // 9: ops leads get shell across the lab branch.
+    policy(
+        name_ids[R_OPS_LEAD],
+        name_ids[TG_LAB],
+        name_ids[AG_INTERACTIVE],
+        "{}",
+    );
     assert_eq!(policies.len(), POLICIES, "policy count drifted");
 
     // `g1` runs `v0 = containing role`, `v1 = member`; `g2`/`g3` run the other
@@ -594,21 +613,23 @@ pub fn build() -> (Fixture, Data) {
 
     // Role tree; see the module docs for the drawing.
     for (parent, child) in [
-        (R_EVERYONE, R_STAFF),
-        (R_EVERYONE, R_VENDOR),
-        (R_STAFF, R_OPS),
-        (R_STAFF, R_DEV),
-        (R_VENDOR, R_AUDIT),
-        (R_OPS, R_OPS_LEAD),
-        (R_DEV, R_DEV_LEAD),
+        (R_MANAGER, R_OPS_LEAD),
+        (R_MANAGER, R_DEV_LEAD),
+        (R_MANAGER, R_AUDIT),
+        (R_AUDIT, R_VENDOR),
+        (R_OPS_LEAD, R_OPS),
+        (R_DEV_LEAD, R_DEV),
+        (R_OPS, R_STAFF),
+        (R_DEV, R_STAFF),
     ] {
         subject_rule(name_ids[parent], name_ids[child]);
     }
 
     // Memberships. `joe` is deliberately absent, and `r_audit` has no members.
     for (role, user) in [
-        (R_OPS_LEAD, ADMIN),
+        (R_MANAGER, ADMIN),
         (R_OPS, JOHN),
+        (R_DEV, JOHN),
         (R_DEV_LEAD, MIKE),
         (R_DEV, LUKA),
         (R_VENDOR, DAISY),
@@ -701,6 +722,9 @@ pub fn build() -> (Fixture, Data) {
 pub struct TestDb {
     pub service: DatabaseService,
     pub fixture: Fixture,
+    /// The connection URL, so a second component — `server::BastionServer`, which
+    /// opens the database from a `Config` — can be pointed at this same file.
+    pub url: String,
     _dir: TempDir,
 }
 
@@ -727,6 +751,7 @@ pub async fn seed() -> TestDb {
     TestDb {
         service,
         fixture,
+        url,
         _dir: dir,
     }
 }
