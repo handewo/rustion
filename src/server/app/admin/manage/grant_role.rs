@@ -2,7 +2,7 @@ use crate::database::Uuid;
 use crate::database::entity::casbin_rule;
 use crate::database::models::{Ptype, Role};
 use crate::error::Error;
-use crate::server::HandlerLog;
+use crate::server::event_log::EventLogger;
 use crate::server::widgets::{
     AdminTable, DisplayMode, FieldsToArray, Message, TableData, centered_area, render_message_popup,
 };
@@ -17,8 +17,6 @@ use ratatui::{
 use sea_orm::ActiveValue::Set;
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
-
-use super::LOG_TYPE;
 
 pub const HELP_TEXT: [&str; 2] = [
     "(Space) toggle | (↑↓) select item",
@@ -37,7 +35,7 @@ where
     handler_id: Uuid,
     admin_id: Uuid,
     save_error: Option<Error>,
-    log: HandlerLog,
+    log: EventLogger<B>,
     pub help_text: [&'static str; 2],
 }
 
@@ -50,7 +48,7 @@ where
         backend: Arc<B>,
         handler_id: Uuid,
         admin_id: Uuid,
-        log: HandlerLog,
+        log: EventLogger<B>,
     ) -> Self {
         let mut save_error = None;
         let items = match backend
@@ -140,14 +138,12 @@ where
                     "[{}] Role '{}({})' revoked from user_id={} by admin_id={}",
                     self.handler_id, t.role, t.casbin_name_id, self.selected_user_id, self.admin_id
                 );
-                (self.log)(
-                    LOG_TYPE.into(),
-                    format!(
+                self.log
+                    .record(format!(
                         "Role '{}({})' revoked from user_id={}",
                         t.role, t.casbin_name_id, self.selected_user_id
-                    ),
-                )
-                .await;
+                    ))
+                    .await;
                 t.casbin_rule_id = None;
             }
             None => {
@@ -168,14 +164,12 @@ where
                     "[{}] Role '{}({})' granted to user_id={} by admin_id={}",
                     self.handler_id, t.role, t.casbin_name_id, self.selected_user_id, self.admin_id
                 );
-                (self.log)(
-                    LOG_TYPE.into(),
-                    format!(
+                self.log
+                    .record(format!(
                         "Role '{}({})' granted to user_id={}",
                         t.role, t.casbin_name_id, self.selected_user_id
-                    ),
-                )
-                .await;
+                    ))
+                    .await;
                 t.casbin_rule_id = Some(cr.id);
             }
         }

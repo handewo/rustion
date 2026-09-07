@@ -2,6 +2,7 @@ use super::AppParams;
 use crate::database::common as db_common;
 use crate::error::Error;
 use crate::server::error::ServerError;
+use crate::server::event_log::EventKind;
 use crate::server::extend_policy;
 use bytes::Bytes;
 
@@ -18,8 +19,6 @@ pub mod error;
 mod manage;
 mod shell;
 mod validate;
-
-const LOG_TYPE: &str = "admin";
 
 pub async fn check_permission<B>(
     user_id: Uuid,
@@ -98,6 +97,7 @@ where
         }
     });
 
+    let log = log.scoped(EventKind::Admin);
     let shell_log = log.clone();
     tokio::spawn(async move {
         shell::shell(
@@ -112,7 +112,7 @@ where
         .await
     });
 
-    (log)(LOG_TYPE.into(), "User login to admin system".to_string()).await;
+    log.record("User login to admin system").await;
     Ok(())
 }
 

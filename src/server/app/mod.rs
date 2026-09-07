@@ -7,7 +7,7 @@ pub(super) mod player;
 pub(super) mod target_selector;
 
 use crate::database::models;
-use crate::server::HandlerLog;
+use crate::server::event_log::EventLogger;
 use crate::server::tty::Tty;
 use russh::ChannelId;
 use std::sync::Arc;
@@ -21,7 +21,7 @@ pub struct AppParams<B: 'static + crate::server::HandlerBackend + Send + Sync> {
     pub backend: Arc<B>,
     pub tty: Tty,
     pub recv_from_tty: mpsc::Receiver<Bytes>,
-    pub log: HandlerLog,
+    pub log: EventLogger<B>,
     pub app_sender: mpsc::Sender<(ChannelId, NextApplication)>,
 }
 
@@ -32,7 +32,7 @@ type Params<B> = (
     Arc<B>,
     Tty,
     mpsc::Receiver<Bytes>,
-    HandlerLog,
+    EventLogger<B>,
     mpsc::Sender<(ChannelId, NextApplication)>,
 );
 

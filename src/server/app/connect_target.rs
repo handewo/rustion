@@ -5,7 +5,8 @@ use crate::database::models::session_recording;
 use crate::database::models::{Target, TargetSecretName, User};
 use crate::error::Error;
 use crate::server::app::error::AppError;
-use crate::server::{HandlerLog, error::ServerError, extend_policy};
+use crate::server::event_log::{EventKind, EventLogger};
+use crate::server::{error::ServerError, extend_policy};
 use log::{debug, trace};
 use russh::client as ru_client;
 use russh::server as ru_server;
@@ -14,8 +15,6 @@ use sea_orm::ActiveValue::{Set, Unchanged};
 use std::fmt;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
-static LOG_TYPE: &str = "target";
 
 /// Wrapper for session recording that includes the database metadata ID
 #[derive(Clone)]
@@ -48,7 +47,7 @@ where
 
     record_session: Option<Arc<Mutex<RecordingSession>>>,
     backend: Arc<B>,
-    log: HandlerLog,
+    log: EventLogger<B>,
 }
 
 impl<B> ConnectTarget<B>
@@ -57,7 +56,7 @@ where
 {
     pub(crate) async fn new(
         handler_id: Uuid,
-        log: HandlerLog,
+        log: EventLogger<B>,
         user: &User,
         client_ip: Option<std::net::IpAddr>,
         backend: Arc<B>,
@@ -111,7 +110,7 @@ where
             target_handle: None,
             target_secret_name,
             record_session: None,
-            log,
+            log: log.scoped(EventKind::Target),
         })
     }
 
@@ -120,7 +119,7 @@ where
         user_id: Uuid,
         backend: Arc<B>,
         client_ip: Option<std::net::IpAddr>,
-        log: HandlerLog,
+        log: EventLogger<B>,
         target: Target,
         target_secret_name: TargetSecretName,
     ) -> Result<ConnectTarget<B>, Error> {
@@ -139,7 +138,7 @@ where
             target_handle: None,
             target_secret_name,
             record_session: None,
-            log,
+            log: log.scoped(EventKind::Target),
         })
     }
 
@@ -536,24 +535,19 @@ where
                 }
             }
             let _ = handle.close(channel).await;
-            log(
-                LOG_TYPE.into(),
-                format!(
-                    "target request: {} closed on {}({})",
-                    request_str, move_target.name, move_target.id
-                ),
-            )
+            log.record(format!(
+                "target request: {} closed on {}({})",
+                request_str, move_target.name, move_target.id
+            ))
             .await;
         });
 
-        (self.log)(
-            LOG_TYPE.into(),
-            format!(
+        self.log
+            .record(format!(
                 "target request: {} succeed on {}({})",
                 request, self.target.name, self.target.id
-            ),
-        )
-        .await;
+            ))
+            .await;
 
         Ok(())
     }

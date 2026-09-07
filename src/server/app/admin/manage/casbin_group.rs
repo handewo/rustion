@@ -1,9 +1,8 @@
-use super::LOG_TYPE;
 use crate::database::Uuid;
 use crate::database::entity::casbin_rule;
 use crate::database::models::{GroupType, ObjectGroup};
 use crate::error::Error;
-use crate::server::HandlerLog;
+use crate::server::event_log::EventLogger;
 use crate::server::widgets::tree;
 use crate::server::widgets::{
     AdminTable, DisplayMode, Message, centered_area, common::*, render_confirm_dialog,
@@ -46,7 +45,7 @@ where
     backend: Arc<B>,
     handler_id: Uuid,
     admin_id: Uuid,
-    log: HandlerLog,
+    log: EventLogger<B>,
     pub is_editing: bool,
     pub is_deleting: bool,
     win_size: (u16, u16),
@@ -69,7 +68,7 @@ where
         handler_id: Uuid,
         admin_id: Uuid,
         group_type: GroupType,
-        log: HandlerLog,
+        log: EventLogger<B>,
     ) -> Self {
         let mut message = None;
         let (state, items, selector_items) =
@@ -361,9 +360,8 @@ where
             {
                 Ok(res) => {
                     if res {
-                        (self.log)(
-                            LOG_TYPE.into(),
-                            format!(
+                        self.log
+                            .record(format!(
                                 "Deleted {} '{}' from group '{}' (ptype={}, v0={}, v1={})",
                                 self.group_type,
                                 item_iden.rid,
@@ -371,9 +369,8 @@ where
                                 self.group_type,
                                 item_iden.rid,
                                 group_iden.rid
-                            ),
-                        )
-                        .await;
+                            ))
+                            .await;
                         info!(
                             "[{}] Deleted casbin_rule successfully: ptype={}, v0={}, v1={}",
                             self.handler_id, self.group_type, item_iden.rid, group_iden.rid
@@ -483,14 +480,12 @@ where
 
         match self.backend.db_repository().create_casbin_rule(cr).await {
             Ok(cr) => {
-                (self.log)(
-                    LOG_TYPE.into(),
-                    format!(
+                self.log
+                    .record(format!(
                         "{} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
                         t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1
-                    ),
-                )
-                .await;
+                    ))
+                    .await;
                 info!(
                     "[{}] {} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
                     self.handler_id, t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1

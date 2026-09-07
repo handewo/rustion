@@ -1,8 +1,8 @@
 use crate::database::Uuid;
 use crate::database::models::{SecretInfo, TargetInfo};
 use crate::error::Error;
-use crate::server::HandlerLog;
 use crate::server::app::admin::error::AdminError;
+use crate::server::event_log::EventLogger;
 use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData};
 use crate::server::widgets::{Message, centered_area, render_message_popup};
 use ::log::{error, info};
@@ -16,8 +16,6 @@ use ratatui::{
 };
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
-
-use super::LOG_TYPE;
 
 pub const HELP_TEXT: [&str; 2] = [
     "(Space) toggle | (←→) switch window | (↑↓) select item",
@@ -55,7 +53,7 @@ where
     handler_id: Uuid,
     admin_id: Uuid,
     save_error: Option<Error>,
-    log: HandlerLog,
+    log: EventLogger<B>,
     pub help_text: [&'static str; 2],
 }
 
@@ -69,7 +67,7 @@ where
         backend: Arc<B>,
         handler_id: Uuid,
         admin_id: Uuid,
-        log: HandlerLog,
+        log: EventLogger<B>,
     ) -> Self {
         Self {
             targets: targets.clone(),
@@ -208,14 +206,12 @@ where
             "[{}] Secret '{}({})' {} target '{}({})' by admin_id={}",
             self.handler_id, s.name, s.id, action, t.name, t.id, self.admin_id
         );
-        (self.log)(
-            LOG_TYPE.into(),
-            format!(
+        self.log
+            .record(format!(
                 "Secret '{}({})' {} target '{}({})'",
                 s.name, s.id, action, t.name, t.id
-            ),
-        )
-        .await;
+            ))
+            .await;
         Ok(())
     }
 

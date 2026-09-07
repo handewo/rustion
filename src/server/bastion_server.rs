@@ -607,19 +607,13 @@ impl super::HandlerBackend for BastionServer {
         Ok(())
     }
 
-    async fn insert_log(
-        &self,
-        connection_id: Uuid,
-        user_id: Uuid,
-        log_type: String,
-        detail: String,
-    ) {
+    async fn insert_log(&self, event: super::Event) {
         // `created_at` is stamped by the repository.
         let l = event_log::ActiveModel {
-            connection_id: Set(connection_id),
-            user_id: Set(user_id),
-            log_type: Set(log_type),
-            detail: Set(detail),
+            connection_id: Set(event.connection_id),
+            user_id: Set(event.user_id),
+            log_type: Set(event.kind.as_str().into()),
+            detail: Set(event.detail),
             ..Default::default()
         };
         if let Err(e) = self.database.repository().insert_log(l).await {

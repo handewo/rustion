@@ -2,6 +2,7 @@ use super::AppParams;
 use crate::database::entity::user;
 use crate::database::models::User;
 use crate::error::Error;
+use crate::server::event_log::EventKind;
 use bytes::Bytes;
 use crossterm::event::SenderWriter;
 use inquire::{
@@ -13,8 +14,6 @@ use russh::ChannelId;
 use russh::server as ru_server;
 use sea_orm::ActiveValue::{Set, Unchanged};
 use tokio::sync::mpsc;
-
-static LOG_TYPE: &str = "password";
 
 // Custom validators for password requirements
 #[derive(Clone)]
@@ -110,7 +109,7 @@ where
     let user_for_prompt = user.clone();
     let username = user.username.clone();
     let user_id = user.id;
-    let log = log.clone();
+    let log = log.scoped(EventKind::Password);
 
     tokio::spawn(async move {
         loop {
@@ -157,7 +156,7 @@ where
                                         debug!("[{}] Password updated successfully for user '{}({})'", handler_id, username, user_id);
                                         handle_prompt.data(channel, "\r\npassword updated successfully.\r\n"
                                             ).await.is_err().then(|| warn!("[{}] Fail to send password prompt to session from prompt", handler_id));
-                                        log(LOG_TYPE.into(),"password updated successfully".into()).await;
+                                        log.record("password updated successfully").await;
                                     }
                                     if handle_prompt.exit_status_request(channel,exit_status).await.is_err() {
                                         warn!("[{}] Fail to send exit status", handler_id);

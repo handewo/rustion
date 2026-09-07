@@ -1,5 +1,5 @@
 use crate::database::Uuid;
-use crate::server::HandlerLog;
+use crate::server::event_log::EventLogger;
 use log::warn;
 use reedline::{
     ColumnarMenu, DefaultPrompt, DefaultPromptSegment, Emacs, ExampleHighlighter, KeyCode,
@@ -22,7 +22,7 @@ pub(super) async fn shell<B>(
     user_id: Uuid,
     handler_id: Uuid,
     backend: Arc<B>,
-    log: HandlerLog,
+    log: EventLogger<B>,
 ) where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {

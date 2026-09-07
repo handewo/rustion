@@ -33,6 +33,7 @@ use crate::asciinema::{
     player,
 };
 use crate::database::Uuid;
+use crate::server::event_log::EventKind;
 use log::{debug, warn};
 use tokio::sync::mpsc;
 
@@ -44,7 +45,6 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 const SCROLLBACK_LEN: usize = 1000;
-const LOG_TYPE: &str = "player";
 const HELP_TEXT: [&str; 2] = [
     "(Enter) play | (Esc) quit | (↑↓) select | (s) setting",
     "(+/-) zoom in/out | (PgUp/PgDn) page up/down",
@@ -140,7 +140,9 @@ where
         let _ = terminal.flush().await;
     });
 
-    (log)(LOG_TYPE.into(), "User login to player".to_string()).await;
+    log.scoped(EventKind::Player)
+        .record("User login to player")
+        .await;
     Ok(())
 }
 

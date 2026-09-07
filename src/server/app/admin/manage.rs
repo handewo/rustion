@@ -2,7 +2,7 @@ use super::common::*;
 use crate::database::Uuid;
 use crate::database::models::*;
 use crate::error::Error;
-use crate::server::HandlerLog;
+use crate::server::event_log::{EventKind, EventLogger};
 use crate::server::widgets::{
     AdminTable, Colors, DisplayMode, FieldsToArray, Message, TableData as TD, centered_area,
     common::*, render_confirm_dialog, render_message_popup,
@@ -31,7 +31,6 @@ mod secret;
 mod target;
 mod user;
 
-const LOG_TYPE: &str = "manage";
 const HELP_TEXT: [&str; 2] = [
     "(a) add | (e) edit | (d) delete | (Esc) quit | (↑↓←→) move around",
     "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
@@ -48,7 +47,7 @@ pub(super) async fn manage<B>(
     user_id: Uuid,
     handler_id: Uuid,
     backend: Arc<B>,
-    log: HandlerLog,
+    log: EventLogger<B>,
 ) -> Result<(), Error>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
@@ -168,7 +167,7 @@ where
     admin_id: Uuid,
     editor: Editor<B>,
     message: Option<Message>,
-    log: HandlerLog,
+    log: EventLogger<B>,
     tab_scroll_offset: usize,
 }
 
@@ -176,7 +175,7 @@ impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    async fn new(backend: Arc<B>, admin_id: Uuid, handler_id: Uuid, log: HandlerLog) -> Self {
+    async fn new(backend: Arc<B>, admin_id: Uuid, handler_id: Uuid, log: EventLogger<B>) -> Self {
         let data = TableData::Users(
             match backend.db_repository().list_users_with_role(false).await {
                 Ok(d) => d,
@@ -200,7 +199,7 @@ where
             admin_id,
             editor: Editor::None,
             message: None,
-            log,
+            log: log.scoped(EventKind::Manage),
             tab_scroll_offset: 0,
         }
     }
@@ -386,11 +385,9 @@ where
                         "[{}] User '{}({})' deleted by admin_id={}",
                         self.handler_id, u.username, u.id, self.admin_id
                     );
-                    (self.log)(
-                        LOG_TYPE.into(),
-                        format!("User '{}({})' deleted", u.username, u.id),
-                    )
-                    .await;
+                    self.log
+                        .record(format!("User '{}({})' deleted", u.username, u.id))
+                        .await;
                     self.message = Some(Message::Success(vec!["User deleted".into()]));
                     self.refresh_data().await;
                 }
@@ -412,11 +409,9 @@ where
                         "[{}] Target '{}({})' deleted by admin_id={}",
                         self.handler_id, t.name, t.id, self.admin_id
                     );
-                    (self.log)(
-                        LOG_TYPE.into(),
-                        format!("Target '{}({})' deleted", t.name, t.id),
-                    )
-                    .await;
+                    self.log
+                        .record(format!("Target '{}({})' deleted", t.name, t.id))
+                        .await;
                     self.message = Some(Message::Success(vec!["Target deleted".into()]));
                     self.refresh_data().await;
                 }
@@ -438,11 +433,9 @@ where
                         "[{}] Secret '{}({})' deleted by admin_id={}",
                         self.handler_id, s.name, s.id, self.admin_id
                     );
-                    (self.log)(
-                        LOG_TYPE.into(),
-                        format!("Secret '{}({})' deleted", s.name, s.id),
-                    )
-                    .await;
+                    self.log
+                        .record(format!("Secret '{}({})' deleted", s.name, s.id))
+                        .await;
                     self.message = Some(Message::Success(vec!["Secret deleted".into()]));
                     self.refresh_data().await;
                 }
@@ -468,11 +461,9 @@ where
                         "[{}] Permission '({})' deleted by admin_id={}",
                         self.handler_id, p.rule.id, self.admin_id
                     );
-                    (self.log)(
-                        LOG_TYPE.into(),
-                        format!("Permission '({})' deleted", p.rule.id),
-                    )
-                    .await;
+                    self.log
+                        .record(format!("Permission '({})' deleted", p.rule.id))
+                        .await;
                     self.message = Some(Message::Success(vec!["Permission deleted".into()]));
                     self.refresh_data().await;
                 }
@@ -494,11 +485,9 @@ where
                         "[{}] Casbin name '{}({})' deleted by admin_id={}",
                         self.handler_id, c.name, c.id, self.admin_id
                     );
-                    (self.log)(
-                        LOG_TYPE.into(),
-                        format!("Casbin name '{}({})' deleted", c.name, c.id),
-                    )
-                    .await;
+                    self.log
+                        .record(format!("Casbin name '{}({})' deleted", c.name, c.id))
+                        .await;
                     self.message = Some(Message::Success(vec!["Group deleted".into()]));
                     self.refresh_data().await;
                 }
@@ -731,11 +720,9 @@ where
                             "[{}] User '{}({})' {} by admin_id={}",
                             self.handler_id, user.username, user.id, action, self.admin_id
                         );
-                        (self.log)(
-                            LOG_TYPE.into(),
-                            format!("User '{}({})' {}", user.username, user.id, action),
-                        )
-                        .await;
+                        self.log
+                            .record(format!("User '{}({})' {}", user.username, user.id, action))
+                            .await;
                         let mut msg = vec![format!("User {}", action)];
                         if !password.is_empty() {
                             msg.push(format!("New password: {}", password));
@@ -788,11 +775,12 @@ where
                             "[{}] Target '{}({})' {} by admin_id={}",
                             self.handler_id, target.name, target.id, action, self.admin_id
                         );
-                        (self.log)(
-                            LOG_TYPE.into(),
-                            format!("Target '{}({})' {}", target.name, target.id, action),
-                        )
-                        .await;
+                        self.log
+                            .record(format!(
+                                "Target '{}({})' {}",
+                                target.name, target.id, action
+                            ))
+                            .await;
                         let msg = vec![format!("Target {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
@@ -841,11 +829,12 @@ where
                             "[{}] Secret '{}({})' {} by admin_id={}",
                             self.handler_id, secret.name, secret.id, action, self.admin_id
                         );
-                        (self.log)(
-                            LOG_TYPE.into(),
-                            format!("Secret '{}({})' {}", secret.name, secret.id, action),
-                        )
-                        .await;
+                        self.log
+                            .record(format!(
+                                "Secret '{}({})' {}",
+                                secret.name, secret.id, action
+                            ))
+                            .await;
                         let msg = vec![format!("Secret {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
@@ -896,11 +885,9 @@ where
                             "[{}] Permission '({})' {} by admin_id={}",
                             self.handler_id, rule.id, action, self.admin_id
                         );
-                        (self.log)(
-                            LOG_TYPE.into(),
-                            format!("Permission '({})' {}", rule.id, action),
-                        )
-                        .await;
+                        self.log
+                            .record(format!("Permission '({})' {}", rule.id, action))
+                            .await;
                         let msg = vec![format!("Permission {}", action)];
                         self.message = Some(Message::Success(msg));
                     }
@@ -963,14 +950,12 @@ where
                             action,
                             self.admin_id
                         );
-                        (self.log)(
-                            LOG_TYPE.into(),
-                            format!(
+                        self.log
+                            .record(format!(
                                 "Casbin name '{}({})' {}",
                                 casbin_name.name, casbin_name.id, action
-                            ),
-                        )
-                        .await;
+                            ))
+                            .await;
                         let msg = vec![format!("Group {}", action)];
                         self.message = Some(Message::Success(msg));
                     }

@@ -78,6 +78,9 @@ pub enum ServerError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
+    #[error("Event log doesn't init")]
+    EventLogNotInit,
+
     #[error("User doesn't init")]
     UserNotInit,
 

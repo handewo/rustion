@@ -1,6 +1,7 @@
 use super::HandlerBackend;
 use super::app::{self, Application, NextApplication};
 use super::error::ServerError;
+use super::event_log::{EventKind, EventLogger};
 use super::tty;
 use crate::database::Uuid;
 use crate::database::models::User;
@@ -8,7 +9,6 @@ use crate::error::Error;
 use crate::server::app::{AppParams, connect_target::ConnectTarget};
 use crate::server::extend_policy::ExtendPolicyReq;
 use bytes::Bytes;
-use futures::future::FutureExt;
 use log::{debug, info, trace, warn};
 use russh::keys::ssh_key::PublicKey;
 use russh::server as ru_server;
@@ -18,8 +18,6 @@ use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
-static LOG_TYPE: &str = "server";
-
 pub struct BastionHandler<B: 'static + HandlerBackend + Send + Sync> {
     // Unique ID for each connection.
     id: Uuid,
@@ -28,7 +26,9 @@ pub struct BastionHandler<B: 'static + HandlerBackend + Send + Sync> {
     client_ip: Option<std::net::SocketAddr>,
     channel_session: HashMap<ChannelId, ChannelSession<B>>,
     backend: Arc<B>,
-    log: super::HandlerLog,
+    /// `None` until authentication succeeds: an audit event needs a user to
+    /// attribute it to. Unauthenticated connections audit nothing.
+    log: Option<EventLogger<B>>,
     auth_attempts_per_conn: u32,
     max_auth_attempts_per_conn: u32,
     send_app_msg: Sender<(ChannelId, NextApplication)>,
@@ -70,7 +70,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     let app = Box::new(
                         app::connect_target::ConnectTarget::new(
                             self.id,
-                            self.log.clone(),
+                            self.event_log()?,
                             user,
                             self.client_ip.map(|v| v.ip()),
                             self.backend.clone(),
@@ -118,24 +118,22 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             return Ok(ru_server::Auth::reject());
         }
 
-        match self.user.as_ref() {
-            Some(u) => {
-                self.log = self.handler_log(u.id);
-                if !u.is_active {
-                    return Ok(ru_server::Auth::reject());
-                }
-                if u.verify_password(password) {
-                    self.backend
-                        .clear_auth_attempts(self.client_ip, u.username.clone())
-                        .await;
-                    (self.log)(LOG_TYPE.into(), "login successfully by password".into()).await;
-                    return Ok(ru_server::Auth::Accept);
-                }
-            }
-            None => {
-                debug!("[{}] User {} doesn't exist", self.id, login_name);
-                return Ok(ru_server::Auth::reject());
-            }
+        let Some(user) = self.user.as_ref() else {
+            debug!("[{}] User {} doesn't exist", self.id, login_name);
+            return Ok(ru_server::Auth::reject());
+        };
+        let log = self.init_event_log(user.id);
+
+        if !user.is_active {
+            return Ok(ru_server::Auth::reject());
+        }
+        if user.verify_password(password) {
+            self.backend
+                .clear_auth_attempts(self.client_ip, user.username.clone())
+                .await;
+            log.record("login successfully by password").await;
+            self.log = Some(log);
+            return Ok(ru_server::Auth::Accept);
         }
         Ok(ru_server::Auth::reject())
     }
@@ -151,24 +149,22 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             return Ok(ru_server::Auth::reject());
         }
 
-        match self.user.as_ref() {
-            Some(u) => {
-                self.log = self.handler_log(u.id);
-                if !u.is_active {
-                    return Ok(ru_server::Auth::reject());
-                }
-                if u.verify_authorized_keys(public_key) {
-                    self.backend
-                        .clear_auth_attempts(self.client_ip, u.username.clone())
-                        .await;
-                    (self.log)(LOG_TYPE.into(), "login successfully by public key".into()).await;
-                    return Ok(ru_server::Auth::Accept);
-                }
-            }
-            None => {
-                debug!("[{}] User {} doesn't exist", self.id, login_name);
-                return Ok(ru_server::Auth::reject());
-            }
+        let Some(user) = self.user.as_ref() else {
+            debug!("[{}] User {} doesn't exist", self.id, login_name);
+            return Ok(ru_server::Auth::reject());
+        };
+        let log = self.init_event_log(user.id);
+
+        if !user.is_active {
+            return Ok(ru_server::Auth::reject());
+        }
+        if user.verify_authorized_keys(public_key) {
+            self.backend
+                .clear_auth_attempts(self.client_ip, user.username.clone())
+                .await;
+            log.record("login successfully by public key").await;
+            self.log = Some(log);
+            return Ok(ru_server::Auth::Accept);
         }
         Ok(ru_server::Auth::reject())
     }
@@ -357,7 +353,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 let mut app = Box::new(
                     app::connect_target::ConnectTarget::new(
                         self.id,
-                        self.log.clone(),
+                        self.event_log()?,
                         user,
                         self.client_ip.map(|v| v.ip()),
                         self.backend.clone(),
@@ -543,6 +539,8 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         data: Self::Data,
         session: &mut ru_server::Session,
     ) -> Result<(), Self::Error> {
+        // Taken before the `&mut` borrow of `channel_session` below.
+        let log = self.event_log()?;
         let channel_session = self
             .channel_session
             .get_mut(&data.0)
@@ -556,7 +554,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     self.user.as_ref().ok_or(ServerError::UserNotInit)?.id,
                     self.backend.clone(),
                     self.client_ip.map(|v| v.ip()),
-                    self.log.clone(),
+                    log,
                     target,
                     target_secret_name,
                 )?);
@@ -594,12 +592,6 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
         let (send_app_msg, recv_app_msg) = channel(1);
         let uuid = Uuid::new_v4();
         trace!("[{}] create new handler", uuid);
-        let log = Arc::new(move |_, _| {
-            async move {
-                warn!("[{}] handler log hasn't initialized", uuid);
-            }
-            .boxed()
-        });
         BastionHandler {
             id: uuid,
             user: None,
@@ -607,7 +599,7 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
             client_ip,
             channel_session: HashMap::with_capacity(1),
             backend,
-            log,
+            log: None,
             auth_attempts_per_conn: 0,
             max_auth_attempts_per_conn,
             send_app_msg,
@@ -615,17 +607,16 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
         }
     }
 
-    fn handler_log(&self, user_id: Uuid) -> super::HandlerLog {
-        let cid = self.id;
-        let backend = self.backend.clone();
+    /// The connection's audit logger. Errors before authentication, which is
+    /// unreachable for anything downstream of a channel request.
+    fn event_log(&self) -> Result<EventLogger<B>, Error> {
+        self.log.clone().ok_or(ServerError::EventLogNotInit.into())
+    }
 
-        Arc::new(move |log_type: String, detail: String| {
-            let backend = backend.clone();
-            async move {
-                backend.insert_log(cid, user_id, log_type, detail).await;
-            }
-            .boxed()
-        })
+    /// Bind the audit logger to the now-known user, and hand back a clone for
+    /// the caller to log through.
+    fn init_event_log(&self, user_id: Uuid) -> EventLogger<B> {
+        EventLogger::new(self.backend.clone(), self.id, user_id, EventKind::Server)
     }
 
     async fn init_login(&mut self, login_name: &str) -> Result<(), Error> {
@@ -675,7 +666,7 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
             backend: self.backend.clone(),
             tty,
             recv_from_tty,
-            log: self.log.clone(),
+            log: self.event_log()?,
             app_sender: self.send_app_msg.clone(),
         })
     }
@@ -723,10 +714,12 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
 
 impl<B: 'static + HandlerBackend + Send + Sync> Drop for BastionHandler<B> {
     fn drop(&mut self) {
-        let log = self.log.clone();
-        tokio::spawn(async move {
-            log(LOG_TYPE.into(), "logout".into()).await;
-        });
+        // Only authenticated connections have a logout to record.
+        if let Some(log) = self.log.clone() {
+            tokio::spawn(async move {
+                log.record("logout").await;
+            });
+        }
         trace!("[{}] drop BastionHandler", self.id);
     }
 }

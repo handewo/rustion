@@ -4,6 +4,7 @@ pub mod bastion_server;
 mod casbin;
 mod connection_pool;
 pub mod error;
+mod event_log;
 mod extend_policy;
 pub mod init_service;
 mod test;
@@ -18,14 +19,11 @@ use crate::database::Uuid;
 use crate::database::entity::user;
 use crate::database::models::{GroupType, Target, TargetSecretName, User};
 use crate::error::Error;
-use futures::future::BoxFuture;
+use event_log::Event;
 use petgraph::stable_graph::StableDiGraph;
 use russh::client as ru_client;
 use std::future::Future;
 use std::sync::Arc;
-
-//TODO: Refactor log method
-type HandlerLog = Arc<dyn Fn(String, String) -> BoxFuture<'static, ()> + Send + Sync>;
 
 //TODO: Remove uneccessary sql query
 pub(super) trait HandlerBackend: Send + Clone {
@@ -48,13 +46,9 @@ pub(super) trait HandlerBackend: Send + Clone {
         active_only: bool,
     ) -> impl Future<Output = Result<Vec<TargetSecretName>, Error>> + Send;
 
-    fn insert_log(
-        &self,
-        connection_id: Uuid,
-        user_id: Uuid,
-        log_type: String,
-        detail: String,
-    ) -> impl Future<Output = ()> + Send;
+    /// Best-effort audit write; failures are reported, not returned. Call
+    /// sites go through [`EventLogger`] rather than here.
+    fn insert_log(&self, event: Event) -> impl Future<Output = ()> + Send;
 
     fn clear_auth_attempts(
         &self,
