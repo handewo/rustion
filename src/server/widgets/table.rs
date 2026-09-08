@@ -493,7 +493,7 @@ impl FieldsToArray for SessionRecording {
                     self.started_at.to_string(),
                     self.ended_at.map(|t| t.to_string()).unwrap_or_default(),
                     self.connection_id.to_string(),
-                    self.status.clone(),
+                    self.status.to_string(),
                 ]
             }
             DisplayMode::Manage => {
@@ -559,7 +559,7 @@ impl FieldsToArray for RecordingView {
             self.ended_at
                 .map(super::common::format_timestamp)
                 .unwrap_or_default(),
-            self.status.clone(),
+            self.status.to_string(),
         ]
     }
 }

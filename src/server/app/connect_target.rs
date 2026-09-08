@@ -361,7 +361,7 @@ where
                         secret_id: Set(self.target_secret_name.secret_id),
                         file_path: Set(file_path),
                         connection_id: Set(self.handler_id),
-                        status: Set(session_recording::STATUS_ACTIVE.into()),
+                        status: Set(session_recording::RecordingStatus::Active),
                         ..Default::default()
                     })
                     .await
@@ -526,7 +526,7 @@ where
                     .update_session_recording(session_recording_entity::ActiveModel {
                         id: Unchanged(id),
                         ended_at: Set(Some(chrono::Utc::now().timestamp_millis())),
-                        status: Set(session_recording::STATUS_COMPLETED.into()),
+                        status: Set(session_recording::RecordingStatus::Completed),
                         ..Default::default()
                     })
                     .await

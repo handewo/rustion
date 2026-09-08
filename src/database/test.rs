@@ -14,7 +14,7 @@ use crate::database::entity::{
 };
 use crate::database::error::DatabaseError;
 use crate::database::fixture::{self, *};
-use crate::database::models::{GroupType, NamePtype, Ptype, SessionRecording};
+use crate::database::models::{GroupType, NamePtype, Ptype, RecordingStatus, SessionRecording};
 use crate::error::Error;
 use sea_orm::ActiveValue::{NotSet, Set, Unchanged};
 use std::collections::{HashMap, HashSet};
@@ -1420,7 +1420,7 @@ async fn recordings_open_close_and_list_per_user_and_target() {
                 )),
                 ended_at: Set(None),
                 connection_id: Set(Uuid::now_v7()),
-                status: Set(crate::database::models::session_recording::STATUS_ACTIVE.to_string()),
+                status: Set(RecordingStatus::Active),
                 ..Default::default()
             })
             .await
@@ -1443,14 +1443,14 @@ async fn recordings_open_close_and_list_per_user_and_target() {
         .update_session_recording(session_recording::ActiveModel {
             id: Unchanged(ids[0]),
             ended_at: Set(Some(started + 5_000)),
-            status: Set(crate::database::models::session_recording::STATUS_COMPLETED.to_string()),
+            status: Set(RecordingStatus::Completed),
             ..Default::default()
         })
         .await
         .unwrap();
     assert_eq!(closed.ended_at, Some(started + 5_000));
     assert_eq!(closed.started_at, started, "started_at was restamped");
-    assert_eq!(closed.status, "completed");
+    assert_eq!(closed.status, RecordingStatus::Completed);
 
     assert_eq!(repo.list_session_recordings(None).await.unwrap().len(), 3);
     assert_eq!(
@@ -1502,7 +1502,7 @@ async fn recordings_open_close_and_list_per_user_and_target() {
     let labels: HashSet<&str> = view.iter().map(|v| v.target_secret.as_str()).collect();
     assert_eq!(labels, HashSet::from(["mon@mars1:22", "root@sun:2222"]));
     let first = view.iter().find(|v| v.id == ids[0]).unwrap();
-    assert_eq!(first.status, "completed");
+    assert_eq!(first.status, RecordingStatus::Completed);
     assert_eq!(first.generate_path(), format!("{}.cast", ids[0]));
 
     // A recording outlives its target: the row stays, the label goes empty.
@@ -1855,7 +1855,7 @@ async fn recording_round_trips_every_column() {
         file_path: Set("nested/dir/recording.cast".to_string()),
         ended_at: Set(Some(1)),
         connection_id: Set(connection),
-        status: Set("active".to_string()),
+        status: Set(RecordingStatus::Active),
         ..Default::default()
     })
     .await
@@ -1884,5 +1884,64 @@ async fn recording_round_trips_every_column() {
     assert_ne!(started_at, 0, "create stamps started_at");
     assert_eq!(ended_at, Some(1));
     assert_eq!(connection_id, connection);
-    assert_eq!(status, "active");
+    assert_eq!(status, RecordingStatus::Active);
+}
+
+/// `RecordingStatus` reaches the column as its `num_value`, not as a name.
+///
+/// Nothing else checks this: every other assertion reads back a value this same
+/// code wrote, so renumbering the variants would round-trip happily while
+/// reinterpreting every stored row. Reading the column raw is the only way to
+/// catch it. The unit test beside the enum pins the numbers themselves.
+#[tokio::test]
+async fn recording_status_is_stored_as_an_integer() {
+    use sea_orm::{FromQueryResult, Statement};
+
+    let db = fixture::seed().await;
+    let repo = db.repo();
+    let f = &db.fixture;
+
+    let id = Uuid::now_v7();
+    repo.create_session_recording(session_recording::ActiveModel {
+        id: Set(id),
+        user_id: Set(f.user(MIKE)),
+        target_id: Set(f.target("venus3")),
+        secret_id: Set(f.secret(S_DEV)),
+        file_path: Set(crate::database::models::session_recording::generate_path(
+            id,
+        )),
+        connection_id: Set(Uuid::now_v7()),
+        status: Set(RecordingStatus::Active),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+
+    // A second connection to the same file: the repository deliberately offers no
+    // way to read a column outside its model.
+    let conn = sea_orm::Database::connect(&db.url).await.unwrap();
+
+    #[derive(FromQueryResult)]
+    struct Raw {
+        status: i32,
+        kind: String,
+    }
+
+    // `typeof` is SQLite's, which is the only backend the fixture runs on. It
+    // distinguishes a stored 0 from a stored "0" — the point of the assertion.
+    let raw = Raw::find_by_statement(Statement::from_string(
+        conn.get_database_backend(),
+        "SELECT status, typeof(status) AS kind FROM session_recording LIMIT 1",
+    ))
+    .one(&conn)
+    .await
+    .unwrap()
+    .expect("the recording");
+
+    assert_eq!(raw.kind, "integer", "status is not stored as an integer");
+    assert_eq!(raw.status, 0, "Active's discriminant changed");
+
+    // The names live on for display only, and are no longer what is stored.
+    assert_eq!(RecordingStatus::Active.as_str(), "active");
+    assert_eq!(RecordingStatus::Completed.as_str(), "completed");
 }

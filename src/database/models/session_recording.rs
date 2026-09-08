@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub(crate) use crate::database::entity::session_recording::RecordingStatus;
+
 /// Session recording metadata, as read back from storage.
 ///
 /// Read-only, like [`super::Log`]: writes go through the repository as an
@@ -15,15 +17,8 @@ pub struct SessionRecording {
     pub started_at: i64,
     pub ended_at: Option<i64>,
     pub connection_id: Uuid,
-    //TODO:Using enum instead
-    pub status: String,
+    pub status: RecordingStatus,
 }
-
-/// The status of a freshly opened recording. `connect_target` flips it to
-/// `"completed"` when the channel closes.
-pub const STATUS_ACTIVE: &str = "active";
-/// The status of a recording whose channel has closed.
-pub const STATUS_COMPLETED: &str = "completed";
 
 pub fn generate_path(id: Uuid) -> String {
     format!("{}.cast", id)
@@ -35,7 +30,7 @@ pub struct RecordingView {
     pub target_secret: String,
     pub started_at: i64,
     pub ended_at: Option<i64>,
-    pub status: String,
+    pub status: RecordingStatus,
 }
 
 impl RecordingView {

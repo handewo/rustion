@@ -30,8 +30,8 @@ use crate::database::entity::{
     casbin_name, casbin_rule, secret, session_recording, target, target_secret, user,
 };
 use crate::database::models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, ObjectGroup, PermissionPolicy, RecordingView, Role,
-    Secret, SecretInfo, Target, TargetSecretName, UserWithRole,
+    CasbinName, CasbinRule, CasbinRuleGroup, ObjectGroup, PermissionPolicy, RecordingStatus,
+    RecordingView, Role, Secret, SecretInfo, Target, TargetSecretName, UserWithRole,
 };
 use crate::error::Error;
 
@@ -658,7 +658,7 @@ pub(super) async fn list_recording_view_for_user(
         id: Uuid,
         started_at: i64,
         ended_at: Option<i64>,
-        status: String,
+        status: RecordingStatus,
         secret_user: Option<String>,
         target_name: Option<String>,
         port: Option<i32>,
