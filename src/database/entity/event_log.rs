@@ -1,4 +1,5 @@
 use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
 
 /// Records a user's successful operations.
 ///
@@ -38,11 +39,153 @@ pub struct Model {
     pub connection_id: Uuid,
     #[sea_orm(column_type = "String(StringLen::N(512))")]
     pub detail: String,
-    pub log_type: String,
+    /// No `column_type` here: `ValueType::column_type()` delegates to
+    /// [`EventKind`]'s `db_type`, so the enum is the only place the column shape
+    /// is declared. Note this is now an integer column — see the enum.
+    pub log_type: EventKind,
     pub user_id: Uuid,
+}
+
+/// Which subsystem an event came from — the `log_type` column.
+///
+/// One variant per module that audits. Being a closed set means the vocabulary is
+/// greppable, a typo is a compile error, and a filter UI can enumerate it.
+///
+/// Stored as a small integer, matching [`super::casbin_rule::Ptype`] and
+/// [`super::session_recording::RecordingStatus`]. The `num_value`s are the on-disk
+/// format and must never be renumbered — a database written by this version reads
+/// its `log_type` column back through these exact discriminants.
+///
+/// This is a change of storage: the column previously held these names as text, so
+/// an existing database needs its values rewritten and the column retyped. There is
+/// no migration runner in this tree and
+/// [`crate::database::DatabaseRepository::initialize`] only creates missing tables,
+/// so that is a manual step — `migrations/004-event-log-type-integer.sql`. Until it
+/// is applied `log_type` fails to decode, and because the failure is per-query
+/// rather than per-row, one stale row empties the whole admin log view.
+///
+/// Serde deliberately stays on the names: a kind is spelled as a word everywhere
+/// outside the column, and that is a separate concern from how it is stored.
+///
+/// Declared here rather than in `server::event_log` — where it began life as a
+/// server-side enum mapped to strings at the insert boundary — because it is now
+/// the column's storage declaration. `server::event_log` re-exports it, so call
+/// sites still name it `EventKind`.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
+)]
+#[sea_orm(rs_type = "i32", db_type = "Integer")]
+pub enum EventKind {
+    /// Connection lifecycle: authentication and logout.
+    #[sea_orm(num_value = 0)]
+    #[serde(rename = "server")]
+    Server,
+    /// Entering the admin TUI.
+    #[sea_orm(num_value = 1)]
+    #[serde(rename = "admin")]
+    Admin,
+    /// CRUD inside the admin TUI.
+    #[sea_orm(num_value = 2)]
+    #[serde(rename = "manage")]
+    Manage,
+    /// Target connections and channel requests.
+    #[sea_orm(num_value = 3)]
+    #[serde(rename = "target")]
+    Target,
+    /// Forced and voluntary password changes.
+    #[sea_orm(num_value = 4)]
+    #[serde(rename = "password")]
+    Password,
+    /// Entering the session player.
+    #[sea_orm(num_value = 5)]
+    #[serde(rename = "player")]
+    Player,
+}
+
+impl EventKind {
+    /// The human-facing name, as used in the admin log view. This is *not* the
+    /// stored representation — see `num_value` above. These are the same strings
+    /// the column used to hold, which is what
+    /// `migrations/004-event-log-type-integer.sql` maps from.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Server => "server",
+            Self::Admin => "admin",
+            Self::Manage => "manage",
+            Self::Target => "target",
+            Self::Password => "password",
+            Self::Player => "player",
+        }
+    }
+}
+
+impl std::fmt::Display for EventKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{ActiveEnum, Iterable};
+
+    /// The `num_value`s are the on-disk format. Renumbering them silently
+    /// reinterprets every existing row, so assert them literally — this test is
+    /// meant to fail loudly if anyone reorders the variants.
+    #[test]
+    fn event_kind_stored_discriminants_are_stable() {
+        for (want, k) in [
+            (0, EventKind::Server),
+            (1, EventKind::Admin),
+            (2, EventKind::Manage),
+            (3, EventKind::Target),
+            (4, EventKind::Password),
+            (5, EventKind::Player),
+        ] {
+            assert_eq!(k.to_value(), want, "{k} changed its stored value");
+            assert_eq!(EventKind::try_from_value(&want).unwrap(), k);
+        }
+        assert_eq!(EventKind::iter().count(), 6, "a variant was added");
+    }
+
+    /// `as_str`, `Display` and the serde rename are three hand-written spellings of
+    /// one name. They are also the strings the column held before it was an
+    /// integer, and what migration 004 maps from — so pin them.
+    #[test]
+    fn event_kind_name_spellings_agree() {
+        for k in EventKind::iter() {
+            assert_eq!(k.to_string(), k.as_str(), "Display disagrees with as_str");
+            assert_eq!(
+                serde_json::to_string(&k).unwrap(),
+                format!("\"{}\"", k.as_str()),
+                "serde disagrees with as_str"
+            );
+            assert_eq!(
+                serde_json::from_str::<EventKind>(&format!("\"{}\"", k.as_str())).unwrap(),
+                k,
+                "serde does not round-trip"
+            );
+        }
+    }
+
+    /// A `log_type` outside the six known values is a corrupt row, not a default.
+    #[test]
+    fn event_kind_rejects_unknown_discriminant() {
+        assert!(EventKind::try_from_value(&6).is_err());
+        assert!(EventKind::try_from_value(&-1).is_err());
+    }
+
+    #[test]
+    fn event_kind_column_is_an_integer() {
+        assert_eq!(
+            EventKind::db_type().get_column_type(),
+            &sea_orm::ColumnType::Integer
+        );
+    }
+}

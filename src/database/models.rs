@@ -9,6 +9,7 @@ pub(crate) use casbin_rule::{
     CasbinName, CasbinRule, CasbinRuleGroup, GroupType, NamePtype, ObjectGroup, PermissionPolicy,
     Ptype, Role,
 };
+pub(crate) use event_log::EventKind;
 pub use event_log::EventLog;
 /// Only the tests reach `RecordingStatus` through here; `connect_target` names it
 /// via `session_recording::`, and the two model structs already re-export it.

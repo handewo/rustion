@@ -887,10 +887,12 @@ mod tests {
             .filter_map(|u| u.authorized_keys.as_ref())
             .count();
 
-        // `id` is excluded for the same reason as `ptype` below: a legacy row
-        // predates the surrogate key, so selecting it would assert the opposite of
-        // the intended change. The columns that were the old composite key still
-        // have to read, along with the widest legacy `detail` values.
+        // `id` and `log_type` are excluded for the same reason as `ptype` below: a
+        // legacy row predates the surrogate key and holds `log_type` as the text
+        // `'server'` rather than a discriminant, so selecting either would assert
+        // the opposite of the intended change. Both are what migrations 003 and 004
+        // are for. The columns that were the old composite key still have to read,
+        // along with the widest legacy `detail` values.
         let logs: Vec<(i64, Uuid, String)> = event_log::Entity::find()
             .select_only()
             .columns([
@@ -950,7 +952,8 @@ mod tests {
 
         eprintln!(
             "legacy read OK: {} users ({} with keys), {} targets, {} logs, {} rules, {} names \
-             (ptype excluded: needs migration to integer; event_log.id excluded: needs 003)",
+             (ptype excluded: needs migration to integer; event_log.id needs 003, \
+             event_log.log_type needs 004)",
             users.len(),
             keyed,
             targets.len(),

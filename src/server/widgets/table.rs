@@ -469,7 +469,7 @@ impl FieldsToArray for EventLog {
                 vec![
                     self.id.to_string(),
                     print_short_uuid(self.connection_id),
-                    self.log_type.clone(),
+                    self.log_type.to_string(),
                     print_short_uuid(self.user_id),
                     self.detail.clone(),
                     self.created_at.to_string(),

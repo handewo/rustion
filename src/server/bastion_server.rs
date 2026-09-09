@@ -612,7 +612,7 @@ impl super::HandlerBackend for BastionServer {
         let l = event_log::ActiveModel {
             connection_id: Set(event.connection_id),
             user_id: Set(event.user_id),
-            log_type: Set(event.kind.as_str().into()),
+            log_type: Set(event.kind),
             detail: Set(event.detail),
             ..Default::default()
         };

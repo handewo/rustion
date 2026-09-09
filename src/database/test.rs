@@ -15,7 +15,7 @@ use crate::database::entity::{
 use crate::database::error::DatabaseError;
 use crate::database::fixture::{self, *};
 use crate::database::models::{
-    EventLog, GroupType, NamePtype, Ptype, RecordingStatus, SessionRecording,
+    EventKind, EventLog, GroupType, NamePtype, Ptype, RecordingStatus, SessionRecording,
 };
 use crate::error::Error;
 use sea_orm::ActiveValue::{NotSet, Set, Unchanged};
@@ -1374,7 +1374,7 @@ async fn logs_are_appended_and_read_newest_first() {
         repo.insert_log(event_log::ActiveModel {
             connection_id: Set(connection),
             detail: Set(detail.to_string()),
-            log_type: Set("session".to_string()),
+            log_type: Set(EventKind::Target),
             user_id: Set(f.user(JOHN)),
             ..Default::default()
         })
@@ -1430,7 +1430,7 @@ async fn an_identical_event_is_appended_not_rejected() {
         created_at: Set(1_700_000_000_000),
         connection_id: Set(connection),
         detail: Set("opened a shell".to_string()),
-        log_type: Set("session".to_string()),
+        log_type: Set(EventKind::Target),
         user_id: Set(f.user(JOHN)),
         ..Default::default()
     };
@@ -1446,7 +1446,7 @@ async fn an_identical_event_is_appended_not_rejected() {
     repo.insert_log(event_log::ActiveModel {
         connection_id: Set(connection),
         detail: Set("disconnected".to_string()),
-        log_type: Set("session".to_string()),
+        log_type: Set(EventKind::Target),
         user_id: Set(f.user(JOHN)),
         ..Default::default()
     })
@@ -2044,4 +2044,55 @@ async fn recording_status_is_stored_as_an_integer() {
     // The names live on for display only, and are no longer what is stored.
     assert_eq!(RecordingStatus::Active.as_str(), "active");
     assert_eq!(RecordingStatus::Completed.as_str(), "completed");
+}
+
+/// `log_type` holds the discriminant, not the name — the same assertion as
+/// `recording_status_is_stored_as_an_integer` makes for `status`.
+#[tokio::test]
+async fn log_type_is_stored_as_an_integer() {
+    use sea_orm::{FromQueryResult, Statement};
+
+    let db = fixture::seed().await;
+    let repo = db.repo();
+    let f = &db.fixture;
+
+    repo.insert_log(event_log::ActiveModel {
+        connection_id: Set(Uuid::now_v7()),
+        detail: Set("entered the admin TUI".to_string()),
+        log_type: Set(EventKind::Admin),
+        user_id: Set(f.user(JOHN)),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+
+    // A second connection to the same file: the repository deliberately offers no
+    // way to read a column outside its model.
+    let conn = sea_orm::Database::connect(&db.url).await.unwrap();
+
+    #[derive(FromQueryResult)]
+    struct Raw {
+        log_type: i32,
+        kind: String,
+    }
+
+    // `typeof` is SQLite's, which is the only backend the fixture runs on. It
+    // distinguishes a stored 1 from a stored "1" — the point of the assertion.
+    let raw = Raw::find_by_statement(Statement::from_string(
+        conn.get_database_backend(),
+        "SELECT log_type, typeof(log_type) AS kind FROM event_log LIMIT 1",
+    ))
+    .one(&conn)
+    .await
+    .unwrap()
+    .expect("the log row");
+
+    assert_eq!(raw.kind, "integer", "log_type is not stored as an integer");
+    assert_eq!(raw.log_type, 1, "Admin's discriminant changed");
+
+    // And it decodes back to the variant, not to the name.
+    let logs = repo.list_logs().await.unwrap();
+    assert_eq!(logs.len(), 1);
+    assert_eq!(logs[0].log_type, EventKind::Admin);
+    assert_eq!(logs[0].log_type.as_str(), "admin");
 }

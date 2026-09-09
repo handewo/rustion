@@ -18,48 +18,13 @@
 use crate::database::Uuid;
 use std::sync::Arc;
 
-/// Which subsystem an event came from — the `log_type` column.
+/// Which subsystem an event came from — one variant per module that audits.
 ///
-/// One variant per module that audits, replacing the per-module
-/// `const LOG_TYPE: &str` these used to be. Being a closed set means the
-/// vocabulary is greppable, a typo is a compile error, and a filter UI can
-/// enumerate it.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum EventKind {
-    /// Connection lifecycle: authentication and logout.
-    Server,
-    /// Entering the admin TUI.
-    Admin,
-    /// CRUD inside the admin TUI.
-    Manage,
-    /// Target connections and channel requests.
-    Target,
-    /// Forced and voluntary password changes.
-    Password,
-    /// Entering the session player.
-    Player,
-}
-
-impl EventKind {
-    /// The stored `log_type` value. Existing rows depend on these strings, so
-    /// they are not derived from the variant names.
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Server => "server",
-            Self::Admin => "admin",
-            Self::Manage => "manage",
-            Self::Target => "target",
-            Self::Password => "password",
-            Self::Player => "player",
-        }
-    }
-}
-
-impl std::fmt::Display for EventKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+/// Declared in `entity::event_log`, not here: it is the storage type of the
+/// `log_type` column, stored as an integer, and the entity is where the column's
+/// shape is declared. Re-exported so the call sites in this crate's server modules
+/// read as `EventKind` rather than reaching into `database::entity`.
+pub(crate) use crate::database::models::EventKind;
 
 /// One audit event, fully identified. `created_at` is stamped by the repository
 /// at insert time.

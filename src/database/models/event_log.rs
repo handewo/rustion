@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub(crate) use crate::database::entity::event_log::EventKind;
+
 /// A user's successful operation, as read back for the admin log view.
 ///
 /// Read-only: writes go through `insert_log` as an
@@ -14,7 +16,7 @@ pub struct EventLog {
     /// columns repeat freely.
     pub id: i64,
     pub connection_id: Uuid,
-    pub log_type: String,
+    pub log_type: EventKind,
     pub user_id: Uuid,
     pub detail: String,
     pub created_at: i64,
