@@ -20,7 +20,7 @@ use crate::database::entity::{
 };
 use crate::database::error::DatabaseError;
 use crate::database::models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, GroupType, Log, NamePtype, ObjectGroup,
+    CasbinName, CasbinRule, CasbinRuleGroup, EventLog, GroupType, NamePtype, ObjectGroup,
     PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo, SessionRecording, Target,
     TargetInfo, TargetSecret, TargetSecretName, User, UserWithRole,
 };
@@ -656,17 +656,25 @@ impl DatabaseRepository for SeaOrmRepository {
 
     async fn insert_log(&self, mut log: event_log::ActiveModel) -> Result<(), Error> {
         log.created_at = Set(Utc::now().timestamp_millis());
-        log.insert(&self.db).await?;
+        // `exec`, not `ActiveModel::insert`: the row is discarded, and with a
+        // generated key `insert` would follow the write with a `SELECT` to
+        // reconstruct a model nobody reads (SQLite and MySQL have no `RETURNING`
+        // here). `id` is left `NotSet` so the database assigns it.
+        event_log::Entity::insert(log).exec(&self.db).await?;
         Ok(())
     }
 
-    async fn list_logs(&self) -> Result<Vec<Log>, Error> {
+    async fn list_logs(&self) -> Result<Vec<EventLog>, Error> {
         Ok(event_log::Entity::find()
+            // `id` breaks ties: `created_at` is milliseconds, and a burst on one
+            // connection shares a stamp. Descending id puts the later write first,
+            // which is the order they were appended in.
             .order_by_desc(event_log::Column::CreatedAt)
+            .order_by_desc(event_log::Column::Id)
             .all(&self.db)
             .await?
             .into_iter()
-            .map(Log::from)
+            .map(EventLog::from)
             .collect())
     }
 
@@ -833,7 +841,7 @@ mod tests {
     /// Reads a database written by the previous sqlx implementation and checks
     /// the storage-level assumptions this refactor depends on: UUIDs held as
     /// BLOB decode, `port` reads back in range, `authorized_keys` still parses
-    /// as JSON-in-TEXT, and the composite-PK `logs` table is queryable.
+    /// as JSON-in-TEXT, and `event_log`'s pre-surrogate-key columns are queryable.
     ///
     /// Skipped unless `RUSTION_LEGACY_DB` points at such a file, so the normal
     /// test run stays self-contained:
@@ -879,8 +887,25 @@ mod tests {
             .filter_map(|u| u.authorized_keys.as_ref())
             .count();
 
-        // Composite primary key, and the widest legacy `detail` values.
-        let logs = event_log::Entity::find().all(&db).await.expect("read logs");
+        // `id` is excluded for the same reason as `ptype` below: a legacy row
+        // predates the surrogate key, so selecting it would assert the opposite of
+        // the intended change. The columns that were the old composite key still
+        // have to read, along with the widest legacy `detail` values.
+        let logs: Vec<(i64, Uuid, String)> = event_log::Entity::find()
+            .select_only()
+            .columns([
+                event_log::Column::CreatedAt,
+                event_log::Column::ConnectionId,
+                event_log::Column::Detail,
+            ])
+            .into_tuple()
+            .all(&db)
+            .await
+            .expect("read logs");
+        for (created_at, connection_id, _) in &logs {
+            assert!(*created_at > 0, "log created_at decoded as {created_at}");
+            assert!(!connection_id.is_nil(), "log connection_id decoded as nil");
+        }
 
         // `ptype` is deliberately excluded from both casbin reads below.
         //
@@ -925,7 +950,7 @@ mod tests {
 
         eprintln!(
             "legacy read OK: {} users ({} with keys), {} targets, {} logs, {} rules, {} names \
-             (ptype excluded: needs migration to integer)",
+             (ptype excluded: needs migration to integer; event_log.id excluded: needs 003)",
             users.len(),
             keyed,
             targets.len(),

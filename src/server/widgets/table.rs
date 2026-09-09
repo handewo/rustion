@@ -462,14 +462,15 @@ impl FieldsToArray for CasbinRule {
     }
 }
 
-impl FieldsToArray for Log {
+impl FieldsToArray for EventLog {
     fn to_array(&self, mode: DisplayMode) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 vec![
-                    self.connection_id.to_string(),
+                    self.id.to_string(),
+                    print_short_uuid(self.connection_id),
                     self.log_type.clone(),
-                    self.user_id.to_string(),
+                    print_short_uuid(self.user_id),
                     self.detail.clone(),
                     self.created_at.to_string(),
                 ]

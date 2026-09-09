@@ -26,7 +26,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, GroupType, Log, NamePtype, ObjectGroup,
+    CasbinName, CasbinRule, CasbinRuleGroup, EventLog, GroupType, NamePtype, ObjectGroup,
     PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo, SessionRecording, Target,
     TargetInfo, TargetSecret, TargetSecretName, User,
 };
@@ -451,13 +451,18 @@ pub trait DatabaseRepository: Send + Sync {
 
     /// Append one audit event.
     ///
-    /// `created_at` is stamped here, like every other write. Returns nothing —
-    /// the row is never read back, and callers log on the connection path where
-    /// there is nothing useful to do with the id.
+    /// `created_at` is stamped here, like every other write. `id` is assigned by
+    /// the database; leave it `NotSet`. Returns nothing — the row is never read
+    /// back, and callers log on the connection path where there is nothing useful
+    /// to do with the id.
+    ///
+    /// Appends unconditionally. Repeating an identical event is not an error:
+    /// under the old composite key it was, and the row was lost.
     async fn insert_log(&self, log: event_log::ActiveModel) -> Result<(), Error>;
 
-    /// Every audit event, newest first. Unbounded — the table only grows.
-    async fn list_logs(&self) -> Result<Vec<Log>, Error>;
+    /// Every audit event, newest first, ties broken by descending `id`.
+    /// Unbounded — the table only grows.
+    async fn list_logs(&self) -> Result<Vec<EventLog>, Error>;
 
     // ------------------------------------------------------ session_recording
 

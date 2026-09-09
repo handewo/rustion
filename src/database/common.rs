@@ -72,7 +72,7 @@ pub const TABLE_TARGETS: &str = "TARGETS";
 pub const TABLE_SECRETS: &str = "SECRETS";
 pub const TABLE_TARGET_SECRETS: &str = "TARGET_SECRETS";
 pub const TABLE_CASBIN_NAMES: &str = "CASBIN_NAMES";
-pub const TABLE_LOGS: &str = "LOGS";
+pub const TABLE_LOGS: &str = "EVENT_LOG";
 pub const TABLE_SESSION_RECORDINGS: &str = "SESSION_RECORDINGS";
 pub const TABLE_LIST: [&str; 8] = [
     TABLE_USERS,

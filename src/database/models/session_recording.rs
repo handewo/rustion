@@ -5,7 +5,7 @@ pub(crate) use crate::database::entity::session_recording::RecordingStatus;
 
 /// Session recording metadata, as read back from storage.
 ///
-/// Read-only, like [`super::Log`]: writes go through the repository as an
+/// Read-only, like [`super::EventLog`]: writes go through the repository as an
 /// `entity::session_recordings::ActiveModel`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRecording {

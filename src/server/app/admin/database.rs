@@ -276,7 +276,7 @@ enum TableData {
     TargetSecrets(Vec<TargetSecret>),
     CasbinNames(Vec<CasbinName>),
     CasbinRule(Vec<CasbinRule>),
-    Logs(Vec<Log>),
+    Logs(Vec<EventLog>),
     SessionRecordings(Vec<SessionRecording>),
 }
 
@@ -469,6 +469,12 @@ impl TableData {
                 ]
             }
             Self::Logs(data) => {
+                let id_len = data
+                    .iter()
+                    .map(|v| v.id.to_string().len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(2);
                 let log_type_len = data
                     .iter()
                     .map(|v| v.log_type.as_str())
@@ -484,9 +490,10 @@ impl TableData {
                     .unwrap_or(0)
                     .max(6);
                 vec![
-                    Constraint::Length(LENGTH_UUID),
+                    Constraint::Length(id_len as u16),
+                    Constraint::Length(LENGTH_SHORT_UUID),
                     Constraint::Length(log_type_len as u16),
-                    Constraint::Length(LENGTH_UUID),
+                    Constraint::Length(LENGTH_SHORT_UUID),
                     Constraint::Length(detail_len as u16),
                     Constraint::Length(LENGTH_TIMSTAMP),
                 ]
@@ -659,6 +666,7 @@ impl crate::server::widgets::TableData for TableData {
             }
             Self::Logs(_) => {
                 vec![
+                    "id",
                     "connection_id",
                     "log_type",
                     "user_id",

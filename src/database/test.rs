@@ -14,9 +14,12 @@ use crate::database::entity::{
 };
 use crate::database::error::DatabaseError;
 use crate::database::fixture::{self, *};
-use crate::database::models::{GroupType, NamePtype, Ptype, RecordingStatus, SessionRecording};
+use crate::database::models::{
+    EventLog, GroupType, NamePtype, Ptype, RecordingStatus, SessionRecording,
+};
 use crate::error::Error;
 use sea_orm::ActiveValue::{NotSet, Set, Unchanged};
+use sea_orm::EntityTrait;
 use std::collections::{HashMap, HashSet};
 
 // --------------------------------------------------------------------- helpers
@@ -1383,12 +1386,84 @@ async fn logs_are_appended_and_read_newest_first() {
     assert_eq!(logs.len(), 3);
     assert!(logs.iter().all(|l| l.user_id == f.user(JOHN)));
     assert!(logs.iter().all(|l| l.created_at != 0), "created_at stamped");
-    // Newest first. The three may share a millisecond, so assert the ordering
-    // rather than which row is first.
+    assert!(logs.iter().all(|l| l.id > 0), "id assigned by the database");
     let stamps: Vec<i64> = logs.iter().map(|l| l.created_at).collect();
     assert!(stamps.windows(2).all(|w| w[0] >= w[1]));
+    // The three may share a millisecond, so `created_at` alone does not settle the
+    // order. Descending `id` does, and it is the order they were written in — so
+    // the newest-first claim can be asserted exactly rather than as `>=`.
+    let ids: Vec<i64> = logs.iter().map(|l| l.id).collect();
+    assert!(ids.windows(2).all(|w| w[0] > w[1]), "newest first: {ids:?}");
+    assert_eq!(
+        logs.first().unwrap().detail,
+        "disconnected",
+        "the last write should read back first"
+    );
     let details: HashSet<&str> = logs.iter().map(|l| l.detail.as_str()).collect();
     assert!(details.contains("opened a shell"));
+}
+
+/// The same event in the same millisecond is two rows.
+///
+/// Under the old composite key `(created_at, connection_id, detail)` the second
+/// insert hit `UNIQUE constraint failed` and, because `insert_log`'s error is
+/// logged and swallowed on the connection path, the event was silently dropped. A
+/// repeated action within one millisecond is ordinary — a held key, a retried
+/// command — so the audit trail was losing records it existed to keep.
+///
+/// The colliding pair is written through the entity rather than `insert_log`,
+/// which stamps `created_at` from the clock: two calls to it land in different
+/// milliseconds and so would not have collided under the old key either, making
+/// the test pass without testing anything. Pinning the stamp is the whole point.
+#[tokio::test]
+async fn an_identical_event_is_appended_not_rejected() {
+    let db = fixture::seed().await;
+    let repo = db.repo();
+    let f = &db.fixture;
+
+    let conn = sea_orm::Database::connect(&db.url)
+        .await
+        .expect("open the fixture file directly");
+
+    let connection = Uuid::now_v7();
+    let event = || event_log::ActiveModel {
+        created_at: Set(1_700_000_000_000),
+        connection_id: Set(connection),
+        detail: Set("opened a shell".to_string()),
+        log_type: Set("session".to_string()),
+        user_id: Set(f.user(JOHN)),
+        ..Default::default()
+    };
+
+    for _ in 0..2 {
+        event_log::Entity::insert(event())
+            .exec(&conn)
+            .await
+            .expect("an identical event is not a conflict");
+    }
+
+    // And the ordinary path still works alongside them.
+    repo.insert_log(event_log::ActiveModel {
+        connection_id: Set(connection),
+        detail: Set("disconnected".to_string()),
+        log_type: Set("session".to_string()),
+        user_id: Set(f.user(JOHN)),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+
+    let logs = repo.list_logs().await.unwrap();
+    assert_eq!(logs.len(), 3, "every event kept");
+
+    let same: Vec<&EventLog> = logs
+        .iter()
+        .filter(|l| l.created_at == 1_700_000_000_000)
+        .collect();
+    assert_eq!(same.len(), 2, "both halves of the colliding pair");
+    assert_ne!(same[0].id, same[1].id, "distinct surrogate keys");
+    assert_eq!(same[0].detail, same[1].detail);
+    assert_eq!(same[0].connection_id, same[1].connection_id);
 }
 
 // ------------------------------------------------------------ session_recording
