@@ -1,3 +1,4 @@
+use super::common::print_short_uuid;
 use crate::database::models::*;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Margin, Rect};
@@ -485,14 +486,15 @@ impl FieldsToArray for SessionRecording {
         match mode {
             DisplayMode::Full => {
                 vec![
-                    self.id.to_string(),
-                    self.user_id.to_string(),
-                    self.target_id.to_string(),
-                    self.secret_id.to_string(),
+                    print_short_uuid(self.id),
+                    print_short_uuid(self.user_id),
+                    print_short_uuid(self.target_id),
+                    print_short_uuid(self.secret_id),
+                    self.target_label.to_string(),
                     self.file_path.clone(),
                     self.started_at.to_string(),
                     self.ended_at.map(|t| t.to_string()).unwrap_or_default(),
-                    self.connection_id.to_string(),
+                    print_short_uuid(self.connection_id),
                     self.status.to_string(),
                 ]
             }
@@ -553,8 +555,13 @@ impl FieldsToArray for ObjectGroup {
 
 impl FieldsToArray for RecordingView {
     fn to_array(&self, _mode: DisplayMode) -> Vec<String> {
+        let label = if !self.current_label.is_empty() && self.current_label != self.target_label {
+            format!("{}({})", self.current_label, self.target_label)
+        } else {
+            self.target_label.clone()
+        };
         vec![
-            self.target_secret.clone(),
+            label,
             super::common::format_timestamp(self.started_at),
             self.ended_at
                 .map(super::common::format_timestamp)
@@ -566,7 +573,7 @@ impl FieldsToArray for RecordingView {
 
 impl TableData for Vec<RecordingView> {
     fn header(&self) -> Vec<&str> {
-        vec!["Target", "Started At", "Ended At", "Status"]
+        vec!["Target Label", "Started At", "Ended At", "Status"]
     }
 
     fn as_vec(&self) -> Vec<&dyn FieldsToArray> {

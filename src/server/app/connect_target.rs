@@ -359,6 +359,13 @@ where
                         user_id: Set(self.user_id),
                         target_id: Set(self.target_secret_name.target_id),
                         secret_id: Set(self.target_secret_name.secret_id),
+                        // Frozen here, not composed at read time: this is what
+                        // the operator connected to, whatever the target is
+                        // renamed to or whether it still exists later.
+                        target_label: Set(session_recording::compose_label(
+                            &self.target_secret_name.secret_user,
+                            &self.target_secret_name.target_name,
+                        )),
                         file_path: Set(file_path),
                         connection_id: Set(self.handler_id),
                         status: Set(session_recording::RecordingStatus::Active),

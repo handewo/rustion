@@ -12,6 +12,7 @@ use bytes::Bytes;
 use crossterm::event::{
     self, Event, KeyCode, KeyEventKind, KeyModifiers, NoTtyEvent, SenderWriter,
 };
+use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::NottyBackend;
 use ratatui::buffer::Buffer;
 use tui_term::widget::PseudoTerminal;
@@ -130,14 +131,10 @@ where
 
     let app = App::new(backend.clone(), handler_id, user_id).await;
     let w = SenderWriter::new(send_to_session.clone());
-    let tty_backend = NottyBackend::new(tty.clone(), w);
+    let tty_backend = NottyBackend::new(tty.clone(), w.clone());
     let mut terminal = AsyncTerminal::new(tty_backend)?;
-    terminal.hide_cursor().await?;
-    terminal.flush().await?;
     tokio::spawn(async move {
-        let _ = app.run(tty, &mut terminal, send_status).await;
-        let _ = terminal.show_cursor().await;
-        let _ = terminal.flush().await;
+        let _ = app.run(tty, &mut terminal, send_status, w).await;
     });
 
     log.scoped(EventKind::Player)
@@ -229,11 +226,18 @@ where
     fn constraint_len_calculator(items: &[RecordingView]) -> Vec<Constraint> {
         let target_len = items
             .iter()
-            .map(|v| v.target_secret.as_str())
-            .map(UnicodeWidthStr::width)
+            .map(|v| {
+                if !v.current_label.is_empty() && v.current_label != v.target_label {
+                    UnicodeWidthStr::width(
+                        format!("{}({})", v.current_label, v.target_label).as_str(),
+                    )
+                } else {
+                    UnicodeWidthStr::width(v.target_label.as_str())
+                }
+            })
             .max()
             .unwrap_or(0)
-            .max(6);
+            .max(12);
 
         let status_len = items
             .iter()
@@ -594,7 +598,11 @@ where
         tty: NoTtyEvent,
         terminal: &mut AsyncTerminal<NottyBackend>,
         send_status: mpsc::Sender<Status>,
+        writer: SenderWriter,
     ) -> Result<(), Error> {
+        let _ = crossterm::async_execute!(&writer, EnterAlternateScreen).await;
+        let _ = terminal.hide_cursor().await;
+        let _ = terminal.flush().await;
         loop {
             if self.is_playing {
                 if let Err(e) = self.do_play(&tty, terminal).await {
@@ -667,6 +675,8 @@ where
             }
         }
         let _ = terminal.show_cursor().await;
+        let _ = terminal.flush().await;
+        let _ = crossterm::async_execute!(&writer, LeaveAlternateScreen).await;
         let _ = send_status.send(Status::Terminate(0)).await;
         Ok(())
     }

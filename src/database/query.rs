@@ -661,7 +661,7 @@ pub(super) async fn list_recording_view_for_user(
         status: RecordingStatus,
         secret_user: Option<String>,
         target_name: Option<String>,
-        port: Option<i32>,
+        target_label: String,
     }
 
     // LEFT JOINs: a recording whose target or secret has since been deleted
@@ -672,9 +672,9 @@ pub(super) async fn list_recording_view_for_user(
         .column(session_recording::Column::StartedAt)
         .column(session_recording::Column::EndedAt)
         .column(session_recording::Column::Status)
+        .column(session_recording::Column::TargetLabel)
         .column_as(secret::Column::User, "secret_user")
         .column_as(target::Column::Name, "target_name")
-        .column_as(target::Column::Port, "port")
         .join(
             JoinType::LeftJoin,
             session_recording::Relation::Secret.def(),
@@ -692,13 +692,14 @@ pub(super) async fn list_recording_view_for_user(
     Ok(rows
         .into_iter()
         .map(|r| {
-            let target_secret = match (r.secret_user, r.target_name, r.port) {
-                (Some(u), Some(n), Some(p)) => format!("{}@{}:{}", u, n, p),
+            let current_label = match (r.secret_user, r.target_name) {
+                (Some(u), Some(n)) => format!("{}@{}", u, n,),
                 _ => String::new(),
             };
             RecordingView {
                 id: r.id,
-                target_secret,
+                current_label,
+                target_label: r.target_label,
                 started_at: r.started_at,
                 ended_at: r.ended_at,
                 status: r.status,

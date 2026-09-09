@@ -12,3 +12,16 @@ pub fn format_timestamp(ts: i64) -> String {
         chrono::LocalResult::None => ts.to_string(),
     }
 }
+
+pub fn print_short_uuid(id: uuid::Uuid) -> String {
+    let mut s = id.to_string();
+    let mut tail = s.split_off(8);
+    format!("{}...{}", s, tail.split_off(20))
+}
+
+#[test]
+fn test_print_short_uuid() {
+    let uuid = uuid::Uuid::parse_str("936DA01f9abd4d9d80c702af85c822a8").unwrap();
+    assert_eq!(print_short_uuid(uuid), "936da01f...85c822a8".to_string());
+    assert_eq!(print_short_uuid(uuid).len(), 19);
+}

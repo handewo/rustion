@@ -10,6 +10,8 @@ pub(crate) use casbin_rule::{
     Ptype, Role,
 };
 pub use log::Log;
+/// Only the tests reach `RecordingStatus` through here; `connect_target` names it
+/// via `session_recording::`, and the two model structs already re-export it.
 pub(crate) use session_recording::{RecordingStatus, RecordingView, SessionRecording};
 pub(crate) use target::{Target, TargetInfo};
 pub(crate) use target_secret::{Secret, SecretInfo, TargetSecret, TargetSecretName};

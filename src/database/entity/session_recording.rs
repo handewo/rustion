@@ -11,6 +11,24 @@ pub struct Model {
     #[sea_orm(indexed)]
     pub target_id: Uuid,
     pub secret_id: Uuid,
+    /// `secret_user@target_name:port` as it read when the recording was made.
+    ///
+    /// `target_id` and `secret_id` say which rows were involved; this says what
+    /// they were called. Renaming a target, editing a secret's login user or
+    /// moving a port rewrites history for every past recording if the label is
+    /// composed from a join at read time, and deleting either leaves no label at
+    /// all — this column is what a recording of a session that happened is
+    /// supposed to be labelled with, which is not a question about the target as
+    /// it stands today.
+    ///
+    /// The cost is that the rendering is now on disk: changing how a label is
+    /// spelled cannot reach existing rows, the same bind `event_log.detail` is in.
+    ///
+    /// 1024, not 512: `target.name` and `secret.user` are `varchar(255)` each, so
+    /// a label can reach 517 characters and MySQL would reject one that long
+    /// against a tighter bound.
+    #[sea_orm(column_type = "String(StringLen::N(1024))")]
+    pub target_label: String,
     #[sea_orm(column_type = "Text")]
     pub file_path: String,
     #[sea_orm(indexed)]
@@ -115,12 +133,15 @@ mod tests {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    /// `skip_fk` is essential, not incidental: recordings outlive the targets and
-    /// secrets they reference, and the original table carried no foreign keys for
-    /// exactly that reason. Emitting one here would make deleting a target that
-    /// has recordings fail on PostgreSQL and MySQL. The relation exists only so
-    /// the label query can `LeftJoin` — which is also why
-    /// `list_recording_view_for_user` tolerates a missing target or secret.
+    /// Nothing joins these any more — `list_recording_view_for_user` reads
+    /// [`Model::target_label`] off the row instead of composing it from a join.
+    /// They are kept for the `skip_fk`, which is essential rather than
+    /// incidental: recordings outlive the targets and secrets they reference, and
+    /// the original table carried no foreign keys for exactly that reason.
+    /// Emitting one would make deleting a target that has recordings fail on
+    /// PostgreSQL and MySQL. Declaring the relation and suppressing the key
+    /// records that, where deleting the relation outright would leave the next
+    /// person to add a join free to reintroduce the bug.
     #[sea_orm(
         belongs_to = "super::target::Entity",
         from = "Column::TargetId",

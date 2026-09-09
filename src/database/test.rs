@@ -1403,10 +1403,10 @@ async fn recordings_open_close_and_list_per_user_and_target() {
 
     // Two for john, one for mike, so the per-user lists have something to filter.
     let mut ids = Vec::new();
-    for (user, target, secret) in [
-        (JOHN, "mars1", S_MON),
-        (JOHN, "sun", S_ROOT),
-        (MIKE, "jupiter5", S_MON),
+    for (user, target, secret, label) in [
+        (JOHN, "mars1", S_MON, "mon@mars1:22"),
+        (JOHN, "sun", S_ROOT, "root@sun:2222"),
+        (MIKE, "jupiter5", S_MON, "mon@jupiter5:22"),
     ] {
         let id = Uuid::now_v7();
         let created = repo
@@ -1415,6 +1415,7 @@ async fn recordings_open_close_and_list_per_user_and_target() {
                 user_id: Set(f.user(user)),
                 target_id: Set(f.target(target)),
                 secret_id: Set(f.secret(secret)),
+                target_label: Set(label.to_string()),
                 file_path: Set(crate::database::models::session_recording::generate_path(
                     id,
                 )),
@@ -1493,21 +1494,20 @@ async fn recordings_open_close_and_list_per_user_and_target() {
             .is_empty()
     );
 
-    // The player's view: labelled `user@target:port`.
+    // The player's view: labelled `user@target:port`, read off the row.
     let view = repo
         .list_recording_view_for_user(f.user(JOHN))
         .await
         .unwrap();
     assert_eq!(view.len(), 2);
-    let labels: HashSet<&str> = view.iter().map(|v| v.target_secret.as_str()).collect();
+    let labels: HashSet<&str> = view.iter().map(|v| v.target_label.as_str()).collect();
     assert_eq!(labels, HashSet::from(["mon@mars1:22", "root@sun:2222"]));
     let first = view.iter().find(|v| v.id == ids[0]).unwrap();
     assert_eq!(first.status, RecordingStatus::Completed);
     assert_eq!(first.generate_path(), format!("{}.cast", ids[0]));
 
-    // A recording outlives its target: the row stays, the label goes empty.
-    // Deleting the target must not fail on a foreign key, which is why the
-    // relation is `skip_fk`.
+    // A recording outlives its target, and so does its label. Deleting the target
+    // must not fail on a foreign key, which is why the relation is `skip_fk`.
     assert!(repo.delete_target(f.target("mars1")).await.unwrap());
     let after = repo
         .list_recording_view_for_user(f.user(JOHN))
@@ -1515,7 +1515,28 @@ async fn recordings_open_close_and_list_per_user_and_target() {
         .unwrap();
     assert_eq!(after.len(), 2, "the recording disappeared with its target");
     let orphan = after.iter().find(|v| v.id == ids[0]).unwrap();
-    assert_eq!(orphan.target_secret, "", "label should be empty, not stale");
+    assert_eq!(
+        orphan.target_label, "mon@mars1:22",
+        "the label is a snapshot and should outlive the target"
+    );
+
+    // And it does not follow a rename either — that is the whole point of storing
+    // it. `sun` is the other recording's target.
+    let mut sun = expect_some(
+        repo.get_target_by_id(f.target("sun"), true).await.unwrap(),
+        "sun",
+    );
+    sun.name = "sun-renamed".to_string();
+    repo.update_target(sun.into_active_model()).await.unwrap();
+    let renamed = repo
+        .list_recording_view_for_user(f.user(JOHN))
+        .await
+        .unwrap();
+    let unmoved = renamed.iter().find(|v| v.id == ids[1]).unwrap();
+    assert_eq!(
+        unmoved.target_label, "root@sun:2222",
+        "the label followed a rename"
+    );
     assert!(
         repo.get_session_recording_by_id(ids[0])
             .await
@@ -1852,6 +1873,7 @@ async fn recording_round_trips_every_column() {
         user_id: Set(f.user(MIKE)),
         target_id: Set(f.target("venus3")),
         secret_id: Set(f.secret(S_DEV)),
+        target_label: Set("dev@venus3:22".to_string()),
         file_path: Set("nested/dir/recording.cast".to_string()),
         ended_at: Set(Some(1)),
         connection_id: Set(connection),
@@ -1866,6 +1888,7 @@ async fn recording_round_trips_every_column() {
         user_id,
         target_id,
         secret_id,
+        target_label,
         file_path,
         started_at,
         ended_at,
@@ -1880,6 +1903,7 @@ async fn recording_round_trips_every_column() {
     assert_eq!(user_id, f.user(MIKE));
     assert_eq!(target_id, f.target("venus3"));
     assert_eq!(secret_id, f.secret(S_DEV));
+    assert_eq!(target_label, "dev@venus3:22");
     assert_eq!(file_path, "nested/dir/recording.cast");
     assert_ne!(started_at, 0, "create stamps started_at");
     assert_eq!(ended_at, Some(1));
@@ -1907,6 +1931,7 @@ async fn recording_status_is_stored_as_an_integer() {
         user_id: Set(f.user(MIKE)),
         target_id: Set(f.target("venus3")),
         secret_id: Set(f.secret(S_DEV)),
+        target_label: Set("dev@venus3:22".to_string()),
         file_path: Set(crate::database::models::session_recording::generate_path(
             id,
         )),

@@ -24,6 +24,7 @@ const INFO_TEXT: [&str; 2] = [
 ];
 
 const LENGTH_UUID: u16 = 36;
+const LENGTH_SHORT_UUID: u16 = 19;
 const LENGTH_TIMSTAMP: u16 = 14;
 
 pub(super) async fn query_table<B>(
@@ -279,6 +280,7 @@ enum TableData {
     SessionRecordings(Vec<SessionRecording>),
 }
 
+// TODO: Support switching uuid format, long or short
 impl TableData {
     fn constraint_len_calculator(&self) -> Vec<Constraint> {
         match self {
@@ -490,6 +492,13 @@ impl TableData {
                 ]
             }
             Self::SessionRecordings(data) => {
+                let target_label_len = data
+                    .iter()
+                    .map(|v| v.target_label.as_str())
+                    .map(UnicodeWidthStr::width)
+                    .max()
+                    .unwrap_or(0)
+                    .max(12);
                 let file_path_len = data
                     .iter()
                     .map(|v| v.file_path.as_str())
@@ -505,14 +514,15 @@ impl TableData {
                     .unwrap_or(0)
                     .max(6);
                 vec![
-                    Constraint::Length(LENGTH_UUID), // id
-                    Constraint::Length(LENGTH_UUID), // user_id
-                    Constraint::Length(LENGTH_UUID), // target_id
-                    Constraint::Length(LENGTH_UUID), // secret_id
+                    Constraint::Length(LENGTH_SHORT_UUID), // id
+                    Constraint::Length(LENGTH_SHORT_UUID), // user_id
+                    Constraint::Length(LENGTH_SHORT_UUID), // target_id
+                    Constraint::Length(LENGTH_SHORT_UUID), // secret_id
+                    Constraint::Length(target_label_len as u16),
                     Constraint::Length(file_path_len as u16),
                     Constraint::Length(LENGTH_TIMSTAMP), // started_at
                     Constraint::Length(LENGTH_TIMSTAMP), // ended_at
-                    Constraint::Length(LENGTH_UUID),     // connection_id
+                    Constraint::Length(LENGTH_SHORT_UUID), // connection_id
                     Constraint::Length(status_len as u16),
                 ]
             }
@@ -662,6 +672,7 @@ impl crate::server::widgets::TableData for TableData {
                     "user_id",
                     "target_id",
                     "secret_id",
+                    "target_label",
                     "file_path",
                     "started_at",
                     "ended_at",
