@@ -93,6 +93,9 @@ pub enum ServerError {
     #[error("Window size not exist")]
     WindowSizeNotExist,
 
+    #[error("Exec not init")]
+    ExecNotInit,
+
     #[error("Tty not init")]
     TtyNotInit,
 

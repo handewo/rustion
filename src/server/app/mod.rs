@@ -14,7 +14,16 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-pub struct AppParams<B: 'static + crate::server::HandlerBackend + Send + Sync> {
+pub struct ExecParams<B: 'static + crate::server::HandlerBackend + Send + Sync> {
+    pub handler_id: Uuid,
+    pub user_id: Uuid,
+    pub client_ip: Option<std::net::IpAddr>,
+    pub backend: Arc<B>,
+    pub recv: mpsc::Receiver<Bytes>,
+    pub log: EventLogger<B>,
+}
+
+pub struct PtyParams<B: 'static + crate::server::HandlerBackend + Send + Sync> {
     pub handler_id: Uuid,
     pub user_id: Uuid,
     pub client_ip: Option<std::net::IpAddr>,
@@ -25,7 +34,16 @@ pub struct AppParams<B: 'static + crate::server::HandlerBackend + Send + Sync> {
     pub app_sender: mpsc::Sender<(ChannelId, NextApplication)>,
 }
 
-type Params<B> = (
+type ScatterExecParams<B> = (
+    Uuid,
+    Uuid,
+    Option<std::net::IpAddr>,
+    Arc<B>,
+    mpsc::Receiver<Bytes>,
+    EventLogger<B>,
+);
+
+type ScatterPtyParams<B> = (
     Uuid,
     Uuid,
     Option<std::net::IpAddr>,
@@ -36,8 +54,21 @@ type Params<B> = (
     mpsc::Sender<(ChannelId, NextApplication)>,
 );
 
-impl<B: 'static + crate::server::HandlerBackend + Send + Sync> AppParams<B> {
-    fn split(self) -> Params<B> {
+impl<B: 'static + crate::server::HandlerBackend + Send + Sync> ExecParams<B> {
+    fn split(self) -> ScatterExecParams<B> {
+        (
+            self.handler_id,
+            self.user_id,
+            self.client_ip,
+            self.backend,
+            self.recv,
+            self.log,
+        )
+    }
+}
+
+impl<B: 'static + crate::server::HandlerBackend + Send + Sync> PtyParams<B> {
+    fn split(self) -> ScatterPtyParams<B> {
         (
             self.handler_id,
             self.user_id,

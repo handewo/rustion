@@ -38,7 +38,7 @@ use crate::server::event_log::EventKind;
 use log::{debug, warn};
 use tokio::sync::mpsc;
 
-use super::AppParams;
+use super::PtyParams;
 use russh::ChannelId;
 use russh::server as ru_server;
 
@@ -72,15 +72,14 @@ where
 }
 
 pub(crate) async fn shell_request<B>(
-    app_params: AppParams<B>,
+    params: PtyParams<B>,
     channel: ChannelId,
     session: &mut ru_server::Session,
 ) -> Result<(), Error>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    let (handler_id, user_id, client_ip, backend, tty, mut recv_from_tty, log, _) =
-        app_params.split();
+    let (handler_id, user_id, client_ip, backend, tty, mut recv_from_tty, log, _) = params.split();
     let uuids = db_common::InternalUuids::get();
     if !check_permission(
         user_id,
@@ -121,6 +120,8 @@ where
                 status = recv_status.recv() => {
                     if let Some(Status::Terminate(exit)) = status {
                         let _ = handle_session.exit_status_request(channel, exit).await;
+                        // BUG: Some data receive from `SenderWriter` has not be sent to
+                        // client before session close
                         let _ = handle_session.close(channel).await;
                         break;
                     }

@@ -1,4 +1,4 @@
-use super::AppParams;
+use super::PtyParams;
 use crate::database::entity::user;
 use crate::database::models::User;
 use crate::error::Error;
@@ -92,14 +92,14 @@ enum Status {
 
 pub(crate) async fn shell_request<B>(
     user: User,
-    app_params: AppParams<B>,
+    params: PtyParams<B>,
     channel: ChannelId,
     session: &mut ru_server::Session,
 ) -> Result<(), Error>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    let (handler_id, _, _, backend, tty, mut recv_from_tty, log, _) = app_params.split();
+    let (handler_id, _, _, backend, tty, mut recv_from_tty, log, _) = params.split();
     let handle_prompt = session.handle();
     let (send_status, mut recv_status) = mpsc::channel(1);
     let (tty, _) = tty.split();

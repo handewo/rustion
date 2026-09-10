@@ -6,7 +6,7 @@ use super::tty;
 use crate::database::Uuid;
 use crate::database::models::User;
 use crate::error::Error;
-use crate::server::app::{AppParams, connect_target::ConnectTarget};
+use crate::server::app::{ExecParams, PtyParams, connect_target::ConnectTarget};
 use crate::server::extend_policy::ExtendPolicyReq;
 use bytes::Bytes;
 use log::{debug, info, trace, warn};
@@ -16,7 +16,7 @@ use russh::{Channel, ChannelId, Pty};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
-use tokio::sync::mpsc::{Receiver, Sender, channel};
+use tokio::sync::mpsc::{self, Receiver, Sender, channel};
 
 pub struct BastionHandler<B: 'static + HandlerBackend + Send + Sync> {
     // Unique ID for each connection.
@@ -201,18 +201,40 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             .ok_or(ServerError::ChannelNotExist)?;
         match channel_session.app {
             Application::ConnectTarget(ref mut app) => app.data(data).await,
-            Application::TargetSelector
-            | Application::Admin
-            | Application::Password
-            | Application::Player => channel_session
-                .tty
-                .as_ref()
-                .ok_or(ServerError::TtyNotInit)?
-                .send_to_tty
-                .send(Bytes::copy_from_slice(data))
-                .await
-                .map_err(std::io::Error::other)
-                .map_err(Error::IO),
+            Application::Admin => match (
+                channel_session.window_size.as_ref(),
+                channel_session.pty_modes.as_ref(),
+                channel_session.pty_term.as_ref(),
+            ) {
+                (Some(_), Some(_), Some(_)) => channel_session
+                    .tty
+                    .as_ref()
+                    .ok_or(ServerError::TtyNotInit)?
+                    .send_to_tty
+                    .send(Bytes::copy_from_slice(data))
+                    .await
+                    .map_err(std::io::Error::other)
+                    .map_err(Error::IO),
+                _ => channel_session
+                    .sender
+                    .as_ref()
+                    .ok_or(ServerError::ExecNotInit)?
+                    .send(Bytes::copy_from_slice(data))
+                    .await
+                    .map_err(std::io::Error::other)
+                    .map_err(Error::IO),
+            },
+            Application::TargetSelector | Application::Password | Application::Player => {
+                channel_session
+                    .tty
+                    .as_ref()
+                    .ok_or(ServerError::TtyNotInit)?
+                    .send_to_tty
+                    .send(Bytes::copy_from_slice(data))
+                    .await
+                    .map_err(std::io::Error::other)
+                    .map_err(Error::IO)
+            }
             Application::None => Ok(()),
         }
     }
@@ -303,6 +325,27 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     Ok(())
                 }
             }
+            Application::Admin => match (
+                channel_session.window_size.as_ref(),
+                channel_session.pty_modes.as_ref(),
+                channel_session.pty_term.as_ref(),
+            ) {
+                (Some(_), Some(_), Some(_)) => {
+                    let (tty, recv_from_tty) = channel_session.new_tty()?;
+                    let app_params = self.wrap_pty_parameters(tty, recv_from_tty)?;
+                    app::admin::exec_request_with_pty(app_params, channel, data, session).await?;
+                    session.channel_failure(channel)?;
+                    Ok(())
+                }
+                _ => {
+                    let (tx, rx) = mpsc::channel(16);
+                    channel_session.sender = Some(tx);
+                    let params = self.wrap_exec_parameters(rx)?;
+                    app::admin::exec_request_without_pty(params, channel, data, session).await?;
+                    session.channel_success(channel)?;
+                    Ok(())
+                }
+            },
             _ => {
                 warn!("[{}] Unsupported exec request", self.id);
                 session.channel_failure(channel)?;
@@ -436,7 +479,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         match channel_session.app {
             Application::TargetSelector => {
                 let (tty, recv_from_tty) = channel_session.new_tty()?;
-                let app_params = self.new_app(tty, recv_from_tty)?;
+                let app_params = self.wrap_pty_parameters(tty, recv_from_tty)?;
                 let target_name = if let LoginMode::Target(t) = self
                     .login_parse
                     .as_ref()
@@ -456,14 +499,14 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             }
             Application::Admin => {
                 let (tty, recv_from_tty) = channel_session.new_tty()?;
-                let app_params = self.new_app(tty, recv_from_tty)?;
+                let app_params = self.wrap_pty_parameters(tty, recv_from_tty)?;
                 app::admin::shell_request(app_params, channel, session).await?;
                 session.channel_success(channel)?;
                 Ok(())
             }
             Application::Password => {
                 let (tty, recv_from_tty) = channel_session.new_tty()?;
-                let app_params = self.new_app(tty, recv_from_tty)?;
+                let app_params = self.wrap_pty_parameters(tty, recv_from_tty)?;
                 app::change_password::shell_request(
                     self.user.as_ref().ok_or(ServerError::UserNotInit)?.clone(),
                     app_params,
@@ -476,7 +519,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             }
             Application::Player => {
                 let (tty, recv_from_tty) = channel_session.new_tty()?;
-                let app_params = self.new_app(tty, recv_from_tty)?;
+                let app_params = self.wrap_pty_parameters(tty, recv_from_tty)?;
                 app::player::shell_request(app_params, channel, session).await?;
                 session.channel_success(channel)?;
                 Ok(())
@@ -654,12 +697,23 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
         Ok(true)
     }
 
-    fn new_app(
+    fn wrap_exec_parameters(&self, recv: Receiver<Bytes>) -> Result<ExecParams<B>, Error> {
+        Ok(ExecParams {
+            handler_id: self.id,
+            user_id: self.user.as_ref().ok_or(ServerError::UserNotInit)?.id,
+            client_ip: self.client_ip.map(|v| v.ip()),
+            backend: self.backend.clone(),
+            recv,
+            log: self.event_log()?,
+        })
+    }
+
+    fn wrap_pty_parameters(
         &self,
         tty: tty::Tty,
         recv_from_tty: Receiver<Bytes>,
-    ) -> Result<AppParams<B>, Error> {
-        Ok(AppParams {
+    ) -> Result<PtyParams<B>, Error> {
+        Ok(PtyParams {
             handler_id: self.id,
             user_id: self.user.as_ref().ok_or(ServerError::UserNotInit)?.id,
             client_ip: self.client_ip.map(|v| v.ip()),
@@ -789,7 +843,7 @@ struct ChannelSession<B: 'static + HandlerBackend + Send + Sync> {
     // shell request
     pub tty: Option<tty::Tty>,
     //exec request
-    pub sender: Option<Sender<Vec<u8>>>,
+    pub sender: Option<Sender<Bytes>>,
     //pty
     pub window_size: Option<(u32, u32, u32, u32)>,
     pub pty_modes: Option<Vec<(Pty, u32)>>,

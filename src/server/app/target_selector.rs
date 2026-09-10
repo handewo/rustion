@@ -1,4 +1,4 @@
-use super::AppParams;
+use super::PtyParams;
 use crate::database::Uuid;
 use crate::database::models::TargetSecretName;
 use crate::error::Error;
@@ -26,15 +26,14 @@ enum TerminalStatus {
 
 pub(crate) async fn shell_request<B>(
     select_target_name: Option<String>,
-    app_params: AppParams<B>,
+    params: PtyParams<B>,
     channel: ChannelId,
     session: &mut ru_server::Session,
 ) -> Result<(), Error>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    let (handler_id, user_id, _, backend, tty, mut recv_from_tty, _, app_sender) =
-        app_params.split();
+    let (handler_id, user_id, _, backend, tty, mut recv_from_tty, _, app_sender) = params.split();
 
     let mut allowed_targets = backend.list_targets_for_user(&user_id, true).await?;
     trace!(
