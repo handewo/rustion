@@ -60,36 +60,67 @@ where
     let (tty, _) = tty.split();
 
     tokio::spawn(async move {
-        while let Some(d) = recv_from_prompt.recv().await {
-            if handle_prompt.data(channel, d).await.is_err() {
-                warn!("[{}] Fail to send data to session from prompt", handler_id);
-                break;
-            };
-        }
-    });
-
-    tokio::spawn(async move {
         loop {
-            match recv_status.recv().await {
-                Some(s) => match s {
-                    TerminalStatus::SelectTarget => {}
-                    TerminalStatus::SelectUser => {}
-                    TerminalStatus::Connect => {
-                        break;
+            tokio::select! {
+                data = recv_from_prompt.recv() => {
+                    match data {
+                        Some(d) => {
+                            if handle_prompt.data(channel, d).await.is_err() {
+                                warn!("[{}] Fail to send data to session from prompt", handler_id);
+                                break;
+                            }
+                        }
+                        // Every sender is gone, so nothing more can arrive. Without a
+                        // `break` the `select!` re-polls a closed channel, which returns
+                        // `None` immediately and spins hot — measured at ~5.8M iterations
+                        // in 200ms, i.e. a pinned core for the life of the process.
+                        None => break,
                     }
-                    TerminalStatus::Terminate => {
+                }
+                status = recv_status.recv() => {
+                    // `None` means the prompt task returned without sending a status, so
+                    // `send_status` dropped. Same hot-spin risk as the data branch, and
+                    // nobody else will close the channel, so do both.
+                    let Some(s) = status else {
                         if handle_status.close(channel).await.is_err() {
                             warn!("[{}] Fail to close channel", handler_id);
                         };
                         break;
-                    }
-                },
-                None => {
-                    if recv_status.is_closed() {
-                        if handle_status.close(channel).await.is_err() {
-                            warn!("[{}] Fail to close channel", handler_id);
-                        };
-                        break;
+                    };
+                    match s {
+                        TerminalStatus::SelectTarget | TerminalStatus::SelectUser => {}
+                        // Not a teardown: the channel stays open and `connect_target`
+                        // takes it over with its own handle. Still drain, because
+                        // anything the prompt wrote last is buffered here and this task
+                        // stops forwarding after the `break`, so nothing else would ever
+                        // deliver it.
+                        TerminalStatus::Connect => {
+                            while let Ok(d) = recv_from_prompt.try_recv() {
+                                if handle_prompt.data(channel, d).await.is_err() {
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                        TerminalStatus::Terminate => {
+                            // Reedline's output reaches `recv_from_prompt` through
+                            // `SenderWriter`, whose `send().await` only waits for
+                            // buffering, not for this task to consume it. Both branches
+                            // are then ready at once and `select!` picks at random, so
+                            // without this drain `close` below discards whatever the
+                            // prompt wrote last. `try_recv`, not `recv`: the tty task
+                            // still holds a `send_to_session` clone, so `recv` would wait
+                            // for input that is not coming.
+                            while let Ok(d) = recv_from_prompt.try_recv() {
+                                if handle_prompt.data(channel, d).await.is_err() {
+                                    break;
+                                }
+                            }
+                            if handle_status.close(channel).await.is_err() {
+                                warn!("[{}] Fail to close channel", handler_id);
+                            };
+                            break;
+                        }
                     }
                 }
             }

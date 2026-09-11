@@ -93,7 +93,7 @@ where
         return Err(ServerError::PermissionDeny.into());
     }
     let handle_session = session.handle();
-    let (send_to_session, mut recv_from_shell) = mpsc::channel::<Bytes>(1);
+    let (send_to_session, mut recv_from_shell) = mpsc::channel::<Bytes>(16);
     let (send_status, mut recv_status) = mpsc::channel(1);
     let send_to_session_from_tty = send_to_session.clone();
 
@@ -112,19 +112,48 @@ where
         loop {
             tokio::select! {
                 data = recv_from_shell.recv() => {
-                    if let Some(d) = data && handle_session.data(channel, d).await.is_err() {
-                        warn!("[{}] Fail to send data to session from prompt",handler_id);
-                        break;
-                    };
+                    match data {
+                        Some(d) => {
+                            if handle_session.data(channel, d).await.is_err() {
+                                warn!("[{}] Fail to send data to session from prompt",handler_id);
+                                break;
+                            }
+                        }
+                        // Every sender is gone, so nothing more can arrive. Without a
+                        // `break` the `select!` re-polls a closed channel, which returns
+                        // `None` immediately and spins hot — measured at ~5.8M iterations
+                        // in 200ms, i.e. a pinned core for the life of the process.
+                        None => break,
+                    }
                 }
                 status = recv_status.recv() => {
-                    if let Some(Status::Terminate(exit)) = status {
-                        let _ = handle_session.exit_status_request(channel, exit).await;
-                        // BUG: Some data receive from `SenderWriter` has not be sent to
-                        // client before session close
+                    // `None` here means `run` returned without sending `Terminate` — it
+                    // propagates I/O errors with `?`, and `run`'s caller discards them —
+                    // so `send_status` dropped. Same hot-spin risk as the data branch,
+                    // and nobody else will close the channel, so do both.
+                    let Some(Status::Terminate(exit)) = status else {
                         let _ = handle_session.close(channel).await;
                         break;
+                    };
+                    // `run` writes the teardown sequence (show cursor, leave the
+                    // alternate screen) through `SenderWriter` and *then* sends
+                    // `Terminate`. Those writes only await buffering, not delivery, so
+                    // they can still be sitting in `recv_from_shell` when we get here.
+                    // Both branches are then ready at once and `select!` picks at
+                    // random, so without this drain `close` below discards the restore
+                    // sequence and leaves the client in the alternate screen with a
+                    // hidden cursor. `try_recv`, not `recv`: the tty task still holds a
+                    // `send_to_session` clone here, so `recv` would wait for input that
+                    // is not coming. Everything `run` wrote has already returned from
+                    // `send().await`, so it is buffered and available now.
+                    while let Ok(d) = recv_from_shell.try_recv() {
+                        if handle_session.data(channel, d).await.is_err() {
+                            break;
+                        }
                     }
+                    let _ = handle_session.exit_status_request(channel, exit).await;
+                    let _ = handle_session.close(channel).await;
+                    break;
                 }
             }
         }

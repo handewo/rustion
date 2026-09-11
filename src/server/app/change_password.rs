@@ -122,19 +122,40 @@ where
                                 break;
                             };
                         }
+                        // Every sender is gone, so nothing more can arrive. The
+                        // `is_closed()` check it used to guard on is always true here for
+                        // exactly that reason, and when it was false this arm did nothing
+                        // and `select!` re-polled a closed channel — a hot spin measured
+                        // at ~5.8M iterations in 200ms.
                         None => {
-                            if recv_from_prompt.is_closed() {
-                                if handle_prompt.close(channel).await.is_err() {
-                                    warn!("[{}] Fail to close channel",handler_id);
-                                };
-                                break;
-                            }
+                            if handle_prompt.close(channel).await.is_err() {
+                                warn!("[{}] Fail to close channel",handler_id);
+                            };
+                            break;
                         }
                     }
                 }
                 status = recv_status.recv() => {
                     match status {
                         Some(s) => {
+                            // Drop-order, not write-order, is what puts data here. `Password::prompt`
+                            // owns its `Backend` as a local, so it is dropped as `prompt` returns —
+                            // before `res` is bound and so before `send_status.send()`. Both `Drop`
+                            // impls (inquire's `FrameRenderer` and `CrosstermTerminal`) flush their
+                            // remaining buffer with `thread::spawn(blocking_write_all) + join()`,
+                            // which only guarantees the bytes are *buffered* into `recv_from_prompt`.
+                            // They are still sitting there when we get here, so drain them first:
+                            // otherwise `close` below discards the cursor-show and end-position
+                            // teardown, and the `Status::Finish` arm prints its result line *before*
+                            // teardown that was written before it. `try_recv` because the tty task
+                            // holds a `send_to_session` clone for the connection's lifetime, so this
+                            // channel never closes and `recv` would block forever.
+                            while let Ok(d) = recv_from_prompt.try_recv() {
+                                if handle_prompt.data(channel, d).await.is_err() {
+                                    warn!("[{}] Fail to flush prompt teardown to session", handler_id);
+                                    break;
+                                }
+                            }
                             match s {
                                 Status::Finish(password) => {
                                     let mut active_model = user::ActiveModel{
@@ -149,16 +170,15 @@ where
                                     if backend.update_user_password(password, active_model).await.is_err() {
                                         exit_status = 1;
                                         warn!("[{}] Password update failed for user '{}({})'", handler_id, username, user_id);
-                                        handle_prompt.data(channel, "\r\npassword updated failed.\r\n"
+                                        handle_prompt.data(channel, "Password updated failed.\r\n"
                                             ).await.is_err().then(|| warn!("[{}] Fail to send password prompt to session from prompt", handler_id));
-
                                     } else {
                                         debug!("[{}] Password updated successfully for user '{}({})'", handler_id, username, user_id);
-                                        handle_prompt.data(channel, "\r\npassword updated successfully.\r\n"
+                                        handle_prompt.data(channel, "Password updated successfully.\r\n"
                                             ).await.is_err().then(|| warn!("[{}] Fail to send password prompt to session from prompt", handler_id));
                                         log.record("password updated successfully").await;
                                     }
-                                    if handle_prompt.exit_status_request(channel,exit_status).await.is_err() {
+                                    if handle_prompt.exit_status_request(channel, exit_status).await.is_err() {
                                         warn!("[{}] Fail to send exit status", handler_id);
                                     };
                                     if handle_prompt.close(channel).await.is_err() {
@@ -174,13 +194,19 @@ where
                                 }
                             }
                         }
+                        // The prompt task returned without sending a status, so
+                        // `send_status` dropped. Drain first for the same reason the
+                        // `Some` arm does: the `Drop` teardown may still be buffered.
                         None => {
-                            if recv_status.is_closed() {
-                                if handle_prompt.close(channel).await.is_err() {
-                                    warn!("[{}] Fail to close channel", handler_id);
-                                };
-                                break;
+                            while let Ok(d) = recv_from_prompt.try_recv() {
+                                if handle_prompt.data(channel, d).await.is_err() {
+                                    break;
+                                }
                             }
+                            if handle_prompt.close(channel).await.is_err() {
+                                warn!("[{}] Fail to close channel", handler_id);
+                            };
+                            break;
                         }
                     }
                 }
@@ -216,18 +242,9 @@ where
             }
         };
 
-        match status {
-            Status::Terminate => {
-                if let Err(e) = send_status.send(status).await {
-                    warn!("[{}] Fail to send status: {}", handler_id, e);
-                };
-            }
-            Status::Finish(_) => {
-                if let Err(e) = send_status.send(status).await {
-                    warn!("[{}] Fail to send status: {}", handler_id, e);
-                };
-            }
-        }
+        if let Err(e) = send_status.send(status).await {
+            warn!("[{}] Fail to send status: {}", handler_id, e);
+        };
     });
 
     tokio::spawn(async move {
