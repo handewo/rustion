@@ -11,6 +11,7 @@ pub const ACT_SHELL: &str = "__internal_action_shell";
 pub const ACT_PTY: &str = "__internal_action_pty";
 pub const ACT_EXEC: &str = "__internal_action_exec";
 pub const ACT_LOGIN: &str = "__internal_action_login";
+pub const ACT_SFTP: &str = "__internal_action_sftp";
 pub const ACT_DIRECT_TCPIP: &str = "__internal_action_open_direct_tcpip";
 
 pub const INTERNAL_OBJECTS: [&str; 3] = [OBJ_LOGIN, OBJ_ADMIN, OBJ_PLAYER];
@@ -28,6 +29,7 @@ pub struct InternalUuids {
     pub act_pty: Uuid,
     pub act_exec: Uuid,
     pub act_login: Uuid,
+    pub act_sftp: Uuid,
     pub act_direct_tcpip: Uuid,
 }
 

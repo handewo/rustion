@@ -101,6 +101,7 @@ pub async fn init_service(config: Config) {
         insert_name(&db, NamePtype::InternalActionType, ACT_SHELL, admin_id).await;
     insert_name(&db, NamePtype::InternalActionType, ACT_EXEC, admin_id).await;
     insert_name(&db, NamePtype::InternalActionType, ACT_PTY, admin_id).await;
+    insert_name(&db, NamePtype::InternalActionType, ACT_SFTP, admin_id).await;
     insert_name(
         &db,
         NamePtype::InternalActionType,

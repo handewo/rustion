@@ -46,7 +46,8 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         _session: &mut ru_server::Session,
     ) -> Result<(), Self::Error> {
         let user = self.user.as_ref().ok_or(ServerError::UserNotInit)?;
-        let mut channel_session = ChannelSession::new();
+        let channel_id = channel.id();
+        let mut channel_session = ChannelSession::new(Some(channel));
         if !self.init_session(user).await? {
             reply
                 .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
@@ -93,7 +94,6 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             Application::Password
         };
         channel_session.app = app;
-        let channel_id = channel.id();
         match self.channel_session.entry(channel_id) {
             Entry::Occupied(_) => {
                 return Err(ServerError::DuplicateChannelId.into());
@@ -181,8 +181,6 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         match channel_session.app {
             Application::ConnectTarget(ref mut app) => app.channel_eof().await,
             _ => {
-                warn!("[{}] Unsupported eof request", self.id);
-                session.channel_failure(channel)?;
                 session.close(channel)?;
                 Ok(())
             }
@@ -235,7 +233,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     .map_err(std::io::Error::other)
                     .map_err(Error::IO)
             }
-            Application::None => Ok(()),
+            Application::Sftp | Application::None => Ok(()),
         }
     }
 
@@ -291,7 +289,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     Err(ServerError::TtyNotInit.into())
                 }
             }
-            Application::None => Ok(()),
+            Application::Sftp | Application::None => Ok(()),
         }
     }
 
@@ -365,9 +363,9 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         reply: ru_server::ChannelOpenHandle,
         session: &mut ru_server::Session,
     ) -> Result<(), Self::Error> {
-        let mut channel_session = ChannelSession::new();
-        let user = self.user.as_ref().ok_or(ServerError::UserNotInit)?;
         let channel_id = channel.id();
+        let mut channel_session = ChannelSession::new(None);
+        let user = self.user.as_ref().ok_or(ServerError::UserNotInit)?;
 
         if user.force_init_pass {
             reply
@@ -407,7 +405,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 );
                 if !app
                     .channel_open_direct_tcpip(
-                        channel,
+                        channel_id,
                         host_to_connect,
                         port_to_connect,
                         originator_address,
@@ -441,6 +439,54 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 Ok(())
             }
         }
+    }
+
+    async fn subsystem_request(
+        &mut self,
+        channel_id: ChannelId,
+        name: &str,
+        session: &mut ru_server::Session,
+    ) -> Result<(), Self::Error> {
+        // TODO:check permission
+        let channel_session = self
+            .channel_session
+            .get_mut(&channel_id)
+            .ok_or(ServerError::ChannelNotExist)?;
+
+        let user = self.user.as_ref().ok_or(ServerError::UserNotInit)?;
+        if name == "sftp"
+            && let Application::ConnectTarget(ref mut app) = channel_session.app
+        {
+            if let Err(e) = app.request_subsystem(channel_id, name, session).await {
+                session.channel_failure(channel_id)?;
+                return Err(e);
+            }
+            if let (Some(target_channel), Some(session_channel)) =
+                (app.take_target_channel(), channel_session.channel.take())
+            {
+                let target_secret_name = app.target_secret_name.clone();
+                channel_session.app = Application::Sftp;
+                session.channel_success(channel_id)?;
+                app::sftp::sftp_subsystem(
+                    self.id,
+                    user.id,
+                    self.client_ip.map(|v| v.ip()),
+                    self.backend.clone(),
+                    target_secret_name,
+                    target_channel,
+                    session_channel,
+                )
+                .await
+                .map_err(app::error::AppError::Sftp)?;
+                return Ok(());
+            }
+        }
+
+        warn!("[{}] Unsupported subsystem request", self.id);
+        session.channel_failure(channel_id)?;
+        session.close(channel_id)?;
+
+        Ok(())
     }
 
     /// The client requests a pseudo-terminal with the given
@@ -550,7 +596,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     Ok(())
                 }
             }
-            Application::None => {
+            Application::Sftp | Application::None => {
                 session.channel_failure(channel)?;
                 Ok(())
             }
@@ -840,20 +886,22 @@ impl LoginParse {
 
 struct ChannelSession<B: 'static + HandlerBackend + Send + Sync> {
     pub app: Application<B>,
+    pub channel: Option<Channel<ru_server::Msg>>,
     // shell request
     pub tty: Option<tty::Tty>,
-    //exec request
+    // exec request
     pub sender: Option<Sender<Bytes>>,
-    //pty
+    // pty
     pub window_size: Option<(u32, u32, u32, u32)>,
     pub pty_modes: Option<Vec<(Pty, u32)>>,
     pub pty_term: Option<String>,
 }
 
 impl<B: 'static + HandlerBackend + Send + Sync> ChannelSession<B> {
-    pub fn new() -> Self {
+    pub fn new(channel: Option<Channel<ru_server::Msg>>) -> Self {
         Self {
             app: Application::default(),
+            channel,
             tty: None,
             sender: None,
             window_size: None,

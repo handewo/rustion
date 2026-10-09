@@ -138,8 +138,8 @@ where
 
     tokio::spawn(async move {
         // TODO: Classify different target type in future
-        let server_prompt = "Select server";
-        let user_prompt = "Select system user";
+        let target_prompt = "Select target";
+        let user_prompt = "Select target user";
         let mut status = TerminalStatus::SelectTarget;
         let mut selected_target_name = String::new();
 
@@ -181,7 +181,7 @@ where
                         continue;
                     }
                     let prompt = DefaultPrompt::new(
-                        DefaultPromptSegment::Basic(server_prompt.to_string()),
+                        DefaultPromptSegment::Basic(target_prompt.to_string()),
                         DefaultPromptSegment::Empty,
                     );
 

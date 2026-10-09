@@ -227,6 +227,16 @@ impl BastionServer {
                     })
                 })?
                 .id;
+            let act_sftp = database
+                .repository()
+                .get_casbin_name_by_name(ACT_SFTP)
+                .await?
+                .ok_or_else(|| {
+                    Error::Server(ServerError::ActionNotFound {
+                        name: ACT_SFTP.to_string(),
+                    })
+                })?
+                .id;
             let act_direct_tcpip = database
                 .repository()
                 .get_casbin_name_by_name(ACT_DIRECT_TCPIP)
@@ -246,6 +256,7 @@ impl BastionServer {
                 act_pty,
                 act_exec,
                 act_login,
+                act_sftp,
                 act_direct_tcpip,
             });
         }

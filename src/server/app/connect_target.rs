@@ -23,10 +23,11 @@ struct RecordingSession {
     recording_id: Uuid,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum Request<'a> {
     Shell,
     Exec(&'a [u8]),
+    SubSystem(&'a str),
     OpenDirectTcpip((&'a str, u32, &'a str, u32)),
 }
 
@@ -43,7 +44,7 @@ where
     // target bridge
     target_channel: Option<TargetChannel>,
     target_handle: Option<Arc<ru_client::Handle<Target>>>,
-    target_secret_name: TargetSecretName,
+    pub target_secret_name: TargetSecretName,
 
     record_session: Option<Arc<Mutex<RecordingSession>>>,
     backend: Arc<B>,
@@ -173,7 +174,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn channel_open_direct_tcpip(
         &mut self,
-        channel: Channel<ru_server::Msg>,
+        channel_id: ChannelId,
         host_to_connect: &str,
         port_to_connect: u32,
         originator_address: &str,
@@ -191,7 +192,7 @@ where
         };
         match self
             .do_channel_open_direct_tcpip(
-                channel,
+                channel_id,
                 host_to_connect,
                 port_to_connect,
                 originator_address,
@@ -223,6 +224,41 @@ where
         };
         self.do_exec_request(data, term, window_size, modes, channel, session)
             .await
+    }
+
+    /// Only take if `self.target_channel` is `TargetChannel::ChannelFull`
+    pub(crate) fn take_target_channel(&mut self) -> Option<Channel<ru_client::Msg>> {
+        if let Some(tc) = self.target_channel.take() {
+            match tc {
+                TargetChannel::ChannelFull(ch) => Some(ch),
+                TargetChannel::ChannelWriteHalf(ch) => {
+                    self.target_channel = Some(TargetChannel::ChannelWriteHalf(ch));
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    pub(crate) async fn request_subsystem<A: Into<String>>(
+        &mut self,
+        channel: ChannelId,
+        name: A,
+        session: &mut ru_server::Session,
+    ) -> Result<(), Error> {
+        let name: String = name.into();
+        let request = Request::SubSystem(&name);
+        if !self.request_target_channel(&request).await? {
+            session.close(channel)?;
+            return Ok(());
+        }
+
+        let target_channel = self.target_channel.as_ref().ok_or(AppError::ConnectTarget(
+            ConnectTargetError::TargetChannelNotExist,
+        ))?;
+
+        target_channel.request_subsystem(true, name).await
     }
 
     pub(crate) async fn shell_request(
@@ -264,7 +300,7 @@ where
     #[allow(clippy::too_many_arguments)]
     async fn do_channel_open_direct_tcpip(
         &mut self,
-        channel: Channel<ru_server::Msg>,
+        channel_id: ChannelId,
         host_to_connect: &str,
         port_to_connect: u32,
         originator_address: &str,
@@ -278,10 +314,10 @@ where
             originator_port,
         ));
         if self
-            .connect_to_target_without_pty(channel.id(), session, &request)
+            .connect_to_target_without_pty(channel_id, session, &request)
             .await?
         {
-            self.bridge(session.handle(), channel.id(), request).await?;
+            self.bridge(session.handle(), channel_id, request).await?;
             Ok(true)
         } else {
             Ok(false)
@@ -479,6 +515,9 @@ where
         match request {
             Request::Shell => write_half.request_shell(false).await?,
             Request::Exec(data) => write_half.exec(false, data).await?,
+            Request::SubSystem(_) => {
+                unreachable!()
+            }
             Request::OpenDirectTcpip(_) => {}
         }
         self.target_channel = Some(write_half);
@@ -613,7 +652,7 @@ where
         };
 
         let channel = match request {
-            Request::Shell | Request::Exec(_) => {
+            Request::Shell | Request::Exec(_) | Request::SubSystem(_) => {
                 match handle.channel_open_session().await {
                     Ok(ch) => ch,
                     Err(
@@ -671,6 +710,7 @@ impl<'a> fmt::Display for Request<'a> {
         match self {
             Request::Shell => write!(f, "shell"),
             Request::Exec(d) => write!(f, "exec: {}", String::from_utf8_lossy(d)),
+            Request::SubSystem(d) => write!(f, "subsystem: {}", d),
             Request::OpenDirectTcpip(d) => {
                 write!(
                     f,
@@ -733,6 +773,18 @@ impl TargetChannel {
                 )
                 .await?
             }
+        }
+        Ok(())
+    }
+
+    async fn request_subsystem<A: Into<String>>(
+        &self,
+        want_reply: bool,
+        name: A,
+    ) -> Result<(), Error> {
+        match self {
+            TargetChannel::ChannelFull(ch) => ch.request_subsystem(want_reply, name).await?,
+            TargetChannel::ChannelWriteHalf(ch) => ch.request_subsystem(want_reply, name).await?,
         }
         Ok(())
     }

@@ -1,6 +1,7 @@
 pub(super) mod admin;
 pub(super) mod change_password;
 pub(super) mod connect_target;
+pub(super) mod sftp;
 use bytes::Bytes;
 pub mod error;
 pub(super) mod player;
@@ -89,6 +90,7 @@ pub enum Application<B: 'static + crate::server::HandlerBackend + Send + Sync> {
     Admin,
     Password,
     Player,
+    Sftp,
     #[default]
     None,
 }

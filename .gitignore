@@ -2,4 +2,9 @@
 server_key.pem
 *.db
 test
+test.py
+test.toml
 /record
+*.bak
+testkey
+testkey.pub
