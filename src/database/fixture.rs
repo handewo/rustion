@@ -90,7 +90,7 @@ use argon2::password_hash::{PasswordHasher, SaltString};
 use tempfile::TempDir;
 
 use crate::database::common::{
-    ACT_DIRECT_TCPIP, ACT_EXEC, ACT_LOGIN, ACT_PTY, ACT_SHELL, OBJ_ADMIN, OBJ_LOGIN, OBJ_PLAYER,
+    ACT_EXEC, ACT_LOGIN, ACT_PTY, ACT_SHELL, INTERNAL_ACTIONS, OBJ_ADMIN, OBJ_LOGIN, OBJ_PLAYER,
 };
 use crate::database::models::{
     CasbinName, CasbinRule, NamePtype, Ptype, Secret, Target, TargetSecret, User,
@@ -107,7 +107,7 @@ pub const TARGETS: usize = 36;
 pub const ACTIVE_TARGETS: usize = 34;
 pub const SECRETS: usize = 4;
 pub const TARGET_SECRETS: usize = 85;
-pub const CASBIN_NAMES: usize = 30;
+pub const CASBIN_NAMES: usize = 40;
 pub const CASBIN_RULES: usize = 126;
 /// `p` rules. One per entry in [`Fixture::policies`].
 pub const POLICIES: usize = 10;
@@ -118,7 +118,7 @@ pub const G2_RULES: usize = 96;
 /// `g3`: 2 nestings + 4 actions.
 pub const G3_RULES: usize = 6;
 /// Internal action and object names, the ones `--init` would create.
-pub const INTERNAL_NAMES: usize = 8;
+pub const INTERNAL_NAMES: usize = 18;
 
 /// Every target carries this key, so one `PublicKey::from_openssh` covers all 36.
 pub const HOST_PUBLIC_KEY: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDykduj1fRNu4UoqrqfE1WDkotT7AH9AJYGsKAN0WEEy \
@@ -499,7 +499,7 @@ pub fn build() -> (Fixture, Data) {
     }
 
     // The names `--init` creates. Protected against rename, re-type and delete.
-    for action in [ACT_SHELL, ACT_PTY, ACT_EXEC, ACT_LOGIN, ACT_DIRECT_TCPIP] {
+    for action in INTERNAL_ACTIONS {
         push_name(NamePtype::InternalActionType, action, true);
     }
     for object in [OBJ_LOGIN, OBJ_ADMIN, OBJ_PLAYER] {
@@ -740,13 +740,20 @@ impl TestDb {
 /// run in parallel. `sqlite::memory:` would be faster but is per-connection,
 /// and sea-orm's pool opens more than one.
 pub async fn seed() -> TestDb {
+    seed_with(|_| {}).await
+}
+
+/// [`seed`], with the dataset edited before it is written. For a test that
+/// needs the database an older version would have left behind.
+pub async fn seed_with(edit: impl FnOnce(&mut Data)) -> TestDb {
     let dir = tempfile::tempdir().expect("temp dir");
     let url = format!(
         "sqlite://{}?mode=rwc",
         dir.path().join("fixture.db").to_string_lossy()
     );
     let service = DatabaseService::new(&url).await.expect("open database");
-    let (fixture, data) = build();
+    let (fixture, mut data) = build();
+    edit(&mut data);
     write(service.repository(), data).await;
     TestDb {
         service,

@@ -22,34 +22,19 @@
 mod tests {
     use crate::config::Config;
     use crate::database::common::{
-        ACT_DIRECT_TCPIP, ACT_EXEC, ACT_LOGIN, ACT_PTY, ACT_SHELL, OBJ_ADMIN, OBJ_LOGIN, OBJ_PLAYER,
+        ACT_DIRECT_TCPIP, ACT_EXEC, ACT_LOGIN, ACT_PTY, ACT_SFTP_READ, ACT_SHELL, OBJ_ADMIN,
+        OBJ_LOGIN, OBJ_PLAYER, SFTP_ACTIONS,
     };
     use crate::database::entity::{casbin_name, casbin_rule, secret, target, target_secret};
     use crate::database::fixture::{self, *};
-    use crate::database::models::{GroupType, Ptype};
+    use crate::database::models::{GroupType, NamePtype, Ptype};
     use crate::database::{DatabaseRepository, Uuid};
-    use crate::server::extend_policy::ExtendPolicyReq;
+    use crate::server::extend_policy::{ExtendPolicyReq, RequestKind};
     use crate::server::{BastionServer, HandlerBackend};
     use chrono::{DateTime, Utc};
     use sea_orm::ActiveValue::{Set, Unchanged};
     use std::collections::{HashMap, HashSet};
     use std::net::IpAddr;
-    use std::sync::LazyLock;
-    use tokio::sync::Mutex;
-
-    /// Serializes the first `BastionServer::with_config` in the process.
-    ///
-    /// `with_config` initializes the `InternalUuids` global behind an
-    /// `is_initialized()` check, and `InternalUuids::init` panics if it is
-    /// already set. That check-then-set is not atomic, so two tests building a
-    /// server at once can both see `false` and the loser panics. Tests here run
-    /// on one binary and in parallel, so they take this lock across the call.
-    ///
-    /// It also means the global holds whichever fixture won the race, and every
-    /// fixture generates fresh uuids. So nothing below reads
-    /// `InternalUuids::get()` — internal ids come from `f.name(ACT_SHELL)`,
-    /// which is this database's.
-    static SERVER_INIT: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     /// A seeded database and a server reading it.
     ///
@@ -63,11 +48,18 @@ mod tests {
 
     impl Env {
         async fn new() -> Self {
-            let db = fixture::seed().await;
+            Self::on(fixture::seed().await).await
+        }
+
+        /// A server opened on `db`.
+        ///
+        /// The `InternalUuids` global keeps whichever server in the process was
+        /// built first, and every fixture generates fresh uuids. So nothing below
+        /// reads `InternalUuids::get()` — internal ids come from
+        /// `f.name(ACT_SHELL)`, which is this database's.
+        async fn on(db: fixture::TestDb) -> Self {
             let mut config = Config::default().gen_secret_token();
             config.database = db.url.clone();
-
-            let _guard = SERVER_INIT.lock().await;
             let server = BastionServer::with_config(config)
                 .await
                 .expect("build server on the fixture database");
@@ -639,7 +631,7 @@ mod tests {
         let req = |addr: Option<IpAddr>, now: DateTime<Utc>| ExtendPolicyReq {
             ip: addr,
             now,
-            open_direct_tcpip: None,
+            kind: RequestKind::Other,
         };
         // 12:00 +08:00, mid-window and well before the expiry.
         let inside = at("2026-03-05T04:00:00Z");
@@ -721,9 +713,103 @@ mod tests {
         let ext = ExtendPolicyReq {
             ip: None,
             now: at("2026-03-05T20:00:00Z"),
-            open_direct_tcpip: None,
+            kind: RequestKind::Other,
         };
         assert!(env.allows_with(env.f().user(MIKE), venus2, exec, ext).await);
+    }
+
+    /// A path rule gates path-bearing requests, and a request without a path —
+    /// the SFTP session gate — does not satisfy it.
+    #[tokio::test]
+    async fn an_sftp_path_rule_is_full_match_and_needs_a_path() {
+        let env = Env::new().await;
+        // A subject in no role, so only the policy below can grant it anything.
+        let sub = Uuid::now_v7();
+        let sun = env.f().binding("sun", S_MON);
+        let read = env.f().name(ACT_SFTP_READ);
+        env.add_policy(
+            sub,
+            sun,
+            read,
+            r#"{"sftp_path":{"Allow":["/srv/upload(/.*)?"]}}"#,
+        )
+        .await;
+
+        let req = |p: Option<&str>| ExtendPolicyReq {
+            kind: RequestKind::Sftp(p.map(str::to_string)),
+            ..ExtendPolicyReq::default()
+        };
+        assert!(
+            env.allows_with(sub, sun, read, req(Some("/srv/upload")))
+                .await
+        );
+        assert!(
+            env.allows_with(sub, sun, read, req(Some("/srv/upload/a/b")))
+                .await
+        );
+        assert!(
+            !env.allows_with(sub, sun, read, req(Some("/srv/uploads")))
+                .await
+        );
+        assert!(
+            !env.allows_with(sub, sun, read, req(Some("/etc/passwd")))
+                .await
+        );
+        // An SFTP request naming no path — the subsystem gate, `realpath` —
+        // has nothing for the rule to match, so the rule is skipped. Reading
+        // that absence as a failure made one path-restricted policy deny the
+        // session it was meant to narrow.
+        assert!(env.allows_with(sub, sun, read, req(None)).await);
+        // A request of another kind is not what the rule describes, so it
+        // passes the rule too. This policy still grants that kind nothing: it
+        // names one action, and `enforce` matches the action separately.
+        assert!(
+            env.allows_with(sub, sun, read, ExtendPolicyReq::default())
+                .await
+        );
+        assert!(
+            !env.allows_with(
+                sub,
+                sun,
+                env.f().name(ACT_SHELL),
+                ExtendPolicyReq::default()
+            )
+            .await
+        );
+    }
+
+    /// A database from before the SFTP actions existed still starts, and gains
+    /// them — attributed to no user, and granted by no policy.
+    #[tokio::test]
+    async fn missing_internal_actions_are_inserted_at_startup() {
+        let db = fixture::seed_with(|d| {
+            d.casbin_names
+                .retain(|n| !SFTP_ACTIONS.contains(&n.name.as_str()))
+        })
+        .await;
+        for name in SFTP_ACTIONS {
+            assert!(
+                db.repo()
+                    .get_casbin_name_by_name(name)
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "{name} was seeded"
+            );
+        }
+
+        let env = Env::on(db).await;
+        for name in SFTP_ACTIONS {
+            let n = env
+                .repo()
+                .get_casbin_name_by_name(name)
+                .await
+                .unwrap()
+                .unwrap_or_else(|| panic!("{name} was not inserted"));
+            assert_eq!(n.ptype, NamePtype::InternalActionType);
+            assert!(n.is_active);
+            assert_eq!(n.updated_by, Uuid::nil());
+        }
     }
 
     // ------------------------------------------------- list_targets_for_user

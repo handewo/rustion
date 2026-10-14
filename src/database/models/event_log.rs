@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 pub(crate) use crate::database::entity::event_log::EventKind;
 
-/// A user's successful operation, as read back for the admin log view.
+/// A user's successful operation, or an SFTP denial, as read back for the admin log view.
 ///
 /// Read-only: writes go through `insert_log` as an
 /// `entity::event_log::ActiveModel`, so there is no conversion in this direction.

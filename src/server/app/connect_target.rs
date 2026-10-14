@@ -1,10 +1,12 @@
 use crate::asciinema;
 use crate::database::Uuid;
+use crate::database::common::SftpActions;
 use crate::database::entity::session_recording as session_recording_entity;
 use crate::database::models::session_recording;
 use crate::database::models::{Target, TargetSecretName, User};
 use crate::error::Error;
 use crate::server::app::error::AppError;
+use crate::server::app::sftp::SftpContext;
 use crate::server::event_log::{EventKind, EventLogger};
 use crate::server::{error::ServerError, extend_policy};
 use log::{debug, trace};
@@ -241,24 +243,42 @@ where
         }
     }
 
-    pub(crate) async fn request_subsystem<A: Into<String>>(
-        &mut self,
-        channel: ChannelId,
-        name: A,
-        session: &mut ru_server::Session,
-    ) -> Result<(), Error> {
-        let name: String = name.into();
-        let request = Request::SubSystem(&name);
+    /// Open a target channel and request subsystem `name` on it. `Ok(false)`
+    /// when no target connection could be made; the caller answers the client.
+    pub(crate) async fn request_subsystem(&mut self, name: &str) -> Result<bool, Error> {
+        let request = Request::SubSystem(name);
         if !self.request_target_channel(&request).await? {
-            session.close(channel)?;
-            return Ok(());
+            return Ok(false);
         }
+        self.target_channel
+            .as_ref()
+            .ok_or(AppError::ConnectTarget(
+                ConnectTargetError::TargetChannelNotExist,
+            ))?
+            .request_subsystem(true, name)
+            .await?;
+        Ok(true)
+    }
 
-        let target_channel = self.target_channel.as_ref().ok_or(AppError::ConnectTarget(
-            ConnectTargetError::TargetChannelNotExist,
-        ))?;
+    /// For the SFTP proxy's log lines and audit rows: `web1(<uuid>) as deploy`.
+    pub(crate) fn target_label(&self) -> String {
+        format!(
+            "{}({}) as {}",
+            self.target.name, self.target.id, self.target_secret_name.secret_user
+        )
+    }
 
-        target_channel.request_subsystem(true, name).await
+    pub(crate) fn sftp_context(&self, actions: SftpActions) -> SftpContext<B> {
+        SftpContext {
+            handler_id: self.handler_id,
+            user_id: self.user_id,
+            client_ip: self.client_ip,
+            object: self.target_secret_name.id,
+            label: self.target_label(),
+            actions,
+            backend: self.backend.clone(),
+            log: self.log.scoped(EventKind::Sftp),
+        }
     }
 
     pub(crate) async fn shell_request(
@@ -603,8 +623,13 @@ where
         action_uuid: Uuid,
         open_direct_tcpip: Option<(String, u16)>,
     ) -> Result<bool, Error> {
-        let mut ext_req = extend_policy::ExtendPolicyReq::new(self.client_ip);
-        ext_req.open_direct_tcpip = open_direct_tcpip;
+        // Shell, pty and exec are `Other`: they carry no value any per-kind
+        // constraint names. Only a `direct-tcpip` has a destination.
+        let kind = match open_direct_tcpip {
+            Some((host, port)) => extend_policy::RequestKind::OpenDirectTcpip(host, port),
+            None => extend_policy::RequestKind::Other,
+        };
+        let ext_req = extend_policy::ExtendPolicyReq::of(self.client_ip, kind);
         if !self
             .backend
             .enforce(

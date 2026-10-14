@@ -40,6 +40,7 @@ main.rs → cli.rs (clap) → Config (TOML) → BastionServer::with_config()
   - Schema is created by `SchemaBuilder::sync()` (feature `schema-sync`), skipped when all tables already exist.
 - **`server/bastion_server.rs`** — Implements `russh::server::Server`. Holds config, database service, connection/rate-limit caches (moka), and the Casbin role manager.
 - **`server/bastion_handler.rs`** — Implements `russh::server::Handler`. Per-connection state machine routing I/O to the active `Application`.
+- **`server/app/sftp/`** — SFTP proxy: per-operation actions (`SftpActions`), regex `sftp_path` rules in `ExtendPolicy`, lexical path resolution against the target's home, handle table, audit rows under `EventKind::Sftp`.
 - **`server/app/admin/`** — TUI admin interface using ratatui + reedline. CRUD for users, targets, secrets, roles, permissions, and bindings.
 - **`asciinema/`** — Session recording in Asciinema v3 format.
 
@@ -97,4 +98,10 @@ Tests are inline (`#[cfg(test)]` modules) in:
 - `server/test.rs` — `HandlerBackend` integration tests against the fixture:
   `enforce` and `list_targets_for_user`, built on a real `BastionServer` opened on
   the fixture's SQLite file (`TestDb::url`).
+- `server/app/sftp/test.rs` — The SFTP proxy end to end: a `RawSftpSession`
+  client, the proxy, and an in-memory fake target joined by `tokio::io::duplex`,
+  with policies enforced by a real `BastionServer` on the fixture. Pure helpers
+  are tested inline in `sftp/{path,audit,handles}.rs`.
+- `server/extend_policy.rs` — Extended-policy parsing and matching, including
+  the regex `sftp_path` rules.
 - `server/app/change_password.rs` — Password change logic

@@ -11,7 +11,4 @@ pub enum AppError {
     // Admin errors
     #[error(transparent)]
     Admin(#[from] super::admin::error::AdminError),
-
-    #[error(transparent)]
-    Sftp(#[from] russh_sftp::client::error::Error),
 }

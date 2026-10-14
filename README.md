@@ -85,6 +85,63 @@ A full-featured terminal user interface for administration:
 
 </details>
 
+### 📁 SFTP
+
+SFTP works on direct target connections:
+
+```bash
+sftp -P 2222 user@secretuser@target@localhost
+```
+
+**Actions** - `__internal_action_sftp` only opens the session. Every operation needs its own action:
+
+| Action | Operations |
+|---|---|
+| `__internal_action_sftp` | Open the SFTP session, `realpath` |
+| `__internal_action_sftp_list` | `opendir`/`readdir`, `stat`, `lstat`, `readlink` |
+| `__internal_action_sftp_read` | Open a file for reading, read from it |
+| `__internal_action_sftp_write` | Open a file with any write flag (write, append, create, truncate, exclusive), write to it |
+| `__internal_action_sftp_mkdir` | `mkdir` |
+| `__internal_action_sftp_setstat` | `setstat` (change attributes by path) |
+| `__internal_action_sftp_fsetstat` | `fsetstat` (change attributes of an open file) |
+| `__internal_action_sftp_symlink` | `symlink` (both the link and its target are checked) |
+| `__internal_action_sftp_rename` | `rename` (both the source and the destination are checked) |
+| `__internal_action_sftp_delete` | `remove`, `rmdir` |
+
+- `setstat` and `fsetstat` change the same attributes, so grant both or neither. Changing a file's size also requires the write action.
+
+**Path rules** - Add `sftp_path` to a policy's extended policy to restrict it to some paths:
+
+```json
+{"sftp_path":{"Allow":["/srv/upload(/.*)?"]}}
+```
+
+- Patterns are regexes matched against the whole resolved absolute path (relative paths resolve against the target user's home)
+- To cover a directory and its contents, write `/dir(/.*)?`
+- `Allow` passes if any pattern matches; `Deny` passes if none does
+- `Allow: []` denies everything; `Deny: []` restricts nothing
+
+A path rule only constrains requests that name a path. The session gate and `realpath` name none, so they are not blocked by it, and one policy can both open the session and narrow what happens inside it:
+
+```text
+ag_sftp_rw  {"sftp_path":{"Allow":["/srv/upload(/.*)?"]}}
+```
+
+By the same rule, a path rule says nothing about other kinds of request. On a policy whose action group also holds `shell` or `exec`, those are granted unconstrained — what a policy grants is its action list, and the extended policy only narrows the kind it names. Split the group if that is not what you want. The client address, the time window and the expiry are not per-kind: they are checked for every request.
+
+**Audit** - `event_log` records session start and end (with file and byte totals), one row per file with the bytes read or written, every mutation (setstat, mkdir, remove, rename, symlink, ...), and every denial. Listings are not recorded.
+
+**Known limitations:**
+- Path checks are lexical. Existing symlinks on the target can lead outside a pattern.
+- `realpath` reveals whether a path exists.
+- Symlinks created through the bastion store an absolute target.
+- SFTP extensions (`posix-rename`, `hardlink`, ...) are not supported.
+- Requests are processed one at a time.
+
+**Upgrading** - Missing internal actions are created at startup with a warning. Until policies grant them, SFTP operations are denied: a grant of `__internal_action_sftp` alone from an earlier build opens a session in which everything is denied.
+
+**Downgrading** - Older builds ignore `sftp_path`, so a path-restricted policy becomes unrestricted. Remove such policies first. Older builds also cannot display `sftp` audit rows.
+
 ---
 
 ## 🔨 Build from source
@@ -152,7 +209,6 @@ ssh -p 2222 user@root@target@localhost
   - Kubernetes pods
   - MySQL/PostgreSQL/Redis databases
   - Custom protocol targets
-- SFTP file transfer
 - Real-time session monitoring
 - AI-assisted anomaly detection
 

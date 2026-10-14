@@ -101,7 +101,9 @@ pub async fn init_service(config: Config) {
         insert_name(&db, NamePtype::InternalActionType, ACT_SHELL, admin_id).await;
     insert_name(&db, NamePtype::InternalActionType, ACT_EXEC, admin_id).await;
     insert_name(&db, NamePtype::InternalActionType, ACT_PTY, admin_id).await;
-    insert_name(&db, NamePtype::InternalActionType, ACT_SFTP, admin_id).await;
+    for action in SFTP_ACTIONS {
+        insert_name(&db, NamePtype::InternalActionType, action, admin_id).await;
+    }
     insert_name(
         &db,
         NamePtype::InternalActionType,
@@ -143,6 +145,7 @@ pub async fn init_service(config: Config) {
         expire_date: None,
         open_direct_tcpip_host: None,
         open_direct_tcpip_port: None,
+        sftp_path: None,
     };
 
     // Policy: admin can login from localhost (IPv4)
@@ -174,6 +177,7 @@ pub async fn init_service(config: Config) {
         expire_date: None,
         open_direct_tcpip_host: None,
         open_direct_tcpip_port: None,
+        sftp_path: None,
     };
 
     // Policy: admin can login from localhost (IPv6)
@@ -202,6 +206,7 @@ pub async fn init_service(config: Config) {
         expire_date: None,
         open_direct_tcpip_host: None,
         open_direct_tcpip_port: None,
+        sftp_path: None,
     };
     let p = policy(login_group_id, obj_login_id, action_login_id, &ext);
     match db.repository().create_casbin_rule(p).await {

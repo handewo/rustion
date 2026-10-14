@@ -1,7 +1,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// Records a user's successful operations.
+/// Records a user's successful operations, and SFTP access denials.
 ///
 /// Keyed by a surrogate `id` rather than the composite
 /// `(created_at, connection_id, detail)` it used to be. That key was described as
@@ -24,10 +24,10 @@ use serde::{Deserialize, Serialize};
 ///
 /// `detail` is a bounded `varchar` rather than `text` because MySQL cannot index
 /// a `TEXT` column in a key without a prefix length. That reason lapsed with the
-/// composite key, but the bound is kept: details are structurally bounded format
-/// strings — UUIDs (36) plus names the admin form caps at 40–50 chars — and the
-/// longest row in the production database is 192 characters. Widening it later is
-/// a compatible change; narrowing is not. SQLite ignores `varchar` lengths
+/// composite key, but the bound is kept: details can carry client-supplied SFTP
+/// paths, so `EventLogger::record` bounds every detail to 512 characters
+/// (`server::event_log::DETAIL_MAX`) and the SFTP proxy bounds each path within
+/// it. Widening it later is a compatible change; narrowing is not. SQLite ignores `varchar` lengths
 /// entirely, so existing rows are unaffected either way.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "event_log")]
@@ -100,6 +100,10 @@ pub enum EventKind {
     #[sea_orm(num_value = 5)]
     #[serde(rename = "player")]
     Player,
+    /// SFTP sessions, file transfers, mutations and denials.
+    #[sea_orm(num_value = 6)]
+    #[serde(rename = "sftp")]
+    Sftp,
 }
 
 impl EventKind {
@@ -115,6 +119,7 @@ impl EventKind {
             Self::Target => "target",
             Self::Password => "password",
             Self::Player => "player",
+            Self::Sftp => "sftp",
         }
     }
 }
@@ -147,11 +152,12 @@ mod tests {
             (3, EventKind::Target),
             (4, EventKind::Password),
             (5, EventKind::Player),
+            (6, EventKind::Sftp),
         ] {
             assert_eq!(k.to_value(), want, "{k} changed its stored value");
             assert_eq!(EventKind::try_from_value(&want).unwrap(), k);
         }
-        assert_eq!(EventKind::iter().count(), 6, "a variant was added");
+        assert_eq!(EventKind::iter().count(), 7, "a variant was added");
     }
 
     /// `as_str`, `Display` and the serde rename are three hand-written spellings of
@@ -174,10 +180,10 @@ mod tests {
         }
     }
 
-    /// A `log_type` outside the six known values is a corrupt row, not a default.
+    /// A `log_type` outside the seven known values is a corrupt row, not a default.
     #[test]
     fn event_kind_rejects_unknown_discriminant() {
-        assert!(EventKind::try_from_value(&6).is_err());
+        assert!(EventKind::try_from_value(&7).is_err());
         assert!(EventKind::try_from_value(&-1).is_err());
     }
 

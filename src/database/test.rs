@@ -7,7 +7,9 @@
 //! tests are grouped by area rather than one per method.
 
 use crate::database::Uuid;
-use crate::database::common::{ACT_EXEC, ACT_LOGIN, ACT_SHELL, OBJ_ADMIN, OBJ_LOGIN, OBJ_PLAYER};
+use crate::database::common::{
+    ACT_EXEC, ACT_LOGIN, ACT_SHELL, INTERNAL_ACTIONS, OBJ_ADMIN, OBJ_LOGIN, OBJ_PLAYER,
+};
 use crate::database::entity::{
     casbin_name, casbin_rule as casbin_rule_entity, event_log, secret, session_recording,
     target as target_entity, target_secret as target_secret_entity, user,
@@ -1207,7 +1209,7 @@ async fn name_reads_filter_by_ptype_and_hide_internals() {
             .await
             .unwrap()
             .len(),
-        5
+        INTERNAL_ACTIONS.len()
     );
     assert_eq!(
         repo.list_casbin_names_by_ptype(NamePtype::InternalObjectType, false)
@@ -1772,7 +1774,7 @@ async fn pickers_list_objects_then_groups() {
 
     // Actions: the `g3` groups and the internal actions.
     let actions = repo.list_action_group().await.unwrap();
-    assert_eq!(actions.len(), 3 + 5);
+    assert_eq!(actions.len(), 3 + INTERNAL_ACTIONS.len());
     assert_eq!(actions.iter().filter(|o| o.is_group).count(), 3);
     let names: Vec<&str> = actions.iter().map(|o| o.name.as_str()).collect();
     assert!(names.windows(2).all(|w| w[0] <= w[1]), "not name-ordered");

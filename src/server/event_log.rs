@@ -60,6 +60,23 @@ impl<B> Clone for EventLogger<B> {
     }
 }
 
+/// `event_log.detail` is a `varchar(512)`.
+pub(crate) const DETAIL_MAX: usize = 512;
+
+/// Cut `detail` to [`DETAIL_MAX`] characters, ending in `…` when cut.
+///
+/// Postgres and MySQL reject an over-long value, and the insert's error is
+/// logged and swallowed, so without this a long path would silently cost its
+/// audit row.
+pub(crate) fn bound_detail(detail: String) -> String {
+    if detail.chars().count() <= DETAIL_MAX {
+        return detail;
+    }
+    let mut cut: String = detail.chars().take(DETAIL_MAX - 1).collect();
+    cut.push('…');
+    cut
+}
+
 impl<B> EventLogger<B>
 where
     B: 'static + super::HandlerBackend + Send + Sync,
@@ -94,8 +111,31 @@ where
                 connection_id: self.connection_id,
                 user_id: self.user_id,
                 kind: self.kind,
-                detail: detail.into(),
+                detail: bound_detail(detail.into()),
             })
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_detail_is_untouched() {
+        assert_eq!(bound_detail("abc".into()), "abc");
+        let exact = "x".repeat(DETAIL_MAX);
+        assert_eq!(bound_detail(exact.clone()), exact);
+    }
+
+    /// The column is `varchar(512)` in characters; Postgres and MySQL reject a
+    /// longer value, and `insert_log` swallows that error.
+    #[test]
+    fn long_detail_is_cut_on_a_char_boundary() {
+        let long = "é".repeat(DETAIL_MAX + 10);
+        let cut = bound_detail(long);
+        assert_eq!(cut.chars().count(), DETAIL_MAX);
+        assert!(cut.ends_with('…'));
+        assert!(cut.starts_with("éé"));
     }
 }

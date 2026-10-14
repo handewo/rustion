@@ -180,7 +180,32 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             .ok_or(ServerError::ChannelNotExist)?;
         match channel_session.app {
             Application::ConnectTarget(ref mut app) => app.channel_eof().await,
-            _ => {
+            // The proxy owns the channel's stream: EOF ends its read loop, it
+            // writes its last reply, and dropping the stream closes the channel.
+            // Closing here would cut those replies off.
+            Application::Sftp => Ok(()),
+            // An interactive app is still writing. EOF says the client will send
+            // no more input — it does not say the app has finished its output,
+            // and Ctrl+C arrives as EOF. Closing here discarded whatever the
+            // prompt wrote on its way out: inquire's teardown comes from `Drop`,
+            // which only buffers the bytes.
+            //
+            // So end the input instead. These are the last `send_to_tty` and
+            // exec `Sender` clones — each app drops its own copy on the way in
+            // (`let (tty, _) = tty.split()`) — so dropping them makes the app's
+            // reader see end-of-input. Each app then runs its normal terminate
+            // path, which drains the pending output before closing the channel.
+            Application::TargetSelector
+            | Application::Admin
+            | Application::Password
+            | Application::Player => {
+                debug!("[{}] Client sent eof; ending input on {}", self.id, channel);
+                channel_session.tty = None;
+                channel_session.sender = None;
+                Ok(())
+            }
+            // No app is running, so nothing else would ever close the channel.
+            Application::None => {
                 session.close(channel)?;
                 Ok(())
             }
@@ -441,51 +466,65 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         }
     }
 
+    /// Only `sftp`, and only on a direct target connection. The gate is checked
+    /// before anything is opened on the target, and the client's channel is
+    /// handed to the proxy only once the target session is up, so every failure
+    /// before that is a plain failed request on a channel this handler still owns.
     async fn subsystem_request(
         &mut self,
         channel_id: ChannelId,
         name: &str,
         session: &mut ru_server::Session,
     ) -> Result<(), Self::Error> {
-        // TODO:check permission
         let channel_session = self
             .channel_session
             .get_mut(&channel_id)
             .ok_or(ServerError::ChannelNotExist)?;
-
-        let user = self.user.as_ref().ok_or(ServerError::UserNotInit)?;
-        if name == "sftp"
-            && let Application::ConnectTarget(ref mut app) = channel_session.app
-        {
-            if let Err(e) = app.request_subsystem(channel_id, name, session).await {
-                session.channel_failure(channel_id)?;
-                return Err(e);
-            }
-            if let (Some(target_channel), Some(session_channel)) =
-                (app.take_target_channel(), channel_session.channel.take())
-            {
-                let target_secret_name = app.target_secret_name.clone();
-                channel_session.app = Application::Sftp;
-                session.channel_success(channel_id)?;
-                app::sftp::sftp_subsystem(
-                    self.id,
-                    user.id,
-                    self.client_ip.map(|v| v.ip()),
-                    self.backend.clone(),
-                    target_secret_name,
-                    target_channel,
-                    session_channel,
-                )
-                .await
-                .map_err(app::error::AppError::Sftp)?;
-                return Ok(());
-            }
+        let Application::ConnectTarget(ref mut app) = channel_session.app else {
+            warn!(
+                "[{}] Subsystem '{}' outside a target connection",
+                self.id, name
+            );
+            return refuse(session, channel_id);
+        };
+        if name != "sftp" {
+            warn!("[{}] Unsupported subsystem '{}'", self.id, name);
+            return refuse(session, channel_id);
         }
 
-        warn!("[{}] Unsupported subsystem request", self.id);
-        session.channel_failure(channel_id)?;
-        session.close(channel_id)?;
+        let ctx = app.sftp_context(crate::database::common::InternalUuids::get().sftp);
+        if !ctx.allow_session().await {
+            debug!("[{}] sftp denied on {}", self.id, ctx.label);
+            ctx.log
+                .record(format!("sftp denied session on {}", ctx.label))
+                .await;
+            return refuse(session, channel_id);
+        }
 
+        let target_channel = match app.request_subsystem(name).await {
+            Ok(true) => app.take_target_channel(),
+            Ok(false) => None,
+            Err(e) => {
+                debug!("[{}] sftp target subsystem request failed: {}", self.id, e);
+                None
+            }
+        };
+        let Some(target_channel) = target_channel else {
+            return refuse(session, channel_id);
+        };
+        let proxy = match app::sftp::SftpProxy::connect(ctx, target_channel.into_stream()).await {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("[{}] sftp session with target failed: {}", self.id, e);
+                return refuse(session, channel_id);
+            }
+        };
+        let Some(client_channel) = channel_session.channel.take() else {
+            return refuse(session, channel_id);
+        };
+        channel_session.app = Application::Sftp;
+        session.channel_success(channel_id)?;
+        proxy.serve(client_channel.into_stream()).await;
         Ok(())
     }
 
@@ -916,4 +955,11 @@ impl<B: 'static + HandlerBackend + Send + Sync> ChannelSession<B> {
         self.tty = Some(tty.clone());
         Ok((tty, recv_from_tty))
     }
+}
+
+/// Answer a subsystem request the bastion will not serve, and end the channel.
+fn refuse(session: &mut ru_server::Session, channel: ChannelId) -> Result<(), Error> {
+    session.channel_failure(channel)?;
+    session.close(channel)?;
+    Ok(())
 }

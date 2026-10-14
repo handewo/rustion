@@ -14,6 +14,9 @@ pub enum ExtendPolicyError {
 
     #[error("Start time and end time have different timezone")]
     DifferentTimezone,
+
+    #[error("Invalid sftp_path regex '{pattern}': {reason}")]
+    InvalidPathRegex { pattern: String, reason: String },
 }
 
 #[derive(Debug, Error)]
@@ -54,9 +57,6 @@ pub enum ServerError {
     // Casbin errors
     #[error("Internal object '{name}' not found")]
     InternalObjectNotFound { name: String },
-
-    #[error("Action '{name}' not found")]
-    ActionNotFound { name: String },
 
     #[error("Invalid Casbin rule group structure")]
     InvalidRuleGroup,

@@ -2,7 +2,9 @@ use super::casbin;
 use super::extend_policy::{ExtendPolicyReq, verify_extend_policy};
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
-use crate::database::entity::{event_log, user};
+use crate::database::common::{INTERNAL_ACTIONS, INTERNAL_OBJECTS, InternalUuids};
+use crate::database::entity::{casbin_name, event_log, user};
+use crate::database::models::NamePtype;
 use crate::server::HandlerBackend;
 use crate::server::error::ServerError;
 use crate::utils::proxy_connect;
@@ -21,6 +23,7 @@ use russh::client as ru_client;
 use russh::keys::Algorithm;
 use russh::server::{Config as RusshConfig, Server};
 use sea_orm::ActiveValue::Set;
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -152,114 +155,10 @@ impl BastionServer {
             casbin::RoleManage::new(g1, g2, g3)?
         };
 
-        // Initialize global internal UUIDs (only once)
-        // TODO: Query once to get all internal uuids.
-        if !crate::database::common::InternalUuids::is_initialized() {
-            use crate::database::common::*;
-
-            let obj_login = database
-                .repository()
-                .get_casbin_name_by_name(OBJ_LOGIN)
-                .await?
-                .ok_or_else(|| {
-                    Error::Server(ServerError::InternalObjectNotFound {
-                        name: OBJ_LOGIN.to_string(),
-                    })
-                })?
-                .id;
-            let obj_admin = database
-                .repository()
-                .get_casbin_name_by_name(OBJ_ADMIN)
-                .await?
-                .ok_or_else(|| {
-                    Error::Server(ServerError::InternalObjectNotFound {
-                        name: OBJ_ADMIN.to_string(),
-                    })
-                })?
-                .id;
-            let obj_player = database
-                .repository()
-                .get_casbin_name_by_name(OBJ_PLAYER)
-                .await?
-                .ok_or_else(|| {
-                    Error::Server(ServerError::InternalObjectNotFound {
-                        name: OBJ_PLAYER.to_string(),
-                    })
-                })?
-                .id;
-            let act_shell = database
-                .repository()
-                .get_casbin_name_by_name(ACT_SHELL)
-                .await?
-                .ok_or_else(|| {
-                    Error::Server(ServerError::ActionNotFound {
-                        name: ACT_SHELL.to_string(),
-                    })
-                })?
-                .id;
-            let act_pty = database
-                .repository()
-                .get_casbin_name_by_name(ACT_PTY)
-                .await?
-                .ok_or_else(|| {
-                    Error::Server(ServerError::ActionNotFound {
-                        name: ACT_PTY.to_string(),
-                    })
-                })?
-                .id;
-            let act_exec = database
-                .repository()
-                .get_casbin_name_by_name(ACT_EXEC)
-                .await?
-                .ok_or_else(|| {
-                    Error::Server(ServerError::ActionNotFound {
-                        name: ACT_EXEC.to_string(),
-                    })
-                })?
-                .id;
-            let act_login = database
-                .repository()
-                .get_casbin_name_by_name(ACT_LOGIN)
-                .await?
-                .ok_or_else(|| {
-                    Error::Server(ServerError::ActionNotFound {
-                        name: ACT_LOGIN.to_string(),
-                    })
-                })?
-                .id;
-            let act_sftp = database
-                .repository()
-                .get_casbin_name_by_name(ACT_SFTP)
-                .await?
-                .ok_or_else(|| {
-                    Error::Server(ServerError::ActionNotFound {
-                        name: ACT_SFTP.to_string(),
-                    })
-                })?
-                .id;
-            let act_direct_tcpip = database
-                .repository()
-                .get_casbin_name_by_name(ACT_DIRECT_TCPIP)
-                .await?
-                .ok_or_else(|| {
-                    Error::Server(ServerError::ActionNotFound {
-                        name: ACT_DIRECT_TCPIP.to_string(),
-                    })
-                })?
-                .id;
-
-            InternalUuids::init(InternalUuids {
-                obj_login,
-                obj_admin,
-                obj_player,
-                act_shell,
-                act_pty,
-                act_exec,
-                act_login,
-                act_sftp,
-                act_direct_tcpip,
-            });
-        }
+        // Every server resolves the internal names against its own database, so
+        // each database gains any action this version added. The global keeps the
+        // first; see `InternalUuids::init`.
+        InternalUuids::init(load_internal_uuids(database.repository()).await?);
 
         Ok(Self {
             config,
@@ -435,6 +334,50 @@ impl BastionServer {
         self.database.repository().update_user(user).await?;
         Ok(password.to_string())
     }
+}
+
+/// Look up every internal name.
+///
+/// A missing action is inserted and warned about: a database created by an
+/// older version lacks the actions added since, and refusing to start would
+/// leave it with no way forward. A missing object is still an error, because
+/// objects have existed since `--init` and losing one means the database is
+/// damaged, not old.
+async fn load_internal_uuids(repo: &dyn DatabaseRepository) -> Result<InternalUuids, Error> {
+    let mut ids = HashMap::new();
+    for name in INTERNAL_OBJECTS {
+        let n = repo.get_casbin_name_by_name(name).await?.ok_or_else(|| {
+            ServerError::InternalObjectNotFound {
+                name: name.to_string(),
+            }
+        })?;
+        ids.insert(name, n.id);
+    }
+    for name in INTERNAL_ACTIONS {
+        let id = match repo.get_casbin_name_by_name(name).await? {
+            Some(n) => n.id,
+            None => {
+                let n = repo
+                    .create_casbin_name(casbin_name::ActiveModel {
+                        id: Set(Uuid::now_v7()),
+                        ptype: Set(NamePtype::InternalActionType),
+                        name: Set(name.to_string()),
+                        is_active: Set(true),
+                        // Written by the system, not by any user.
+                        updated_by: Set(Uuid::nil()),
+                        ..Default::default()
+                    })
+                    .await?;
+                warn!(
+                    "Internal action '{}' was missing; inserted as {}. No policy grants it yet, so its operations are denied until an admin adds one.",
+                    name, n.id
+                );
+                n.id
+            }
+        };
+        ids.insert(name, id);
+    }
+    Ok(InternalUuids::from_ids(&ids))
 }
 
 impl super::HandlerBackend for BastionServer {
