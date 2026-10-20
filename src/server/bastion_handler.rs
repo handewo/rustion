@@ -47,7 +47,11 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
     ) -> Result<(), Self::Error> {
         let user = self.user.as_ref().ok_or(ServerError::UserNotInit)?;
         let channel_id = channel.id();
-        let mut channel_session = ChannelSession::new(Some(channel));
+        // Not kept: russh queues every message for `channel` before calling the
+        // handler, and a full queue nobody reads stops the whole connection.
+        // Every app, sftp included, is fed through the callbacks instead.
+        drop(channel);
+        let mut channel_session = ChannelSession::new();
         if !self.init_session(user).await? {
             reply
                 .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
@@ -180,10 +184,13 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             .ok_or(ServerError::ChannelNotExist)?;
         match channel_session.app {
             Application::ConnectTarget(ref mut app) => app.channel_eof().await,
-            // The proxy owns the channel's stream: EOF ends its read loop, it
-            // writes its last reply, and dropping the stream closes the channel.
-            // Closing here would cut those replies off.
-            Application::Sftp => Ok(()),
+            // End the proxy's input. It reads EOF, writes its last reply, and
+            // closes the channel when it drops its stream. Closing here would
+            // cut those replies off.
+            Application::Sftp => {
+                channel_session.sender = None;
+                Ok(())
+            }
             // An interactive app is still writing. EOF says the client will send
             // no more input — it does not say the app has finished its output,
             // and Ctrl+C arrives as EOF. Closing here discarded whatever the
@@ -258,7 +265,18 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     .map_err(std::io::Error::other)
                     .map_err(Error::IO)
             }
-            Application::Sftp | Application::None => Ok(()),
+            // A full queue holds the session loop here until the proxy reads,
+            // exactly as russh's own channel queue did. Bytes after the proxy
+            // has gone are dropped: the channel is closing.
+            Application::Sftp => {
+                if let Some(input) = channel_session.sender.as_ref()
+                    && input.send(Bytes::copy_from_slice(data)).await.is_err()
+                {
+                    channel_session.sender = None;
+                }
+                Ok(())
+            }
+            Application::None => Ok(()),
         }
     }
 
@@ -389,7 +407,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         session: &mut ru_server::Session,
     ) -> Result<(), Self::Error> {
         let channel_id = channel.id();
-        let mut channel_session = ChannelSession::new(None);
+        let mut channel_session = ChannelSession::new();
         let user = self.user.as_ref().ok_or(ServerError::UserNotInit)?;
 
         if user.force_init_pass {
@@ -467,9 +485,9 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
     }
 
     /// Only `sftp`, and only on a direct target connection. The gate is checked
-    /// before anything is opened on the target, and the client's channel is
-    /// handed to the proxy only once the target session is up, so every failure
-    /// before that is a plain failed request on a channel this handler still owns.
+    /// before anything is opened on the target, and the proxy is wired to the
+    /// client only once the target session is up, so every failure before that
+    /// is a plain failed request on a channel no app is using yet.
     async fn subsystem_request(
         &mut self,
         channel_id: ChannelId,
@@ -519,12 +537,15 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 return refuse(session, channel_id);
             }
         };
-        let Some(client_channel) = channel_session.channel.take() else {
-            return refuse(session, channel_id);
-        };
+        let (input, client) = app::sftp::client::stream(
+            session.handle(),
+            channel_id,
+            session.config().channel_buffer_size,
+        );
+        channel_session.sender = Some(input);
         channel_session.app = Application::Sftp;
         session.channel_success(channel_id)?;
-        proxy.serve(client_channel.into_stream()).await;
+        proxy.serve(client).await;
         Ok(())
     }
 
@@ -925,10 +946,9 @@ impl LoginParse {
 
 struct ChannelSession<B: 'static + HandlerBackend + Send + Sync> {
     pub app: Application<B>,
-    pub channel: Option<Channel<ru_server::Msg>>,
     // shell request
     pub tty: Option<tty::Tty>,
-    // exec request
+    // exec request, or the sftp proxy's input
     pub sender: Option<Sender<Bytes>>,
     // pty
     pub window_size: Option<(u32, u32, u32, u32)>,
@@ -937,10 +957,9 @@ struct ChannelSession<B: 'static + HandlerBackend + Send + Sync> {
 }
 
 impl<B: 'static + HandlerBackend + Send + Sync> ChannelSession<B> {
-    pub fn new(channel: Option<Channel<ru_server::Msg>>) -> Self {
+    pub fn new() -> Self {
         Self {
             app: Application::default(),
-            channel,
             tty: None,
             sender: None,
             window_size: None,
@@ -962,4 +981,135 @@ fn refuse(session: &mut ru_server::Session, channel: ChannelId) -> Result<(), Er
     session.channel_failure(channel)?;
     session.close(channel)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::Config;
+    use crate::database::Uuid;
+    use crate::database::common::{InternalUuids, OBJ_LOGIN};
+    use crate::database::entity::{casbin_name, casbin_rule};
+    use crate::database::fixture::{self, LUKA, PASSWORD};
+    use crate::database::models::{NamePtype, Ptype};
+    use crate::server::{BastionServer, HandlerBackend};
+    use russh::keys::{Algorithm, PrivateKey, PublicKeyOrCertificate};
+    use russh::{ChannelMsg, client as ru_client, server as ru_server};
+    use sea_orm::ActiveValue::Set;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    struct AnyHostKey;
+
+    impl ru_client::Handler for AnyHostKey {
+        type Error = russh::Error;
+
+        async fn check_server_key(
+            &mut self,
+            _: &PublicKeyOrCertificate,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+    }
+
+    /// Let `user` log in under the process-wide `InternalUuids`, which belong to
+    /// whichever server in the test binary was built first and so need not be
+    /// this database's.
+    async fn grant_login(server: &BastionServer, f: &fixture::Fixture, user: Uuid) {
+        let ids = InternalUuids::get();
+        let repo = server.db_repository();
+        if ids.obj_login != f.name(OBJ_LOGIN) {
+            repo.create_casbin_name(casbin_name::ActiveModel {
+                id: Set(ids.obj_login),
+                ptype: Set(NamePtype::InternalObjectType),
+                name: Set(format!("login-{}", ids.obj_login)),
+                is_active: Set(true),
+                updated_by: Set(f.admin_id),
+                ..Default::default()
+            })
+            .await
+            .expect("insert login object");
+        }
+        repo.create_casbin_rule(casbin_rule::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            ptype: Set(Ptype::Policy),
+            v0: Set(user),
+            v1: Set(ids.obj_login),
+            v2: Set(ids.act_login),
+            v3: Set("{}".to_string()),
+            v4: Set(String::new()),
+            v5: Set(String::new()),
+            updated_by: Set(f.admin_id),
+            ..Default::default()
+        })
+        .await
+        .expect("insert login policy");
+    }
+
+    /// russh queues every channel message for the `Channel` handed to
+    /// `channel_open_session` before it calls the handler, in a queue of
+    /// `channel_buffer_size` (100). A handler that kept that `Channel` without
+    /// reading it froze the whole connection on the 101st message. `env` is the
+    /// cheapest message to send that needs no app behind it.
+    #[tokio::test]
+    async fn an_unread_session_channel_cannot_wedge_the_connection() {
+        let db = fixture::seed().await;
+        let mut config = Config::default().gen_secret_token();
+        config.database = db.url.clone();
+        let mut server = BastionServer::with_config(config).await.expect("server");
+        grant_login(&server, &db.fixture, db.fixture.user(LUKA)).await;
+
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).expect("host key");
+        let server_config = Arc::new(ru_server::Config {
+            keys: vec![key],
+            ..Default::default()
+        });
+        let handler = ru_server::Server::new_client(&mut server, None);
+        let (server_io, client_io) = tokio::io::duplex(1 << 20);
+        let mut running = tokio::spawn(async move {
+            ru_server::run_stream(server_config, server_io, handler)
+                .await?
+                .await
+        });
+
+        let flow = async {
+            let mut client = ru_client::connect_stream(
+                Arc::new(ru_client::Config::default()),
+                client_io,
+                AnyHostKey,
+            )
+            .await
+            .expect("connect");
+            let auth = client
+                .authenticate_password(LUKA, PASSWORD)
+                .await
+                .expect("authenticate");
+            assert!(auth.success(), "fixture password rejected");
+            let mut channel = match client.channel_open_session().await {
+                Ok(c) => c,
+                Err(e) => panic!("open session: {e:?}; server: {:?}", (&mut running).await),
+            };
+
+            for i in 0..150 {
+                channel
+                    .set_env(false, format!("V{i}"), "x")
+                    .await
+                    .expect("send env");
+            }
+            channel
+                .request_pty(true, "xterm", 80, 24, 0, 0, &[])
+                .await
+                .expect("send pty-req");
+            loop {
+                match channel.wait().await {
+                    Some(ChannelMsg::Success) => break,
+                    Some(ChannelMsg::Failure) | None => panic!("pty-req refused"),
+                    Some(_) => {}
+                }
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(10), flow)
+            .await
+            .expect("the connection stopped answering after 150 channel requests");
+        running.abort();
+    }
 }

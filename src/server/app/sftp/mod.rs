@@ -13,8 +13,12 @@
 //!
 //! Audited to `event_log` under [`EventKind::Sftp`]: session start and end,
 //! one row per file, every mutation, every denial. Listings are not audited.
+//!
+//! The user's side is a stream fed by the handler's callbacks ([`client`]),
+//! not the russh `Channel`.
 
 mod audit;
+pub(crate) mod client;
 mod handles;
 mod path;
 #[cfg(test)]

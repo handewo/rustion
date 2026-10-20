@@ -98,10 +98,14 @@ Tests are inline (`#[cfg(test)]` modules) in:
 - `server/test.rs` — `HandlerBackend` integration tests against the fixture:
   `enforce` and `list_targets_for_user`, built on a real `BastionServer` opened on
   the fixture's SQLite file (`TestDb::url`).
+- `server/bastion_handler.rs` — A real russh client against a real
+  `BastionServer` over `tokio::io::duplex`: the connection keeps answering past
+  russh's per-channel queue (`channel_buffer_size`), which a retained, unread
+  `Channel` would fill.
 - `server/app/sftp/test.rs` — The SFTP proxy end to end: a `RawSftpSession`
   client, the proxy, and an in-memory fake target joined by `tokio::io::duplex`,
   with policies enforced by a real `BastionServer` on the fixture. Pure helpers
-  are tested inline in `sftp/{path,audit,handles}.rs`.
+  are tested inline in `sftp/{path,audit,handles,client}.rs`.
 - `server/extend_policy.rs` — Extended-policy parsing and matching, including
   the regex `sftp_path` rules.
 - `server/app/change_password.rs` — Password change logic
