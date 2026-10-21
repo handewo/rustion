@@ -19,7 +19,7 @@ rand = { version = "0.10", features = ["sys_rng"] }
 russh = { git = "https://github.com/handewo/russh.git" }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0.18"
-tokio = "1.46.0"
+tokio = "1.54.0"
 toml = "1"
 # Database dependencies
 sea-orm = { version = "2.0.0", default-features = false, features = [
@@ -39,9 +39,9 @@ uuid = { version = "1.0", features = ["v4", "v7", "serde"] }
 async-trait = "0.1"
 serde_json = "1.0"
 rgb = { version = "0.8", default-features = false }
-base64 = "0.22"
+base64 = "0.23"
 sha2 = "0.11"
-aes-gcm = "0.10.3"
+aes-gcm = "0.10"
 futures = "0.3"
 russh-util = "0.52"
 argon2 = "0.5.3"
@@ -76,7 +76,7 @@ unicode-width = "0.2.1"
 lazy_static = "1.5.0"
 regex = "1.12.2"
 tui-tree-widget = { git = "https://github.com/handewo/tui-rs-tree-widget.git", version = "0.24.0" }
-vt100 = "0.16.2"
+vt100 = "0.16"
 tui-term = { git = "https://github.com/handewo/tui-term.git" }
 rustls = { version = "0.23.40", default-features = false, features = [
   "aws-lc-rs",
@@ -93,4 +93,4 @@ russh-sftp = "3.0.0"
 
 [dev-dependencies]
 tempfile = "3.0"
-tokio = { version = "1.46.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.54.0", features = ["macros", "rt-multi-thread"] }
