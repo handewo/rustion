@@ -7,16 +7,16 @@ use crate::server::app::error::AppError;
 use crate::server::error::ServerError;
 use crate::server::extend_policy::ExtendPolicy;
 use crate::server::widgets::{
-    AdminTable, COMMON_HELP, DisplayMode, EditorColors, Message, SingleLineText, centered_area,
+    AdminTable, COMMON_HELP, DisplayMode, Message, SingleLineText, Theme, centered_area,
     render_cancel_dialog, render_message_popup, render_textarea, table_object_group_len_calculator,
-    text_editing_style, text_input_position,
+    text_editing_style, text_input_position, theme,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
-    style::palette::tailwind,
-    widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
+    style::{Color, Style},
+    widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget},
 };
 use sea_orm::ActiveValue::{Set, Unchanged};
 use std::sync::Arc;
@@ -72,7 +72,8 @@ pub(super) struct PermissionEditor {
     longest_action_lens: Vec<Constraint>,
     extend_policy_text: SingleLineText,
     scroll_offset: usize,
-    colors: EditorColors,
+    /// The theme's cursor colour as of the last render; see `FormEditor`.
+    cursor_color: Color,
     pub show_cancel_confirmation: bool,
     editing_mode: bool,
     save_error: Option<Error>,
@@ -141,9 +142,9 @@ impl PermissionEditor {
         Self {
             perm,
             active_model,
-            user_table: AdminTable::new(&user_items, &tailwind::BLUE),
-            target_table: AdminTable::new(&target_items, &tailwind::BLUE),
-            action_table: AdminTable::new(&action_items, &tailwind::BLUE),
+            user_table: AdminTable::new(&user_items),
+            target_table: AdminTable::new(&target_items),
+            action_table: AdminTable::new(&action_items),
             user_items,
             target_items,
             action_items,
@@ -153,7 +154,7 @@ impl PermissionEditor {
             extend_policy_text,
             focused_field: InputField::User,
             scroll_offset: 0,
-            colors: EditorColors::new(&tailwind::BLUE),
+            cursor_color: theme::DEFAULT.accent_dim,
             show_cancel_confirmation: false,
             editing_mode: false,
             save_error,
@@ -333,10 +334,7 @@ impl PermissionEditor {
                     if self.focused_field == InputField::ExtendPolicy =>
                 {
                     self.editing_mode = true;
-                    text_editing_style(
-                        self.colors.input_cursor,
-                        &mut self.extend_policy_text.textarea,
-                    );
+                    text_editing_style(self.cursor_color, &mut self.extend_policy_text.textarea);
                     text_input_position(key, &mut self.extend_policy_text.textarea);
                 }
                 KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('i') | KeyCode::Char('a')
@@ -398,11 +396,11 @@ impl PermissionEditor {
         12
     }
 
-    fn render_textarea(&mut self, area: Rect, buf: &mut Buffer) {
+    fn render_textarea(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         let height = self.window_height();
         let area = centered_area(area, area.width - 2, area.height - 2);
         let editor_area = Rect::new(0, 0, area.width, height);
-        let mut editor_buf = Buffer::empty(editor_area);
+        let mut editor_buf = theme.buffer(editor_area);
         let scrollbar_needed = height > area.height;
         let content_area = if scrollbar_needed {
             Rect {
@@ -431,7 +429,7 @@ impl PermissionEditor {
             "*User/Role*",
             &SingleLineText::new(Some(self.perm.user_role.clone())),
             false,
-            &self.colors,
+            theme,
             self.focused_field == InputField::User,
         );
 
@@ -442,7 +440,7 @@ impl PermissionEditor {
             "*Target/Group*",
             &SingleLineText::new(Some(self.perm.target_group.clone())),
             false,
-            &self.colors,
+            theme,
             self.focused_field == InputField::Target,
         );
 
@@ -453,7 +451,7 @@ impl PermissionEditor {
             "*Action/Group*",
             &SingleLineText::new(Some(self.perm.action_group.clone())),
             false,
-            &self.colors,
+            theme,
             self.focused_field == InputField::Action,
         );
 
@@ -464,7 +462,7 @@ impl PermissionEditor {
             "Extend Policy",
             &self.extend_policy_text,
             self.editing_mode,
-            &self.colors,
+            theme,
             self.focused_field == InputField::ExtendPolicy,
         );
 
@@ -491,11 +489,14 @@ impl PermissionEditor {
             let area = area.intersection(buf.area);
             let mut state =
                 ScrollbarState::new(self.max_scroll_offset()).position(self.scroll_offset);
-            Scrollbar::new(ScrollbarOrientation::VerticalRight).render(area, buf, &mut state);
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .style(Style::new().fg(theme.muted))
+                .render(area, buf, &mut state);
         }
     }
 
-    fn render_ui(&mut self, area: Rect, buf: &mut Buffer) {
+    pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        self.cursor_color = theme.accent_dim;
         if self.editing_mode && self.focused_field != InputField::ExtendPolicy {
             let area = centered_area(area, area.width - 2, area.height - 2);
             match self.focused_field {
@@ -507,6 +508,7 @@ impl PermissionEditor {
                         &self.user_items,
                         &self.longest_user_lens,
                         DisplayMode::Manage,
+                        theme,
                     );
                 }
                 InputField::Target => {
@@ -517,6 +519,7 @@ impl PermissionEditor {
                         &self.target_items,
                         &self.longest_target_lens,
                         DisplayMode::Manage,
+                        theme,
                     );
                 }
                 InputField::Action => {
@@ -527,27 +530,22 @@ impl PermissionEditor {
                         &self.action_items,
                         &self.longest_action_lens,
                         DisplayMode::Manage,
+                        theme,
                     );
                 }
                 InputField::ExtendPolicy => unreachable!(),
             }
         } else {
-            self.render_textarea(area, buf);
+            self.render_textarea(area, buf, theme);
         }
 
         // Render cancel confirmation dialog if needed
         if self.show_cancel_confirmation {
-            render_cancel_dialog(area, buf);
+            render_cancel_dialog(area, buf, theme);
         }
 
         if let Some(err) = self.save_error.as_ref() {
-            render_message_popup(area, buf, &Message::Error(vec![err.to_string()]));
+            render_message_popup(area, buf, &Message::Error(vec![err.to_string()]), theme);
         }
-    }
-}
-
-impl Widget for &mut PermissionEditor {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        self.render_ui(area, buf);
     }
 }

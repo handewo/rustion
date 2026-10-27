@@ -51,6 +51,46 @@ impl std::str::FromStr for LogLevel {
     }
 }
 
+/// Colour theme of the TUIs: the admin panels and the replay player. This is
+/// the one a session starts with; each session can switch it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ThemeName {
+    #[default]
+    Default,
+    OledBlack,
+    OledWhite,
+    Nord,
+    Gruvbox,
+}
+
+impl ThemeName {
+    pub const ALL: [ThemeName; 5] = [
+        ThemeName::Default,
+        ThemeName::OledBlack,
+        ThemeName::OledWhite,
+        ThemeName::Nord,
+        ThemeName::Gruvbox,
+    ];
+
+    /// The name as written in `rustion.toml`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ThemeName::Default => "default",
+            ThemeName::OledBlack => "oled-black",
+            ThemeName::OledWhite => "oled-white",
+            ThemeName::Nord => "nord",
+            ThemeName::Gruvbox => "gruvbox",
+        }
+    }
+}
+
+impl std::fmt::Display for ThemeName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 fn default_unban_duration() -> Duration {
     Duration::from_secs(900)
 }
@@ -132,6 +172,8 @@ pub struct Config {
     #[serde(default = "default_auth_rejection_time")]
     #[serde(with = "humantime_serde")]
     pub auth_rejection_time: Duration,
+    #[serde(default)]
+    pub theme: ThemeName,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,6 +226,7 @@ impl Config {
             record_input: false,
             record_path: default_record_path(),
             auth_rejection_time: default_auth_rejection_time(),
+            theme: ThemeName::default(),
         }
     }
 
@@ -343,7 +386,8 @@ impl std::fmt::Display for Config {
             enable_record: {}\r
             record_input: {}\r
             record_path: {}\r
-            auth_rejection_time: {}\r",
+            auth_rejection_time: {}\r
+            theme: {}\r",
             self.listen,
             self.server_key,
             self.server_id,
@@ -366,6 +410,7 @@ impl std::fmt::Display for Config {
             self.record_input,
             self.record_path,
             humantime::format_duration(self.auth_rejection_time),
+            self.theme,
         )
     }
 }
@@ -395,6 +440,7 @@ mod tests {
             record_input: false,
             record_path: default_record_path(),
             auth_rejection_time: default_auth_rejection_time(),
+            theme: ThemeName::default(),
         };
         assert!(config.parse_listen_addr().is_ok());
 
@@ -417,6 +463,7 @@ mod tests {
             record_input: false,
             record_path: default_record_path(),
             auth_rejection_time: default_auth_rejection_time(),
+            theme: ThemeName::default(),
         };
         let addr = config.parse_listen_addr().unwrap();
         assert_eq!(addr.port(), 2222);
@@ -440,6 +487,7 @@ mod tests {
             record_input: false,
             record_path: default_record_path(),
             auth_rejection_time: default_auth_rejection_time(),
+            theme: ThemeName::default(),
         };
         let addr = config.parse_listen_addr().unwrap();
         assert_eq!(addr.port(), 2222);
@@ -469,6 +517,7 @@ mod tests {
             record_input: false,
             record_path: default_record_path(),
             auth_rejection_time: default_auth_rejection_time(),
+            theme: ThemeName::default(),
         };
         assert!(invalid_config.validate().is_err());
     }
@@ -487,5 +536,28 @@ mod tests {
 
         // Test invalid log level
         assert!("invalid".parse::<LogLevel>().is_err());
+    }
+
+    #[test]
+    fn test_theme_parsing() {
+        #[derive(Deserialize)]
+        struct Only {
+            #[serde(default)]
+            theme: ThemeName,
+        }
+        let parse = |s: &str| toml::from_str::<Only>(s).map(|o| o.theme);
+        assert_eq!(parse("").unwrap(), ThemeName::Default);
+        assert_eq!(
+            parse(r#"theme = "oled-black""#).unwrap(),
+            ThemeName::OledBlack
+        );
+        assert_eq!(
+            parse(r#"theme = "oled-white""#).unwrap(),
+            ThemeName::OledWhite
+        );
+        assert!(parse(r#"theme = "solarized""#).is_err());
+        for name in ThemeName::ALL {
+            assert_eq!(parse(&format!("theme = \"{name}\"")).unwrap(), name);
+        }
     }
 }

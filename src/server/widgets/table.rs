@@ -1,70 +1,38 @@
+use super::Theme;
 use super::common::print_short_uuid;
 use crate::database::models::*;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Margin, Rect};
-use ratatui::style::{self, Color, Modifier, Style, Stylize};
+use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::Text;
 use ratatui::widgets::{
     Cell, HighlightSpacing, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
     Table, TableState,
 };
-use style::palette::tailwind;
 use unicode_width::UnicodeWidthStr;
-
-pub struct Colors {
-    pub buffer_bg: Color,
-    pub header_bg: Color,
-    pub header_fg: Color,
-    pub row_fg: Color,
-    selected_row_style_fg: Color,
-    selected_column_style_fg: Color,
-    selected_cell_style_fg: Color,
-    normal_row_color: Color,
-    alt_row_color: Color,
-    pub footer_border_color: Color,
-}
-
-impl Colors {
-    pub const fn new(color: &tailwind::Palette) -> Self {
-        Self {
-            buffer_bg: tailwind::SLATE.c950,
-            header_bg: color.c900,
-            header_fg: tailwind::SLATE.c200,
-            row_fg: tailwind::SLATE.c200,
-            selected_row_style_fg: color.c400,
-            selected_column_style_fg: color.c400,
-            selected_cell_style_fg: color.c600,
-            normal_row_color: tailwind::SLATE.c950,
-            alt_row_color: tailwind::SLATE.c900,
-            footer_border_color: color.c400,
-        }
-    }
-
-    pub fn gray(&mut self) {
-        self.header_bg = tailwind::GRAY.c900;
-        self.selected_row_style_fg = tailwind::GRAY.c400;
-        self.selected_column_style_fg = tailwind::GRAY.c400;
-        self.selected_cell_style_fg = tailwind::GRAY.c600;
-    }
-}
 
 pub struct AdminTable {
     pub state: TableState,
     scroll_state: ScrollbarState,
     row_height: usize,
-    pub colors: Colors,
+    /// Drawn in the theme's inactive colours, for while a popup is on top.
+    dimmed: bool,
     pub size: (u16, u16),
 }
 
 impl AdminTable {
-    pub fn new<T: TableData>(items: &T, color: &tailwind::Palette) -> Self {
+    pub fn new<T: TableData>(items: &T) -> Self {
         AdminTable {
             state: TableState::default().with_selected(0),
             scroll_state: ScrollbarState::new((items.len().max(1) - 1) * 2),
             row_height: 2,
-            colors: Colors::new(color),
+            dimmed: false,
             size: (0, 0),
         }
+    }
+
+    pub fn dim(&mut self, dimmed: bool) {
+        self.dimmed = dimmed;
     }
 
     pub fn previous_page(&mut self) {
@@ -172,20 +140,24 @@ impl AdminTable {
         items: &T,
         longest_item_lens: &Vec<Constraint>,
         mode: DisplayMode,
+        theme: &Theme,
     ) {
-        let header_style = Style::default()
-            .fg(self.colors.header_fg)
-            .bg(self.colors.header_bg);
+        let (header_bg, selected, selected_cell) = if self.dimmed {
+            (theme.inactive_bar, theme.inactive, theme.inactive_dim)
+        } else {
+            (theme.bar_bg, theme.accent, theme.accent_dim)
+        };
+        let header_style = Style::default().fg(theme.bar_fg).bg(header_bg).bold();
 
         let selected_row_style = Style::default()
             .add_modifier(Modifier::REVERSED)
-            .fg(self.colors.selected_row_style_fg);
+            .fg(selected);
 
-        let selected_col_style = Style::default().fg(self.colors.selected_column_style_fg);
+        let selected_col_style = Style::default().fg(selected);
 
         let selected_cell_style = Style::default()
             .add_modifier(Modifier::REVERSED)
-            .fg(self.colors.selected_cell_style_fg);
+            .fg(selected_cell);
 
         let header = items
             .header()
@@ -198,15 +170,15 @@ impl AdminTable {
         let items = items.as_vec();
         let rows = items.iter().enumerate().map(|(i, data)| {
             let color = match i % 2 {
-                0 => self.colors.normal_row_color,
-                _ => self.colors.alt_row_color,
+                0 => theme.bg,
+                _ => theme.alt_bg,
             };
 
             let item = data.to_array(mode);
             item.into_iter()
                 .map(|content| Cell::from(Text::from(content.to_string())))
                 .collect::<Row>()
-                .style(Style::new().fg(self.colors.row_fg).bg(color))
+                .style(Style::new().fg(theme.fg).bg(color))
                 .height(self.row_height as u16)
         });
 
@@ -217,7 +189,7 @@ impl AdminTable {
             .column_highlight_style(selected_col_style)
             .cell_highlight_style(selected_cell_style)
             .highlight_symbol(Text::from(bar))
-            .bg(self.colors.buffer_bg)
+            .bg(theme.bg)
             .highlight_spacing(HighlightSpacing::Always);
 
         t.render(area, buf, &mut self.state);
@@ -229,6 +201,7 @@ impl AdminTable {
 
         Scrollbar::default()
             .orientation(ScrollbarOrientation::VerticalRight)
+            .style(Style::new().fg(theme.muted))
             .render(
                 area.inner(Margin {
                     vertical: 1,

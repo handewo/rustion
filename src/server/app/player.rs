@@ -4,9 +4,9 @@ use crate::error::Error;
 use crate::server::error::ServerError;
 use crate::server::extend_policy;
 use crate::server::widgets::{
-    AdminTable, Colors, DisplayMode, FormEditor, FormEvent, FormField, Message, centered_area,
+    AdminTable, DisplayMode, FormEditor, FormEvent, FormField, Message, Theme, centered_area,
     common::{DATETIME_LENGTH, MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW},
-    render_message_popup,
+    popup_block, render_footer, render_message_popup, render_title_bar,
 };
 use bytes::Bytes;
 use crossterm::event::{
@@ -19,11 +19,9 @@ use tui_term::widget::PseudoTerminal;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect, Size};
-use ratatui::style::{Modifier, Style, palette::tailwind};
-use ratatui::text::{Line, Text};
+use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{
-    Block, BorderType, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
-    Widget,
+    Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget,
 };
 use ratatui_core::terminal::AsyncTerminal;
 use unicode_width::UnicodeWidthStr;
@@ -47,7 +45,7 @@ use std::time::{Duration, Instant};
 
 const SCROLLBACK_LEN: usize = 1000;
 const HELP_TEXT: [&str; 2] = [
-    "(Enter) play | (Esc) quit | (↑↓) select | (s) setting",
+    "(Enter) play | (q) quit | (↑↓) select | (s) setting | (r) refresh | (t) theme",
     "(+/-) zoom in/out | (PgUp/PgDn) page up/down",
 ];
 
@@ -200,6 +198,7 @@ where
     pause: bool,
 
     setting: Setting,
+    theme: &'static Theme,
 
     pub help_text: [&'static str; 2],
 }
@@ -227,9 +226,10 @@ where
         };
 
         let longest_item_lens = Self::constraint_len_calculator(&items);
+        let theme = Theme::of(backend.theme());
 
         App {
-            table: AdminTable::new(&items, &tailwind::BLUE),
+            table: AdminTable::new(&items),
             items,
             longest_item_lens,
             backend,
@@ -248,6 +248,7 @@ where
             pause: false,
 
             setting: Setting::new(),
+            theme,
 
             help_text: HELP_TEXT,
         }
@@ -304,7 +305,7 @@ where
         };
         self.items = items;
         self.longest_item_lens = Self::constraint_len_calculator(&self.items);
-        self.table = AdminTable::new(&self.items, &tailwind::BLUE);
+        self.table = AdminTable::new(&self.items);
     }
 
     async fn do_play(
@@ -663,13 +664,13 @@ where
                             } else {
                                 self.setting.editing_mode = false;
                                 self.setting.form.show_cancel_confirmation = false;
-                                self.table.colors = Colors::new(&tailwind::BLUE);
+                                self.table.dim(false);
                             }
                         }
                         FormEvent::Cancel => {
                             self.setting.editing_mode = false;
                             self.setting.form.show_cancel_confirmation = false;
-                            self.table.colors = Colors::new(&tailwind::BLUE);
+                            self.table.dim(false);
                         }
                         FormEvent::None => {}
                     }
@@ -691,8 +692,9 @@ where
                     }
                     KeyCode::Char('s') => {
                         self.setting.editing_mode = true;
-                        self.table.colors.gray();
+                        self.table.dim(true);
                     }
+                    KeyCode::Char('t') => self.theme = self.theme.next(),
                     KeyCode::Char('q') => break,
                     KeyCode::Char('c') if ctrl_pressed => break,
                     KeyCode::Char('j') | KeyCode::Down => self.table.next_row(items_len),
@@ -713,6 +715,8 @@ where
 
     fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
+        let theme = self.theme;
+        theme.paint(area, frame.buffer_mut());
 
         let layout = Layout::vertical([
             Constraint::Length(1),
@@ -723,33 +727,22 @@ where
 
         self.table.size = (table_area.width, table_area.height);
 
-        self.render_header(frame, header_area);
+        render_title_bar(header_area, frame.buffer_mut(), "Player", theme);
         self.table.render(
             frame.buffer_mut(),
             table_area,
             &self.items,
             &self.longest_item_lens,
             DisplayMode::Full,
+            theme,
         );
         if let Some(ref msg) = self.message {
-            render_message_popup(table_area, frame.buffer_mut(), msg);
+            render_message_popup(table_area, frame.buffer_mut(), msg, theme);
         }
         if self.setting.editing_mode {
             self.render_setting_popup(frame, table_area);
         }
         self.render_footer(frame, footer_area);
-    }
-
-    fn render_header(&self, frame: &mut Frame, area: Rect) {
-        let header = Paragraph::new("Player")
-            .style(
-                Style::new()
-                    .bold()
-                    .fg(tailwind::SLATE.c200)
-                    .bg(tailwind::BLUE.c900),
-            )
-            .centered();
-        frame.render_widget(header, area);
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
@@ -758,20 +751,7 @@ where
         } else {
             self.help_text
         };
-        let info_footer = Paragraph::new(Text::from_iter(help_text))
-            .style(
-                Style::new()
-                    .fg(self.table.colors.row_fg)
-                    .bg(self.table.colors.buffer_bg),
-            )
-            .centered()
-            .block(
-                Block::bordered()
-                    .border_type(BorderType::Double)
-                    .border_style(Style::new().fg(self.table.colors.footer_border_color)),
-            );
-
-        frame.render_widget(info_footer, area);
+        render_footer(area, frame.buffer_mut(), help_text, self.theme);
     }
 
     fn render_setting_popup(&mut self, frame: &mut Frame, area: Rect) {
@@ -784,15 +764,12 @@ where
                 area.height.min(MAX_POPUP_WINDOW_ROW),
             )
         };
-        let title = Line::styled("Setting", Style::default().bold());
-        let popup = Block::bordered()
-            .title(title)
-            .title_style(Style::new().fg(self.table.colors.header_fg))
-            .border_style(Style::new().fg(self.table.colors.footer_border_color))
-            .border_type(BorderType::Double);
-        frame.render_widget(Clear, popup_area);
-        frame.render_widget(popup, popup_area);
-        self.setting.form.render_ui(popup_area, frame.buffer_mut());
+        let theme = self.theme;
+        theme.clear(popup_area, frame.buffer_mut());
+        frame.render_widget(popup_block("Setting", theme), popup_area);
+        self.setting
+            .form
+            .render_ui(popup_area, frame.buffer_mut(), theme);
     }
 
     fn player_ui(&mut self, f: &mut Frame, screen: &Screen, size: Size) {
@@ -806,11 +783,12 @@ where
                 .as_ref(),
             )
             .split(f.area());
-        let block = Block::default().borders(Borders::ALL).style(
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .fg(self.table.colors.footer_border_color),
-        );
+        let theme = self.theme;
+        theme.paint(f.area(), f.buffer_mut());
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme.accent));
         let term_area = Rect::new(0, 0, size.width + 2, size.height + 2);
         let buf = f.buffer_mut();
         let mut term_buf = Buffer::empty(term_area);
@@ -868,11 +846,9 @@ where
             // let area = visible_area.intersection(buf.area);
             let mut state = ScrollbarState::new(max_horizontal_scroll_offset)
                 .position(self.horizontal_scroll_offset);
-            Scrollbar::new(ScrollbarOrientation::HorizontalBottom).render(
-                horizontal_bar_area,
-                buf,
-                &mut state,
-            );
+            Scrollbar::new(ScrollbarOrientation::HorizontalBottom)
+                .style(Style::new().fg(theme.muted))
+                .render(horizontal_bar_area, buf, &mut state);
         }
 
         if vertical_bar_needed {
@@ -888,15 +864,14 @@ where
             // let area = visible_area.intersection(buf.area);
             let mut state = ScrollbarState::new(max_vertical_scroll_offset)
                 .position(self.vertical_scroll_offset);
-            Scrollbar::new(ScrollbarOrientation::VerticalRight).render(
-                vertical_bar_area,
-                buf,
-                &mut state,
-            );
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .style(Style::new().fg(theme.muted))
+                .render(vertical_bar_area, buf, &mut state);
         }
 
         let pseudo_term = PseudoTerminal::new(screen).block(block);
         pseudo_term.render(term_area, &mut term_buf);
+        theme.fill_defaults(&mut term_buf);
         match (horizontal_bar_needed, vertical_bar_needed) {
             (false, false) => {
                 let width = term_area.width;
@@ -977,8 +952,9 @@ where
         };
         let explanation = Paragraph::new(explanation).style(
             Style::default()
-                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
-                .fg(self.table.colors.footer_border_color),
+                .add_modifier(Modifier::BOLD)
+                .fg(theme.bar_fg)
+                .bg(theme.bar_bg),
         );
         f.render_widget(explanation, chunks[1]);
     }

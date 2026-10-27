@@ -6,7 +6,7 @@ use crate::error::Error;
 use crate::server::app::error::AppError;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
-use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use ratatui::{buffer::Buffer, layout::Rect};
 use sea_orm::ActiveValue::{Set, Unchanged};
 
 // Radio button options for ptype selection (static for RadioButtons widget)
@@ -115,8 +115,8 @@ impl CasbinNameEditor {
     }
 }
 
-impl Widget for &mut CasbinNameEditor {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        self.form.render_ui(area, buf);
+impl CasbinNameEditor {
+    pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        self.form.render_ui(area, buf, theme);
     }
 }

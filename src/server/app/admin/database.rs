@@ -4,22 +4,20 @@ use crate::database::common::{
 };
 use crate::database::models::*;
 use crate::error::Error;
-use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData as TD};
+use crate::server::widgets::{
+    AdminTable, DisplayMode, FieldsToArray, TabBar, TableData as TD, Theme, render_footer,
+};
 use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent, SenderWriter};
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::Frame;
 use ratatui::backend::NottyBackend;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{self, Color, Style, Stylize};
-use ratatui::text::Text;
-use ratatui::widgets::{Block, BorderType, Paragraph, Tabs};
 use ratatui_core::terminal::AsyncTerminal;
 use std::sync::Arc;
-use style::palette::tailwind;
 use unicode_width::UnicodeWidthStr;
 
 const INFO_TEXT: [&str; 2] = [
-    "(Esc) quit | (↑) move up | (↓) move down | (←) move left | (→) move right",
+    "(Esc) quit | (t) theme | (↑) move up | (↓) move down | (←) move left | (→) move right",
     "(Tab) next tab | (Shift Tab) previous tab | (+) zoom in | (-) zoom out | (PgUp) page up | (PgDn) page down",
 ];
 
@@ -31,6 +29,7 @@ pub(super) async fn query_table<B>(
     tty: NoTtyEvent,
     writer: SenderWriter,
     backend: Arc<B>,
+    theme: &mut &'static Theme,
 ) -> Result<(), Error>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
@@ -38,7 +37,11 @@ where
     let tty_backend = NottyBackend::new(tty.clone(), writer.clone());
     let mut terminal = AsyncTerminal::new(tty_backend)?;
     crossterm::async_execute!(&writer, EnterAlternateScreen).await?;
-    App::new(backend).await.run(tty, &mut terminal).await?;
+    let mut app = App::new(backend, theme).await;
+    let result = app.run(tty, &mut terminal).await;
+    // The shell starts the next panel in the theme this one ended with.
+    *theme = app.theme;
+    result?;
     crossterm::async_execute!(&writer, LeaveAlternateScreen).await?;
     Ok(())
 }
@@ -52,6 +55,8 @@ where
     longest_item_lens: Vec<Constraint>,
     selected_tab: usize,
     last_selected_tab: usize,
+    tabs: TabBar,
+    theme: &'static Theme,
     backend: Arc<B>,
 }
 
@@ -59,7 +64,7 @@ impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    async fn new(backend: Arc<B>) -> Self {
+    async fn new(backend: Arc<B>, theme: &'static Theme) -> Self {
         let data = TableData::Users(
             backend
                 .db_repository()
@@ -68,10 +73,12 @@ where
                 .unwrap_or_default(),
         );
         Self {
-            table: AdminTable::new(&data, &tailwind::BLUE),
+            table: AdminTable::new(&data),
             longest_item_lens: data.constraint_len_calculator(),
             selected_tab: 0,
             last_selected_tab: 0,
+            tabs: TabBar::default(),
+            theme,
             backend,
             items: data,
         }
@@ -98,7 +105,7 @@ where
     }
 
     async fn run(
-        mut self,
+        &mut self,
         tty: NoTtyEvent,
         terminal: &mut AsyncTerminal<NottyBackend>,
     ) -> Result<(), Error> {
@@ -115,6 +122,7 @@ where
                     KeyCode::Char('b') if ctrl_pressed => self.table.previous_page(),
                     KeyCode::Char('+') => self.table.zoom_in(),
                     KeyCode::Char('-') => self.table.zoom_out(),
+                    KeyCode::Char('t') => self.theme = self.theme.next(),
                     KeyCode::Tab => self.next_tab().await,
                     KeyCode::BackTab => self.previous_tab().await,
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
@@ -129,6 +137,7 @@ where
     }
 
     fn render(&mut self, frame: &mut Frame) {
+        self.theme.paint(frame.area(), frame.buffer_mut());
         let layout = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(5),
@@ -145,6 +154,7 @@ where
             &self.items,
             &self.longest_item_lens,
             DisplayMode::Full,
+            self.theme,
         );
         self.render_footer(frame, footer_area);
     }
@@ -232,40 +242,17 @@ where
     }
 
     fn render_tabs(&mut self, frame: &mut Frame, area: Rect) {
-        let tabs = Tabs::new(
-            TABLE_LIST
-                .iter()
-                .map(|v| format!("{v:^17}").fg(tailwind::SLATE.c400)),
-        )
-        .style(Color::White)
-        .highlight_style(
-            Style::default()
-                .magenta()
-                .on_black()
-                .bold()
-                .fg(self.table.colors.header_fg)
-                .bg(self.table.colors.header_bg),
-        )
-        .select(self.selected_tab)
-        .divider(" ")
-        .padding("", "");
-        frame.render_widget(tabs, area);
+        self.tabs.render(
+            area,
+            frame.buffer_mut(),
+            &TABLE_LIST,
+            self.selected_tab,
+            self.theme,
+        );
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        let info_footer = Paragraph::new(Text::from_iter(INFO_TEXT))
-            .style(
-                Style::new()
-                    .fg(self.table.colors.row_fg)
-                    .bg(self.table.colors.buffer_bg),
-            )
-            .centered()
-            .block(
-                Block::bordered()
-                    .border_type(BorderType::Double)
-                    .border_style(Style::new().fg(self.table.colors.footer_border_color)),
-            );
-        frame.render_widget(info_footer, area);
+        render_footer(area, frame.buffer_mut(), INFO_TEXT, self.theme);
     }
 }
 

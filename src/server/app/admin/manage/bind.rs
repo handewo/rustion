@@ -3,15 +3,14 @@ use crate::database::models::{SecretInfo, TargetInfo};
 use crate::error::Error;
 use crate::server::app::admin::error::AdminError;
 use crate::server::event_log::EventLogger;
-use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData};
+use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData, Theme};
 use crate::server::widgets::{Message, centered_area, render_message_popup};
 use ::log::{error, info};
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
-    style::palette::tailwind,
-    style::{Color, Style},
+    style::Style,
     widgets::{Block, BorderType, Widget},
 };
 use std::sync::Arc;
@@ -48,7 +47,6 @@ where
     target_table: AdminTable,
     secret_table: AdminTable,
     focused_table: FocusedTable,
-    editor_colors: EditorColors,
     backend: Arc<B>,
     handler_id: Uuid,
     admin_id: Uuid,
@@ -74,10 +72,9 @@ where
             secrets: secrets.clone(),
             longest_target_lens: target_len_calculator(&targets),
             longest_secret_lens: secret_len_calculator(&secrets),
-            target_table: AdminTable::new(&targets, &tailwind::BLUE),
-            secret_table: AdminTable::new(&secrets, &tailwind::BLUE),
+            target_table: AdminTable::new(&targets),
+            secret_table: AdminTable::new(&secrets),
             focused_table: FocusedTable::Left,
-            editor_colors: EditorColors::new(&tailwind::BLUE),
             backend,
             handler_id,
             admin_id,
@@ -236,7 +233,7 @@ where
         }
     }
 
-    fn render_ui(&mut self, area: Rect, buf: &mut Buffer) {
+    pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         // Create main layout with two columns
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -246,26 +243,27 @@ where
             ])
             .split(area);
 
-        let mut target_border = Block::bordered()
-            .title("targets")
-            .border_type(BorderType::Double);
-
-        let mut secret_border = Block::bordered()
-            .title("secrets")
-            .border_type(BorderType::Double);
-
-        match self.focused_table {
-            FocusedTable::Left => {
-                target_border = target_border
-                    .title_style(Style::new().fg(self.editor_colors.title_color))
-                    .border_style(Style::new().fg(self.editor_colors.border_color))
-            }
-            FocusedTable::Right => {
-                secret_border = secret_border
-                    .title_style(Style::new().fg(self.editor_colors.title_color))
-                    .border_style(Style::new().fg(self.editor_colors.border_color))
-            }
+        let border = |title, focused| {
+            let (title_style, border_style) = if focused {
+                (
+                    Style::new().fg(theme.title).bold(),
+                    Style::new().fg(theme.accent),
+                )
+            } else {
+                (Style::new().fg(theme.muted), Style::new().fg(theme.border))
+            };
+            Block::bordered()
+                .title(title)
+                .border_type(BorderType::Double)
+                .title_style(title_style)
+                .border_style(border_style)
         };
+        let target_border = border(" Targets ", self.focused_table == FocusedTable::Left);
+        let secret_border = border(" Secrets ", self.focused_table == FocusedTable::Right);
+        self.target_table
+            .dim(self.focused_table != FocusedTable::Left);
+        self.secret_table
+            .dim(self.focused_table != FocusedTable::Right);
 
         target_border.render(chunks[0], buf);
         secret_border.render(chunks[1], buf);
@@ -283,6 +281,7 @@ where
             &self.targets,
             &self.longest_target_lens,
             DisplayMode::Manage,
+            theme,
         );
         // Render right table (Secrets)
         self.secret_table.render(
@@ -291,6 +290,7 @@ where
             &self.secrets,
             &self.longest_secret_lens,
             DisplayMode::Manage,
+            theme,
         );
 
         if let Some(err) = self.save_error.as_ref() {
@@ -300,20 +300,16 @@ where
                     AdminError::DuplicateTargetUser { .. }
                 ))
             ) {
-                render_message_popup(area, buf, &Message::Error(vec![err.to_string()]));
+                render_message_popup(area, buf, &Message::Error(vec![err.to_string()]), theme);
             } else {
-                render_message_popup(area, buf, &Message::Error(vec!["Internal error".into()]));
+                render_message_popup(
+                    area,
+                    buf,
+                    &Message::Error(vec!["Internal error".into()]),
+                    theme,
+                );
             }
         }
-    }
-}
-
-impl<B> Widget for &mut BindEditor<B>
-where
-    B: 'static + crate::server::HandlerBackend + Send + Sync,
-{
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        self.render_ui(area, buf);
     }
 }
 
@@ -432,18 +428,4 @@ fn secret_len_calculator(data: &[SecretInfo]) -> Vec<Constraint> {
         Constraint::Length(name_len as u16),
         Constraint::Length(user_len as u16),
     ]
-}
-
-struct EditorColors {
-    border_color: Color,
-    title_color: Color,
-}
-
-impl EditorColors {
-    const fn new(color: &tailwind::Palette) -> Self {
-        Self {
-            border_color: color.c400,
-            title_color: tailwind::SLATE.c200,
-        }
-    }
 }

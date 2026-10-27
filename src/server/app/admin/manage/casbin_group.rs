@@ -5,17 +5,16 @@ use crate::error::Error;
 use crate::server::event_log::EventLogger;
 use crate::server::widgets::tree;
 use crate::server::widgets::{
-    AdminTable, DisplayMode, Message, centered_area, common::*, render_confirm_dialog,
-    render_message_popup, table_object_group_len_calculator,
+    AdminTable, DisplayMode, Message, Theme, centered_area, common::*, popup_block,
+    render_confirm_dialog, render_message_popup, table_object_group_len_calculator,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use log::{error, info, warn};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Rect},
-    style::palette::tailwind,
-    style::{Color, Modifier, Style},
-    widgets::{Block, BorderType, Clear, Scrollbar, ScrollbarOrientation},
+    style::{Modifier, Style},
+    widgets::{Block, BorderType, Scrollbar, ScrollbarOrientation},
 };
 use sea_orm::ActiveValue::Set;
 use std::sync::Arc;
@@ -37,7 +36,6 @@ where
 {
     state: TreeState<tree::Identifier>,
     items: Vec<TreeItem<'static, tree::Identifier>>,
-    editor_colors: EditorColors,
     group_type: GroupType,
     selector_items: Vec<ObjectGroup>,
     selector_table: AdminTable,
@@ -84,8 +82,7 @@ where
             state,
             items,
             group_type,
-            editor_colors: EditorColors::new(&tailwind::BLUE),
-            selector_table: AdminTable::new(&selector_items, &tailwind::BLUE),
+            selector_table: AdminTable::new(&selector_items),
             selector_items,
             longest_item_lens,
             backend,
@@ -518,36 +515,34 @@ where
         };
     }
 
-    pub fn draw(&mut self, area: Rect, buf: &mut Buffer) {
+    pub fn draw(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        let covered = self.is_editing || self.is_deleting || self.message.is_some();
         {
-            let mut block = Block::bordered()
+            let block = Block::bordered()
                 .border_type(BorderType::Double)
-                .border_style(Style::new().fg(self.editor_colors.border_color));
-            if self.is_editing || self.is_deleting || self.message.is_some() {
-                block = block.border_style(Style::default());
-            }
+                .border_style(Style::new().fg(if covered { theme.border } else { theme.accent }));
 
             use ratatui::widgets::Widget;
             block.render(area, buf);
         }
         let inner_area = centered_area(area, area.width - 2, area.height - 2);
         self.win_size = (inner_area.width, inner_area.height);
-        let mut widget = Tree::new(&self.items)
+        let widget = Tree::new(&self.items)
             .expect("all item identifiers must be unique")
-            .experimental_scrollbar(Some(Scrollbar::new(ScrollbarOrientation::VerticalRight)))
+            .experimental_scrollbar(Some(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .style(Style::new().fg(theme.muted)),
+            ))
+            .style(theme.base())
             .highlight_style(
                 Style::new()
                     .add_modifier(Modifier::REVERSED)
-                    .fg(self.editor_colors.border_color),
+                    .fg(if covered {
+                        theme.inactive
+                    } else {
+                        theme.accent
+                    }),
             );
-
-        if self.is_editing || self.is_deleting || self.message.is_some() {
-            widget = widget.highlight_style(
-                Style::new()
-                    .add_modifier(Modifier::REVERSED)
-                    .fg(tailwind::GRAY.c400),
-            );
-        }
         use ratatui::widgets::StatefulWidget;
         widget.render(inner_area, buf, &mut self.state);
 
@@ -562,17 +557,17 @@ where
         };
 
         if self.is_editing {
-            self.draw_popup(popup_area, buf);
+            self.draw_popup(popup_area, buf, theme);
         }
         if self.is_deleting {
-            self.draw_delete(popup_area, buf);
+            self.draw_delete(popup_area, buf, theme);
         }
         if let Some(ref msg) = self.message {
-            render_message_popup(popup_area, buf, msg);
+            render_message_popup(popup_area, buf, msg, theme);
         }
     }
 
-    fn draw_delete(&mut self, area: Rect, buf: &mut Buffer) {
+    fn draw_delete(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         let iden_list = self.state.selected();
         if iden_list.len() > 1 {
             let group_iden = self.state.selected().first().unwrap();
@@ -591,10 +586,11 @@ where
                 area,
                 buf,
                 &[format!("Delete {} in group: {}?", i_name, g_name)],
+                theme,
             );
         }
     }
-    fn draw_popup(&mut self, area: Rect, buf: &mut Buffer) {
+    fn draw_popup(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         let iden = match self.state.selected().first() {
             Some(i) => i,
             None => {
@@ -614,14 +610,9 @@ where
                 );
                 "Unknown".to_string()
             });
-        let title = format!("Add to Group: {}", g_name);
-        let popup = Block::bordered()
-            .title(title)
-            .title_style(Style::new().fg(self.editor_colors.title_color))
-            .border_style(Style::new().fg(self.editor_colors.border_color))
-            .border_type(BorderType::Double);
+        let popup = popup_block(format!(" Add to Group: {} ", g_name), theme);
         use ratatui::widgets::Widget;
-        Clear.render(area, buf);
+        theme.clear(area, buf);
         popup.render(area, buf);
 
         let table_area = centered_area(area, area.width - 2, area.height - 2);
@@ -632,20 +623,7 @@ where
             &self.selector_items,
             &self.longest_item_lens,
             DisplayMode::Manage,
+            theme,
         );
-    }
-}
-
-struct EditorColors {
-    title_color: Color,
-    border_color: Color,
-}
-
-impl EditorColors {
-    const fn new(color: &tailwind::Palette) -> Self {
-        Self {
-            border_color: color.c400,
-            title_color: tailwind::SLATE.c200,
-        }
     }
 }

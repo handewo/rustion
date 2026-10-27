@@ -42,6 +42,7 @@ main.rs → cli.rs (clap) → Config (TOML) → BastionServer::with_config()
 - **`server/bastion_handler.rs`** — Implements `russh::server::Handler`. Per-connection state machine routing I/O to the active `Application`.
 - **`server/app/sftp/`** — SFTP proxy: per-operation actions (`SftpActions`), regex `sftp_path` rules in `ExtendPolicy`, lexical path resolution against the target's home, handle table, audit rows under `EventKind::Sftp`.
 - **`server/app/admin/`** — TUI admin interface using ratatui + reedline. CRUD for users, targets, secrets, roles, permissions, and bindings.
+- **`server/widgets/`** — Widgets shared by the admin panels and the replay player. `theme.rs` holds the colour themes; widgets take a `&Theme` at render time instead of keeping colours, and `TabBar`, `render_footer`, `popup_block` and the dialogs keep the panels looking the same. `t` cycles the theme in any panel; the admin shell carries the choice from one panel to the next.
 - **`asciinema/`** — Session recording in Asciinema v3 format.
 
 ### Key Traits
@@ -66,6 +67,10 @@ Several dependencies use git forks (not crates.io): `russh`, `crossterm`, `reedl
 ## Configuration
 
 Runtime config is in `rustion.toml` (TOML format). Key settings: listen address, server key path, auth rate limits, connection pooling, database config, session recording. See `src/config/mod.rs` for the `Config` struct.
+
+`theme` picks the TUI theme sessions start with: `default`, `oled-black`,
+`oled-white`, `nord` or `gruvbox` (omitted means `default`). `default` keeps the
+terminal's own background and text colour; the others paint every cell.
 
 `database` is a sea-orm connection URL, passed to sea-orm verbatim. The scheme
 selects the driver, so it is the whole of the backend choice
@@ -106,6 +111,8 @@ Tests are inline (`#[cfg(test)]` modules) in:
   client, the proxy, and an in-memory fake target joined by `tokio::io::duplex`,
   with policies enforced by a real `BastionServer` on the fixture. Pure helpers
   are tested inline in `sftp/{path,audit,handles,client}.rs`.
+- `server/widgets/{mod,theme}.rs` — Themes, and the shared widgets rendered into a
+  `Buffer`: outside `default`, no cell is left at the terminal's default colours.
 - `server/extend_policy.rs` — Extended-policy parsing and matching, including
   the regex `sftp_path` rules.
 - `server/app/change_password.rs` — Password change logic

@@ -3,8 +3,8 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
-    style::palette::tailwind,
-    widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
+    style::Color,
+    widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget},
 };
 
 /// The type of widget backing a form field.
@@ -89,12 +89,6 @@ impl FormField {
         self.editable = false;
         self
     }
-
-    /// Builder: set whether this field is editable.
-    pub fn editable(mut self, editable: bool) -> Self {
-        self.editable = editable;
-        self
-    }
 }
 
 /// Result of a key event processed by `FormEditor`.
@@ -118,7 +112,9 @@ pub struct FormEditor {
     fields: Vec<FormField>,
     focused: usize,
     scroll_offset: usize,
-    colors: EditorColors,
+    /// The theme's cursor colour, as of the last render. Edit mode styles the
+    /// textarea with it when entered, between two renders.
+    cursor_color: Color,
     pub show_cancel_confirmation: bool,
     editing_mode: bool,
     save_error: Option<Vec<String>>,
@@ -141,7 +137,7 @@ impl FormEditor {
             fields,
             focused: 0,
             scroll_offset: 0,
-            colors: EditorColors::new(&tailwind::BLUE),
+            cursor_color: theme::DEFAULT.accent_dim,
             show_cancel_confirmation: false,
             editing_mode: false,
             save_error: None,
@@ -335,12 +331,12 @@ impl FormEditor {
                 if t.textarea.mask_char().is_some() {
                     t.clear_line()
                 }
-                text_editing_style(self.colors.input_cursor, &mut t.textarea);
+                text_editing_style(self.cursor_color, &mut t.textarea);
                 text_input_position(key, &mut t.textarea);
             }
             FormFieldWidget::MultiLine(t) => {
                 self.editing_mode = true;
-                t.cursor_color = self.colors.input_cursor;
+                t.cursor_color = self.cursor_color;
                 t.highlight();
                 self.help_text = MULTILINES_EDIT_HELP;
             }
@@ -389,20 +385,6 @@ impl FormEditor {
         };
     }
 
-    /// Set whether the field at `index` is editable at runtime.
-    pub fn set_field_editable(&mut self, index: usize, editable: bool) {
-        self.fields[index].editable = editable;
-        if index == self.focused {
-            self.editing_mode = false;
-            self.update_help_text();
-        }
-    }
-
-    /// Whether the field at `index` is currently editable.
-    pub fn is_field_editable(&self, index: usize) -> bool {
-        self.fields[index].editable
-    }
-
     fn window_height(&self) -> u16 {
         self.fields.iter().map(|f| f.height).sum()
     }
@@ -411,11 +393,12 @@ impl FormEditor {
         self.fields.len().saturating_sub(1)
     }
 
-    pub fn render_ui(&mut self, area: Rect, buf: &mut Buffer) {
+    pub fn render_ui(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        self.cursor_color = theme.accent_dim;
         let height = self.window_height();
         let inner_area = centered_area(area, area.width - 2, area.height - 2);
         let editor_area = Rect::new(0, 0, inner_area.width, height);
-        let mut editor_buf = Buffer::empty(editor_area);
+        let mut editor_buf = theme.buffer(editor_area);
         let scrollbar_needed = height > inner_area.height;
         let content_area = if scrollbar_needed {
             Rect {
@@ -456,7 +439,7 @@ impl FormEditor {
                         &label,
                         t,
                         editing,
-                        &self.colors,
+                        theme,
                         is_focused,
                     );
                 }
@@ -467,7 +450,7 @@ impl FormEditor {
                         &label,
                         t,
                         editing,
-                        &self.colors,
+                        theme,
                         is_focused,
                     );
                 }
@@ -477,7 +460,7 @@ impl FormEditor {
                         &mut editor_buf,
                         &label,
                         *checked,
-                        &self.colors,
+                        theme,
                         is_focused,
                     );
                 }
@@ -488,7 +471,7 @@ impl FormEditor {
                         &label,
                         r,
                         editing,
-                        &self.colors,
+                        theme,
                         is_focused,
                     );
                 }
@@ -519,22 +502,18 @@ impl FormEditor {
             let area = inner_area.intersection(buf.area);
             let mut state =
                 ScrollbarState::new(self.max_scroll_offset()).position(self.scroll_offset);
-            Scrollbar::new(ScrollbarOrientation::VerticalRight).render(area, buf, &mut state);
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .style(Style::new().fg(theme.muted))
+                .render(area, buf, &mut state);
         }
 
         // Dialogs
         if self.show_cancel_confirmation {
-            render_cancel_dialog(area, buf);
+            render_cancel_dialog(area, buf, theme);
         }
 
         if let Some(ref lines) = self.save_error {
-            render_message_dialog(area, buf, &Message::Error(lines.clone()));
+            render_message_dialog(area, buf, &Message::Error(lines.clone()), theme);
         }
-    }
-}
-
-impl Widget for &mut FormEditor {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        self.render_ui(area, buf);
     }
 }

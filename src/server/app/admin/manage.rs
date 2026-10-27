@@ -4,22 +4,22 @@ use crate::database::models::*;
 use crate::error::Error;
 use crate::server::event_log::{EventKind, EventLogger};
 use crate::server::widgets::{
-    AdminTable, Colors, DisplayMode, FieldsToArray, Message, TableData as TD, centered_area,
-    common::*, render_confirm_dialog, render_message_popup,
+    AdminTable, DisplayMode, FieldsToArray, Message, TabBar, TableData as TD, Theme, centered_area,
+    common::*, popup_block, render_confirm_dialog, render_footer, render_message_popup,
 };
 use ::log::{error, info, warn};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent, SenderWriter};
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::Frame;
 use ratatui::backend::NottyBackend;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{self, Color, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Widget};
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::widgets::Paragraph;
 use ratatui_core::terminal::AsyncTerminal;
 use std::fmt;
 use std::sync::Arc;
-use style::palette::tailwind;
 use unicode_width::UnicodeWidthStr;
 
 mod bind;
@@ -32,12 +32,12 @@ mod target;
 mod user;
 
 const HELP_TEXT: [&str; 2] = [
-    "(a) add | (e) edit | (d) delete | (Esc) quit | (↑↓←→) move around",
+    "(a) add | (e) edit | (d) delete | (t) theme | (Esc) quit | (↑↓←→) move around",
     "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
 ];
 
 const USER_HELP_TEXT: [&str; 2] = [
-    "(a) add | (e) edit | (d) delete | (r) grant role | (Esc) quit | (↑↓←→) move around",
+    "(a) add | (e) edit | (d) delete | (r) grant role | (t) theme | (Esc) quit | (↑↓←→) move around",
     "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
 ];
 
@@ -48,6 +48,7 @@ pub(super) async fn manage<B>(
     handler_id: Uuid,
     backend: Arc<B>,
     log: EventLogger<B>,
+    theme: &mut &'static Theme,
 ) -> Result<(), Error>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
@@ -55,32 +56,13 @@ where
     let tty_backend = NottyBackend::new(tty.clone(), writer.clone());
     let mut terminal = AsyncTerminal::new(tty_backend)?;
     crossterm::async_execute!(&writer, EnterAlternateScreen).await?;
-    App::new(backend, user_id, handler_id, log)
-        .await
-        .run(tty, &mut terminal)
-        .await?;
+    let mut app = App::new(backend, user_id, handler_id, log, theme).await;
+    let result = app.run(tty, &mut terminal).await;
+    // The shell starts the next panel in the theme this one ended with.
+    *theme = app.theme;
+    result?;
     crossterm::async_execute!(&writer, LeaveAlternateScreen).await?;
     Ok(())
-}
-
-struct EditorColors {
-    border_color: Color,
-    title_color: Color,
-    tab_font: Color,
-    tab_fg: Color,
-    tab_bg: Color,
-}
-
-impl EditorColors {
-    const fn new(color: &tailwind::Palette) -> Self {
-        Self {
-            border_color: color.c400,
-            title_color: tailwind::SLATE.c200,
-            tab_font: tailwind::SLATE.c300,
-            tab_fg: tailwind::SLATE.c200,
-            tab_bg: color.c900,
-        }
-    }
 }
 
 #[derive(PartialEq)]
@@ -161,21 +143,27 @@ where
     selected_tab: SelectedTab,
     last_selected_tab: SelectedTab,
     popup: Popup,
-    editor_colors: EditorColors,
+    theme: &'static Theme,
     backend: Arc<B>,
     handler_id: Uuid,
     admin_id: Uuid,
     editor: Editor<B>,
     message: Option<Message>,
     log: EventLogger<B>,
-    tab_scroll_offset: usize,
+    tabs: TabBar,
 }
 
 impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    async fn new(backend: Arc<B>, admin_id: Uuid, handler_id: Uuid, log: EventLogger<B>) -> Self {
+    async fn new(
+        backend: Arc<B>,
+        admin_id: Uuid,
+        handler_id: Uuid,
+        log: EventLogger<B>,
+        theme: &'static Theme,
+    ) -> Self {
         let data = TableData::Users(
             match backend.db_repository().list_users_with_role(false).await {
                 Ok(d) => d,
@@ -187,9 +175,9 @@ where
         );
 
         Self {
-            table: AdminTable::new(&data, &tailwind::BLUE),
+            table: AdminTable::new(&data),
             longest_item_lens: data.constraint_len_calculator(),
-            editor_colors: EditorColors::new(&tailwind::BLUE),
+            theme,
             selected_tab: SelectedTab::Users,
             last_selected_tab: SelectedTab::Users,
             popup: Popup::None,
@@ -200,7 +188,7 @@ where
             editor: Editor::None,
             message: None,
             log: log.scoped(EventKind::Manage),
-            tab_scroll_offset: 0,
+            tabs: TabBar::default(),
         }
     }
 
@@ -541,11 +529,11 @@ where
     }
 
     fn restore_color(&mut self) {
-        self.table.colors = Colors::new(&tailwind::BLUE);
+        self.table.dim(false);
     }
 
     async fn run(
-        mut self,
+        &mut self,
         tty: NoTtyEvent,
         terminal: &mut AsyncTerminal<NottyBackend>,
     ) -> Result<(), Error> {
@@ -596,6 +584,7 @@ where
                             KeyCode::Char('b') if ctrl_pressed => self.table.previous_page(),
                             KeyCode::Char('+') => self.table.zoom_in(),
                             KeyCode::Char('-') => self.table.zoom_out(),
+                            KeyCode::Char('t') => self.theme = self.theme.next(),
                             KeyCode::Tab => self.next_tab().await,
                             KeyCode::BackTab => self.previous_tab().await,
                             KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
@@ -605,7 +594,7 @@ where
                             KeyCode::Char('l') | KeyCode::Right => self.table.next_column(),
                             KeyCode::Char('h') | KeyCode::Left => self.table.previous_column(),
                             KeyCode::Char('d') if !ctrl_pressed => {
-                                self.table.colors.gray();
+                                self.table.dim(true);
                                 let idx = self.table.state.selected().unwrap();
 
                                 if self.could_delete(idx) {
@@ -615,17 +604,17 @@ where
                                 }
                             }
                             KeyCode::Char('a') => {
-                                self.table.colors.gray();
+                                self.table.dim(true);
                                 self.add_form().await
                             }
                             KeyCode::Char('e') => {
-                                self.table.colors.gray();
+                                self.table.dim(true);
                                 if !self.edit_form().await {
                                     self.clear_form();
                                 }
                             }
                             KeyCode::Char('r') => {
-                                self.table.colors.gray();
+                                self.table.dim(true);
                                 if !self.grant_role_form().await {
                                     self.clear_form();
                                 }
@@ -973,6 +962,8 @@ where
 
     fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
+        let theme = self.theme;
+        theme.paint(area, frame.buffer_mut());
 
         if area.width < MIN_WINDOW_COL || area.height < MIN_WINDOW_ROW {
             self.render_notice(frame, area, "window is too small");
@@ -992,28 +983,28 @@ where
         match self.selected_tab {
             SelectedTab::Bind => {
                 if let Editor::Bind(_) = self.editor {
-                    frame.render_widget(&mut self.editor, table_area);
+                    self.editor.render(table_area, frame.buffer_mut(), theme);
                 } else {
                     unreachable!()
                 }
             }
             SelectedTab::RoleHierarchy => {
                 if let Editor::CasbinGroup(ref mut e) = self.editor {
-                    e.draw(table_area, frame.buffer_mut());
+                    e.draw(table_area, frame.buffer_mut(), theme);
                 } else {
                     unreachable!()
                 }
             }
             SelectedTab::TargetGroup => {
                 if let Editor::CasbinGroup(ref mut e) = self.editor {
-                    e.draw(table_area, frame.buffer_mut());
+                    e.draw(table_area, frame.buffer_mut(), theme);
                 } else {
                     unreachable!()
                 }
             }
             SelectedTab::ActionGroup => {
                 if let Editor::CasbinGroup(ref mut e) = self.editor {
-                    e.draw(table_area, frame.buffer_mut());
+                    e.draw(table_area, frame.buffer_mut(), theme);
                 } else {
                     unreachable!()
                 }
@@ -1029,12 +1020,13 @@ where
                     &self.items,
                     &self.longest_item_lens,
                     DisplayMode::Manage,
+                    theme,
                 );
             }
         }
         self.render_popup(frame, table_area);
         if let Some(ref msg) = self.message {
-            render_message_popup(table_area, frame.buffer_mut(), msg);
+            render_message_popup(table_area, frame.buffer_mut(), msg, theme);
         }
         self.render_footer(frame, footer_area);
     }
@@ -1155,125 +1147,18 @@ where
         self.longest_item_lens = self.items.constraint_len_calculator();
     }
 
-    /// Returns (full_tab_count, has_left_arrow, has_right_arrow) for the given
-    /// scroll offset and available width. Only counts tabs that fit completely.
-    fn tab_visibility(offset: usize, area_width: usize) -> (usize, bool, bool) {
-        let tab_count = MANAGE_LIST.len();
-        let tab_w: usize = 17;
-        let div_w: usize = 1;
-        let arrow_w: usize = 2;
-
-        let has_left = offset > 0;
-        let left_res = if has_left { arrow_w } else { 0 };
-        let remaining = tab_count.saturating_sub(offset);
-
-        // Try with right arrow reserved
-        let usable_r = area_width.saturating_sub(left_res + arrow_w);
-        let count_r = if usable_r >= tab_w {
-            ((usable_r + div_w) / (tab_w + div_w)).min(remaining)
-        } else {
-            0
-        };
-
-        // Check if all remaining tabs fit without right arrow
-        // FIXME: The last tab at least has two space tail.
-        // Since the usable_r = area_width - left_res - **arrow_w**
-        if offset + count_r >= tab_count {
-            let usable_nr = area_width.saturating_sub(left_res);
-            let count_nr = if usable_nr >= tab_w {
-                ((usable_nr + div_w) / (tab_w + div_w)).min(remaining)
-            } else {
-                0
-            };
-            if offset + count_nr >= tab_count {
-                return (count_nr, has_left, false);
-            }
-        }
-
-        (count_r, has_left, offset + count_r < tab_count)
-    }
-
     fn render_tabs(&mut self, frame: &mut Frame, area: Rect) {
-        let width = area.width as usize;
-        let selected = self.selected_tab as usize;
-        let tab_count = MANAGE_LIST.len();
-        let tab_w: usize = 17;
-        let arrow_w: usize = 2; // "◄ " or " ►"
-
-        // Scroll left if selected tab is before the visible window
-        if selected < self.tab_scroll_offset {
-            self.tab_scroll_offset = selected;
-        }
-
-        // Scroll right if selected tab is beyond the visible window
-        loop {
-            let (visible_count, _, _) = Self::tab_visibility(self.tab_scroll_offset, width);
-            if visible_count == 0 || selected < self.tab_scroll_offset + visible_count {
-                break;
-            }
-            self.tab_scroll_offset += 1;
-        }
-
-        let (visible_count, has_left, has_right) =
-            Self::tab_visibility(self.tab_scroll_offset, width);
-
-        if visible_count == 0 {
-            return;
-        }
-
-        let dim_style = Style::default().fg(self.editor_colors.tab_font);
-
-        let mut spans: Vec<Span> = Vec::new();
-        let mut used: usize = 0;
-
-        if has_left {
-            spans.push(Span::styled("◄ ", dim_style));
-            used += arrow_w;
-        }
-
-        let start = self.tab_scroll_offset;
-        let end = start + visible_count;
-        for (i, item) in MANAGE_LIST.iter().enumerate().take(end).skip(start) {
-            if i > start {
-                spans.push(Span::raw(" "));
-                used += 1;
-            }
-
-            let label = format!("{:^17}", item);
-            let style = if i == selected {
-                Style::default()
-                    .bold()
-                    .fg(self.editor_colors.tab_fg)
-                    .bg(self.editor_colors.tab_bg)
-            } else {
-                dim_style
-            };
-            spans.push(Span::styled(label, style));
-            used += tab_w;
-        }
-
-        // Fill remaining space with a partial next tab if one exists
-        if has_right {
-            let leftover = width.saturating_sub(used + arrow_w);
-            let next_idx = end;
-            if leftover > 1 && next_idx < tab_count {
-                // divider + partial label
-                spans.push(Span::raw(" "));
-                let partial_w = leftover - 1; // 1 for divider
-                let full_label = format!("{:^17}", MANAGE_LIST[next_idx]);
-                let truncated: String = full_label.chars().take(partial_w).collect();
-                spans.push(Span::styled(truncated, dim_style));
-            }
-            spans.push(Span::styled(" ►", dim_style));
-        }
-
-        let line = Line::from(spans);
-        let paragraph = Paragraph::new(line).style(self.editor_colors.tab_bg);
-        frame.render_widget(paragraph, area);
+        self.tabs.render(
+            area,
+            frame.buffer_mut(),
+            &MANAGE_LIST,
+            self.selected_tab as usize,
+            self.theme,
+        );
     }
 
     fn render_notice(&mut self, frame: &mut Frame, area: Rect, msg: &str) {
-        let paragraph = Paragraph::new(msg);
+        let paragraph = Paragraph::new(msg).style(Style::new().fg(self.theme.warning).bold());
         frame.render_widget(paragraph, area);
     }
 
@@ -1324,6 +1209,7 @@ where
                             popup_area,
                             frame.buffer_mut(),
                             &["Delete selected user?".to_string()],
+                            self.theme,
                         );
                     }
                     SelectedTab::Targets => {
@@ -1331,6 +1217,7 @@ where
                             popup_area,
                             frame.buffer_mut(),
                             &["Delete selected target?".to_string()],
+                            self.theme,
                         );
                     }
                     SelectedTab::Secrets => {
@@ -1338,6 +1225,7 @@ where
                             popup_area,
                             frame.buffer_mut(),
                             &["Delete selected secret?".to_string()],
+                            self.theme,
                         );
                     }
                     SelectedTab::Permissions => {
@@ -1345,6 +1233,7 @@ where
                             popup_area,
                             frame.buffer_mut(),
                             &["Delete selected permission?".to_string()],
+                            self.theme,
                         );
                     }
                     SelectedTab::CasbinNames => {
@@ -1352,6 +1241,7 @@ where
                             popup_area,
                             frame.buffer_mut(),
                             &["Delete selected group?".to_string()],
+                            self.theme,
                         );
                     }
                     SelectedTab::Bind => unreachable!(),
@@ -1363,14 +1253,10 @@ where
             }
             _ => unreachable!(),
         };
-        let popup = Block::bordered()
-            .title(title)
-            .title_style(Style::new().fg(self.editor_colors.title_color))
-            .border_style(Style::new().fg(self.editor_colors.border_color))
-            .border_type(BorderType::Double);
-        frame.render_widget(Clear, popup_area);
-        frame.render_widget(popup, popup_area);
-        frame.render_widget(&mut self.editor, popup_area);
+        let theme = self.theme;
+        theme.clear(popup_area, frame.buffer_mut());
+        frame.render_widget(popup_block(title, theme), popup_area);
+        self.editor.render(popup_area, frame.buffer_mut(), theme);
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
@@ -1392,20 +1278,7 @@ where
             }
         };
 
-        let info_footer = Paragraph::new(Text::from_iter(text))
-            .style(
-                Style::new()
-                    .fg(self.table.colors.row_fg)
-                    .bg(self.table.colors.buffer_bg),
-            )
-            .centered()
-            .block(
-                Block::bordered()
-                    .border_type(BorderType::Double)
-                    .border_style(Style::new().fg(self.table.colors.footer_border_color)),
-            );
-
-        frame.render_widget(info_footer, area);
+        render_footer(area, frame.buffer_mut(), text, self.theme);
     }
 }
 
@@ -1728,36 +1601,19 @@ where
     None,
 }
 
-impl<B> Widget for &mut Editor<B>
+impl<B> Editor<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
-    where
-        Self: Sized,
-    {
+    fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         match self {
-            Editor::User(e) => {
-                e.render(area, buf);
-            }
-            Editor::Target(e) => {
-                e.render(area, buf);
-            }
-            Editor::Secret(e) => {
-                e.render(area, buf);
-            }
-            Editor::GrantRole(e) => {
-                e.render(area, buf);
-            }
-            Editor::Bind(e) => {
-                e.render(area, buf);
-            }
-            Editor::Permission(e) => {
-                e.render(area, buf);
-            }
-            Editor::CasbinName(e) => {
-                e.render(area, buf);
-            }
+            Editor::User(e) => e.render(area, buf, theme),
+            Editor::Target(e) => e.render(area, buf, theme),
+            Editor::Secret(e) => e.render(area, buf, theme),
+            Editor::GrantRole(e) => e.render(area, buf, theme),
+            Editor::Bind(e) => e.render(area, buf, theme),
+            Editor::Permission(e) => e.render(area, buf, theme),
+            Editor::CasbinName(e) => e.render(area, buf, theme),
             Editor::CasbinGroup(_) => {
                 unreachable!();
             }

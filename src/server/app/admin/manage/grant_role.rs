@@ -4,15 +4,14 @@ use crate::database::models::{Ptype, Role};
 use crate::error::Error;
 use crate::server::event_log::EventLogger;
 use crate::server::widgets::{
-    AdminTable, DisplayMode, FieldsToArray, Message, TableData, centered_area, render_message_popup,
+    AdminTable, DisplayMode, FieldsToArray, Message, TableData, Theme, centered_area,
+    render_message_popup,
 };
 use ::log::info;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Rect},
-    style::palette::tailwind,
-    widgets::Widget,
 };
 use sea_orm::ActiveValue::Set;
 use std::sync::Arc;
@@ -66,7 +65,7 @@ where
             items: items.clone(),
             selected_user_id,
             longest_role_lens: table_len_calculator(&items),
-            role_table: AdminTable::new(&items, &tailwind::BLUE),
+            role_table: AdminTable::new(&items),
             backend,
             handler_id,
             admin_id,
@@ -177,7 +176,7 @@ where
         Ok(())
     }
 
-    fn render_ui(&mut self, area: Rect, buf: &mut Buffer) {
+    pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         let area = centered_area(area, area.width - 2, area.height - 2);
         self.role_table.size = (area.width, area.height);
 
@@ -188,20 +187,17 @@ where
             &self.items,
             &self.longest_role_lens,
             DisplayMode::Manage,
+            theme,
         );
 
         if self.save_error.is_some() {
-            render_message_popup(area, buf, &Message::Error(vec!["Internal error".into()]));
+            render_message_popup(
+                area,
+                buf,
+                &Message::Error(vec!["Internal error".into()]),
+                theme,
+            );
         }
-    }
-}
-
-impl<B> Widget for &mut GrantRoleEditor<B>
-where
-    B: 'static + crate::server::HandlerBackend + Send + Sync,
-{
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        self.render_ui(area, buf);
     }
 }
 

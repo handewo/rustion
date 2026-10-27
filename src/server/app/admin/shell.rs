@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 
 use super::common::*;
 use super::{Status, database, manage};
+use crate::server::widgets::Theme;
 use bytes::Bytes;
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste, NoTtyEvent, SenderWriter};
 
@@ -40,6 +41,10 @@ pub(super) async fn shell<B>(
     let edit_mode = Box::new(Emacs::new(keybindings));
 
     line_editor = line_editor.with_edit_mode(edit_mode);
+
+    // Shared by the panels below, so a theme picked in one carries over to the
+    // next for the rest of the session.
+    let mut theme = Theme::of(backend.theme());
 
     let prompt = DefaultPrompt::new(
         DefaultPromptSegment::Basic("admin".to_string()),
@@ -73,6 +78,7 @@ pub(super) async fn shell<B>(
                             tty.clone(),
                             SenderWriter::new(send_to_session.clone()),
                             backend.clone(),
+                            &mut theme,
                         )
                         .await;
                     }
@@ -86,6 +92,7 @@ pub(super) async fn shell<B>(
                             handler_id,
                             backend.clone(),
                             log.clone(),
+                            &mut theme,
                         )
                         .await
                         {
