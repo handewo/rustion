@@ -42,7 +42,7 @@ main.rs → cli.rs (clap) → Config (TOML) → BastionServer::with_config()
 - **`server/bastion_handler.rs`** — Implements `russh::server::Handler`. Per-connection state machine routing I/O to the active `Application`.
 - **`server/app/sftp/`** — SFTP proxy: per-operation actions (`SftpActions`), regex `sftp_path` rules in `ExtendPolicy`, lexical path resolution against the target's home, handle table, audit rows under `EventKind::Sftp`.
 - **`server/app/admin/`** — TUI admin interface using ratatui + reedline. CRUD for users, targets, secrets, roles, permissions, and bindings.
-- **`server/widgets/`** — Widgets shared by the admin panels and the replay player. `theme.rs` holds the colour themes; widgets take a `&Theme` at render time instead of keeping colours, and `TabBar`, `render_footer`, `popup_block` and the dialogs keep the panels looking the same. `t` cycles the theme in any panel; the admin shell carries the choice from one panel to the next.
+- **`server/widgets/`** — Widgets shared by the admin panels and the replay player. `theme.rs` holds the colour themes; widgets take a `&Theme` at render time instead of keeping colours, and `TabBar`, `render_footer`, `popup_block` and the dialogs keep the panels looking the same. `t` cycles the theme in any panel; the admin shell carries the choice from one panel to the next. Help text is written `(key) what it does | (key) …` and drawn as key caps in aligned columns (size the footer with `footer_height`, which grows it on narrow terminals); message and confirm dialogs size themselves to their text and word-wrap it.
 - **`asciinema/`** — Session recording in Asciinema v3 format.
 
 ### Key Traits

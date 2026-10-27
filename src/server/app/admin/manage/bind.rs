@@ -4,14 +4,13 @@ use crate::error::Error;
 use crate::server::app::admin::error::AdminError;
 use crate::server::event_log::EventLogger;
 use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData, Theme};
-use crate::server::widgets::{Message, centered_area, render_message_popup};
+use crate::server::widgets::{Message, centered_area, pane_block, render_message_popup};
 use ::log::{error, info};
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
-    style::Style,
-    widgets::{Block, BorderType, Widget},
+    widgets::Widget,
 };
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
@@ -243,23 +242,8 @@ where
             ])
             .split(area);
 
-        let border = |title, focused| {
-            let (title_style, border_style) = if focused {
-                (
-                    Style::new().fg(theme.title).bold(),
-                    Style::new().fg(theme.accent),
-                )
-            } else {
-                (Style::new().fg(theme.muted), Style::new().fg(theme.border))
-            };
-            Block::bordered()
-                .title(title)
-                .border_type(BorderType::Double)
-                .title_style(title_style)
-                .border_style(border_style)
-        };
-        let target_border = border(" Targets ", self.focused_table == FocusedTable::Left);
-        let secret_border = border(" Secrets ", self.focused_table == FocusedTable::Right);
+        let target_border = pane_block("Targets", self.focused_table == FocusedTable::Left, theme);
+        let secret_border = pane_block("Secrets", self.focused_table == FocusedTable::Right, theme);
         self.target_table
             .dim(self.focused_table != FocusedTable::Left);
         self.secret_table

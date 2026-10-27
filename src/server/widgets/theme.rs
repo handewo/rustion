@@ -24,6 +24,8 @@ pub struct Theme {
     pub accent: Color,
     /// The selected cell and the input cursor.
     pub accent_dim: Color,
+    /// Text on a filled `accent`, `success`, `warning` or `error` badge.
+    pub on_accent: Color,
     /// The active tab and table headers, with `bar_fg` on top.
     pub bar_bg: Color,
     pub bar_fg: Color,
@@ -56,6 +58,7 @@ pub const DEFAULT: Theme = Theme {
     border: tailwind::SLATE.c500,
     accent: tailwind::BLUE.c500,
     accent_dim: tailwind::BLUE.c600,
+    on_accent: rgb(0xffffff),
     bar_bg: tailwind::BLUE.c700,
     bar_fg: tailwind::SLATE.c100,
     title: Color::Reset,
@@ -78,6 +81,7 @@ pub const OLED_BLACK: Theme = Theme {
     border: tailwind::NEUTRAL.c700,
     accent: tailwind::SKY.c400,
     accent_dim: tailwind::SKY.c700,
+    on_accent: rgb(0x000000),
     bar_bg: tailwind::NEUTRAL.c900,
     bar_fg: tailwind::SKY.c300,
     title: tailwind::NEUTRAL.c100,
@@ -100,6 +104,7 @@ pub const OLED_WHITE: Theme = Theme {
     border: tailwind::NEUTRAL.c300,
     accent: tailwind::BLUE.c600,
     accent_dim: tailwind::BLUE.c700,
+    on_accent: rgb(0xffffff),
     bar_bg: tailwind::BLUE.c600,
     bar_fg: rgb(0xffffff),
     title: tailwind::NEUTRAL.c950,
@@ -122,6 +127,7 @@ pub const NORD: Theme = Theme {
     border: rgb(0x4c566a),
     accent: rgb(0x88c0d0),
     accent_dim: rgb(0x5e81ac),
+    on_accent: rgb(0x2e3440),
     bar_bg: rgb(0x434c5e),
     bar_fg: rgb(0xeceff4),
     title: rgb(0xeceff4),
@@ -144,6 +150,7 @@ pub const GRUVBOX: Theme = Theme {
     border: rgb(0x504945),
     accent: rgb(0xfabd2f),
     accent_dim: rgb(0xd79921),
+    on_accent: rgb(0x282828),
     bar_bg: rgb(0x504945),
     bar_fg: rgb(0xfbf1c7),
     title: rgb(0xfbf1c7),

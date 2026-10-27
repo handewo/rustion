@@ -4,10 +4,10 @@ use crate::database::models::*;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Margin, Rect};
 use ratatui::style::{Modifier, Style, Stylize};
-use ratatui::text::Text;
+use ratatui::text::{Line, Text};
 use ratatui::widgets::{
     Cell, HighlightSpacing, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
-    Table, TableState,
+    Table, TableState, Widget,
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -168,6 +168,7 @@ impl AdminTable {
             .height(1);
 
         let items = items.as_vec();
+        let empty = items.is_empty();
         let rows = items.iter().enumerate().map(|(i, data)| {
             let color = match i % 2 {
                 0 => theme.bg,
@@ -192,7 +193,24 @@ impl AdminTable {
             .bg(theme.bg)
             .highlight_spacing(HighlightSpacing::Always);
 
-        t.render(area, buf, &mut self.state);
+        StatefulWidget::render(t, area, buf, &mut self.state);
+
+        if empty {
+            let below_header = Rect {
+                y: area.y + 1,
+                height: area.height.saturating_sub(1),
+                ..area
+            };
+            let notice = Rect {
+                y: below_header.y + below_header.height / 2,
+                height: below_header.height.min(1),
+                ..below_header
+            };
+            Line::styled("No records yet", Style::new().fg(theme.muted).italic())
+                .centered()
+                .render(notice, buf);
+            return;
+        }
 
         self.scroll_state = self
             .scroll_state
@@ -201,7 +219,14 @@ impl AdminTable {
 
         Scrollbar::default()
             .orientation(ScrollbarOrientation::VerticalRight)
-            .style(Style::new().fg(theme.muted))
+            .track_style(Style::new().fg(theme.border))
+            .thumb_style(Style::new().fg(if self.dimmed {
+                theme.inactive
+            } else {
+                theme.accent
+            }))
+            .begin_style(Style::new().fg(theme.muted))
+            .end_style(Style::new().fg(theme.muted))
             .render(
                 area.inner(Margin {
                     vertical: 1,

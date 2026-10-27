@@ -5,7 +5,8 @@ use crate::database::common::{
 use crate::database::models::*;
 use crate::error::Error;
 use crate::server::widgets::{
-    AdminTable, DisplayMode, FieldsToArray, TabBar, TableData as TD, Theme, render_footer,
+    AdminTable, DisplayMode, FieldsToArray, TabBar, TableData as TD, Theme, footer_height,
+    render_footer,
 };
 use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent, SenderWriter};
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
@@ -141,7 +142,7 @@ where
         let layout = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(5),
-            Constraint::Length(4),
+            Constraint::Length(footer_height(INFO_TEXT, frame.area().width)),
         ]);
         let [header_area, table_area, footer_area] = layout.areas(frame.area());
 

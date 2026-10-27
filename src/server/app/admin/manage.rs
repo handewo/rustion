@@ -5,7 +5,8 @@ use crate::error::Error;
 use crate::server::event_log::{EventKind, EventLogger};
 use crate::server::widgets::{
     AdminTable, DisplayMode, FieldsToArray, Message, TabBar, TableData as TD, Theme, centered_area,
-    common::*, popup_block, render_confirm_dialog, render_footer, render_message_popup,
+    common::*, footer_height, popup_block, render_confirm_dialog, render_footer,
+    render_message_popup,
 };
 use ::log::{error, info, warn};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent, SenderWriter};
@@ -15,7 +16,6 @@ use ratatui::backend::NottyBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
-use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 use ratatui_core::terminal::AsyncTerminal;
 use std::fmt;
@@ -973,7 +973,7 @@ where
         let layout = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(5),
-            Constraint::Length(4),
+            Constraint::Length(footer_height(self.help_text(), area.width)),
         ]);
         let [header_area, table_area, footer_area] = layout.areas(area);
 
@@ -1158,7 +1158,10 @@ where
     }
 
     fn render_notice(&mut self, frame: &mut Frame, area: Rect, msg: &str) {
-        let paragraph = Paragraph::new(msg).style(Style::new().fg(self.theme.warning).bold());
+        let paragraph = Paragraph::new(msg)
+            .style(Style::new().fg(self.theme.warning).bold())
+            .centered();
+        let area = centered_area(area, area.width, 1);
         frame.render_widget(paragraph, area);
     }
 
@@ -1179,25 +1182,23 @@ where
 
         let title = match self.popup {
             Popup::Add => match self.editor {
-                Editor::User(_) => Line::styled("Add New User", Style::default().bold()),
-                Editor::Target(_) => Line::styled("Add New Target", Style::default().bold()),
-                Editor::Secret(_) => Line::styled("Add New Secret", Style::default().bold()),
-                Editor::Permission(_) => {
-                    Line::styled("Add New Permission", Style::default().bold())
-                }
-                Editor::CasbinName(_) => Line::styled("Add New Group", Style::default().bold()),
+                Editor::User(_) => "Add New User",
+                Editor::Target(_) => "Add New Target",
+                Editor::Secret(_) => "Add New Secret",
+                Editor::Permission(_) => "Add New Permission",
+                Editor::CasbinName(_) => "Add New Group",
                 Editor::GrantRole(_) => unreachable!(),
                 Editor::Bind(_) => unreachable!(),
                 Editor::CasbinGroup(_) => unreachable!(),
                 Editor::None => unreachable!(),
             },
             Popup::Edit => match self.editor {
-                Editor::User(_) => Line::styled("Edit User", Style::default().bold()),
-                Editor::Target(_) => Line::styled("Edit Target", Style::default().bold()),
-                Editor::Secret(_) => Line::styled("Edit Secret", Style::default().bold()),
-                Editor::Permission(_) => Line::styled("Edit Permission", Style::default().bold()),
-                Editor::GrantRole(_) => Line::styled("Grant Role", Style::default().bold()),
-                Editor::CasbinName(_) => Line::styled("Edit Group", Style::default().bold()),
+                Editor::User(_) => "Edit User",
+                Editor::Target(_) => "Edit Target",
+                Editor::Secret(_) => "Edit Secret",
+                Editor::Permission(_) => "Edit Permission",
+                Editor::GrantRole(_) => "Grant Role",
+                Editor::CasbinName(_) => "Edit Group",
                 Editor::Bind(_) => unreachable!(),
                 Editor::CasbinGroup(_) => unreachable!(),
                 Editor::None => unreachable!(),
@@ -1260,7 +1261,12 @@ where
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        let text = match self.editor {
+        render_footer(area, frame.buffer_mut(), self.help_text(), self.theme);
+    }
+
+    /// The keys the footer lists: the open editor's, or the table's.
+    fn help_text(&self) -> [&'static str; 2] {
+        match self.editor {
             Editor::User(ref e) => e.as_ref().form.help_text,
             Editor::Target(ref e) => e.as_ref().form.help_text,
             Editor::Secret(ref e) => e.as_ref().form.help_text,
@@ -1276,9 +1282,7 @@ where
                     HELP_TEXT
                 }
             }
-        };
-
-        render_footer(area, frame.buffer_mut(), text, self.theme);
+        }
     }
 }
 

@@ -6,7 +6,8 @@ use crate::server::extend_policy;
 use crate::server::widgets::{
     AdminTable, DisplayMode, FormEditor, FormEvent, FormField, Message, Theme, centered_area,
     common::{DATETIME_LENGTH, MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW},
-    popup_block, render_footer, render_message_popup, render_title_bar,
+    footer_height, popup_block, render_footer, render_message_popup, render_status_bar,
+    render_title_bar,
 };
 use bytes::Bytes;
 use crossterm::event::{
@@ -19,9 +20,9 @@ use tui_term::widget::PseudoTerminal;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect, Size};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::widgets::{
-    Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget,
+    Block, BorderType, Borders, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget,
 };
 use ratatui_core::terminal::AsyncTerminal;
 use unicode_width::UnicodeWidthStr;
@@ -721,7 +722,7 @@ where
         let layout = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(5),
-            Constraint::Length(4),
+            Constraint::Length(footer_height(self.help_text(), area.width)),
         ]);
         let [header_area, table_area, footer_area] = layout.areas(area);
 
@@ -746,12 +747,16 @@ where
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        let help_text = if self.setting.editing_mode {
+        render_footer(area, frame.buffer_mut(), self.help_text(), self.theme);
+    }
+
+    /// The keys the footer lists: the setting form's while it is open.
+    fn help_text(&self) -> [&'static str; 2] {
+        if self.setting.editing_mode {
             self.setting.form.help_text
         } else {
             self.help_text
-        };
-        render_footer(area, frame.buffer_mut(), help_text, self.theme);
+        }
     }
 
     fn render_setting_popup(&mut self, frame: &mut Frame, area: Rect) {
@@ -937,26 +942,26 @@ where
             }
         }
 
-        let explanation = if self.pause {
-            format!(
-                "<space> play <.> step <]> next mark <PgUp/PgDn> scroll lines [{}*{}]",
-                term_area.width, term_area.height
+        let (state, color, help) = if self.is_finished {
+            ("ENDED", theme.muted, "Playback ended | (any key) exit")
+        } else if self.pause {
+            (
+                "PAUSED",
+                theme.warning,
+                "(Space) play | (.) step | (]) next mark | (PgUp/PgDn) scroll lines",
             )
-        } else if self.is_finished {
-            "Playback ended. Press any key to exit.".to_string()
         } else {
-            format!(
-                "<space> pause <q> exit recording window size: [{}*{}]",
-                term_area.width, term_area.height
-            )
+            ("PLAYING", theme.success, "(Space) pause | (q) exit")
         };
-        let explanation = Paragraph::new(explanation).style(
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .fg(theme.bar_fg)
-                .bg(theme.bar_bg),
+        let size = format!("Window size: {}x{}", term_area.width, term_area.height);
+        render_status_bar(
+            chunks[1],
+            f.buffer_mut(),
+            (state, color),
+            help,
+            &size,
+            theme,
         );
-        f.render_widget(explanation, chunks[1]);
     }
 
     fn decrease_scroll_position(&mut self, parser: &RwLock<vt100::Parser>) {

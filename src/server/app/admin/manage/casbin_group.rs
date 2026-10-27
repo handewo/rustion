@@ -519,7 +519,7 @@ where
         let covered = self.is_editing || self.is_deleting || self.message.is_some();
         {
             let block = Block::bordered()
-                .border_type(BorderType::Double)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::new().fg(if covered { theme.border } else { theme.accent }));
 
             use ratatui::widgets::Widget;
@@ -610,7 +610,7 @@ where
                 );
                 "Unknown".to_string()
             });
-        let popup = popup_block(format!(" Add to Group: {} ", g_name), theme);
+        let popup = popup_block(&format!("Add to Group: {}", g_name), theme);
         use ratatui::widgets::Widget;
         theme.clear(area, buf);
         popup.render(area, buf);
