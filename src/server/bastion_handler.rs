@@ -1,11 +1,12 @@
 use super::HandlerBackend;
 use super::app::{self, Application, NextApplication};
 use super::error::ServerError;
-use super::event_log::{EventKind, EventLogger};
+use super::event_log::{Audit, EventKind, EventLogger};
 use super::tty;
 use crate::database::Uuid;
 use crate::database::models::User;
 use crate::error::Error;
+use crate::i18n::Lang;
 use crate::server::app::{ExecParams, PtyParams, connect_target::ConnectTarget};
 use crate::server::extend_policy::ExtendPolicyReq;
 use bytes::Bytes;
@@ -135,7 +136,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             self.backend
                 .clear_auth_attempts(self.client_ip, user.username.clone())
                 .await;
-            log.record("login successfully by password").await;
+            log.record(Audit::LoginPassword).await;
             self.log = Some(log);
             return Ok(ru_server::Auth::Accept);
         }
@@ -166,7 +167,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             self.backend
                 .clear_auth_attempts(self.client_ip, user.username.clone())
                 .await;
-            log.record("login successfully by public key").await;
+            log.record(Audit::LoginPublicKey).await;
             self.log = Some(log);
             return Ok(ru_server::Auth::Accept);
         }
@@ -372,16 +373,18 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 channel_session.pty_term.as_ref(),
             ) {
                 (Some(_), Some(_), Some(_)) => {
+                    let lang = channel_session.lang(self.backend.language());
                     let (tty, recv_from_tty) = channel_session.new_tty()?;
-                    let app_params = self.wrap_pty_parameters(tty, recv_from_tty)?;
+                    let app_params = self.wrap_pty_parameters(tty, recv_from_tty, lang)?;
                     app::admin::exec_request_with_pty(app_params, channel, data, session).await?;
                     session.channel_failure(channel)?;
                     Ok(())
                 }
                 _ => {
+                    let lang = channel_session.lang(self.backend.language());
                     let (tx, rx) = mpsc::channel(16);
                     channel_session.sender = Some(tx);
-                    let params = self.wrap_exec_parameters(rx)?;
+                    let params = self.wrap_exec_parameters(rx, lang)?;
                     app::admin::exec_request_without_pty(params, channel, data, session).await?;
                     session.channel_success(channel)?;
                     Ok(())
@@ -514,7 +517,9 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         if !ctx.allow_session().await {
             debug!("[{}] sftp denied on {}", self.id, ctx.label);
             ctx.log
-                .record(format!("sftp denied session on {}", ctx.label))
+                .record(Audit::SftpRefused {
+                    target: ctx.label.clone(),
+                })
                 .await;
             return refuse(session, channel_id);
         }
@@ -573,6 +578,31 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
         Ok(())
     }
 
+    /// Only the locale is kept, to pick the interface language; the rest is
+    /// refused, as OpenSSH's `sshd` refuses what `AcceptEnv` does not list.
+    async fn env_request(
+        &mut self,
+        channel: ChannelId,
+        variable_name: &str,
+        variable_value: &str,
+        session: &mut ru_server::Session,
+    ) -> Result<(), Self::Error> {
+        let channel_session = self
+            .channel_session
+            .get_mut(&channel)
+            .ok_or(ServerError::ChannelNotExist)?;
+        if !LOCALE_VARS.contains(&variable_name) {
+            session.channel_failure(channel)?;
+            return Ok(());
+        }
+        let value: String = variable_value.chars().take(LOCALE_MAX).collect();
+        let locale = &mut channel_session.locale;
+        locale.retain(|(k, _)| k != variable_name);
+        locale.push((variable_name.to_string(), value));
+        session.channel_success(channel)?;
+        Ok(())
+    }
+
     async fn shell_request(
         &mut self,
         channel: ChannelId,
@@ -584,8 +614,9 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             .ok_or(ServerError::ChannelNotExist)?;
         match channel_session.app {
             Application::TargetSelector => {
+                let lang = channel_session.lang(self.backend.language());
                 let (tty, recv_from_tty) = channel_session.new_tty()?;
-                let app_params = self.wrap_pty_parameters(tty, recv_from_tty)?;
+                let app_params = self.wrap_pty_parameters(tty, recv_from_tty, lang)?;
                 let target_name = if let LoginMode::Target(t) = self
                     .login_parse
                     .as_ref()
@@ -604,15 +635,17 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 Ok(())
             }
             Application::Admin => {
+                let lang = channel_session.lang(self.backend.language());
                 let (tty, recv_from_tty) = channel_session.new_tty()?;
-                let app_params = self.wrap_pty_parameters(tty, recv_from_tty)?;
+                let app_params = self.wrap_pty_parameters(tty, recv_from_tty, lang)?;
                 app::admin::shell_request(app_params, channel, session).await?;
                 session.channel_success(channel)?;
                 Ok(())
             }
             Application::Password => {
+                let lang = channel_session.lang(self.backend.language());
                 let (tty, recv_from_tty) = channel_session.new_tty()?;
-                let app_params = self.wrap_pty_parameters(tty, recv_from_tty)?;
+                let app_params = self.wrap_pty_parameters(tty, recv_from_tty, lang)?;
                 app::change_password::shell_request(
                     self.user.as_ref().ok_or(ServerError::UserNotInit)?.clone(),
                     app_params,
@@ -624,8 +657,9 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 Ok(())
             }
             Application::Player => {
+                let lang = channel_session.lang(self.backend.language());
                 let (tty, recv_from_tty) = channel_session.new_tty()?;
-                let app_params = self.wrap_pty_parameters(tty, recv_from_tty)?;
+                let app_params = self.wrap_pty_parameters(tty, recv_from_tty, lang)?;
                 app::player::shell_request(app_params, channel, session).await?;
                 session.channel_success(channel)?;
                 Ok(())
@@ -803,8 +837,13 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
         Ok(true)
     }
 
-    fn wrap_exec_parameters(&self, recv: Receiver<Bytes>) -> Result<ExecParams<B>, Error> {
+    fn wrap_exec_parameters(
+        &self,
+        recv: Receiver<Bytes>,
+        lang: Lang,
+    ) -> Result<ExecParams<B>, Error> {
         Ok(ExecParams {
+            lang,
             handler_id: self.id,
             user_id: self.user.as_ref().ok_or(ServerError::UserNotInit)?.id,
             client_ip: self.client_ip.map(|v| v.ip()),
@@ -818,8 +857,10 @@ impl<B: 'static + HandlerBackend + Sync> BastionHandler<B> {
         &self,
         tty: tty::Tty,
         recv_from_tty: Receiver<Bytes>,
+        lang: Lang,
     ) -> Result<PtyParams<B>, Error> {
         Ok(PtyParams {
+            lang,
             handler_id: self.id,
             user_id: self.user.as_ref().ok_or(ServerError::UserNotInit)?.id,
             client_ip: self.client_ip.map(|v| v.ip()),
@@ -877,7 +918,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Drop for BastionHandler<B> {
         // Only authenticated connections have a logout to record.
         if let Some(log) = self.log.clone() {
             tokio::spawn(async move {
-                log.record("logout").await;
+                log.record(Audit::Logout).await;
             });
         }
         trace!("[{}] drop BastionHandler", self.id);
@@ -954,6 +995,9 @@ struct ChannelSession<B: 'static + HandlerBackend + Send + Sync> {
     pub window_size: Option<(u32, u32, u32, u32)>,
     pub pty_modes: Option<Vec<(Pty, u32)>>,
     pub pty_term: Option<String>,
+    /// The client's `LC_ALL`, `LC_MESSAGES` and `LANG`, from env requests:
+    /// the language of the interface. Nothing else the client sends is kept.
+    pub locale: Vec<(String, String)>,
 }
 
 impl<B: 'static + HandlerBackend + Send + Sync> ChannelSession<B> {
@@ -965,7 +1009,19 @@ impl<B: 'static + HandlerBackend + Send + Sync> ChannelSession<B> {
             window_size: None,
             pty_modes: None,
             pty_term: None,
+            locale: Vec::new(),
         }
+    }
+
+    /// The language the client's locale asks for, or `default`.
+    fn lang(&self, default: Lang) -> Lang {
+        Lang::from_env(|name| {
+            self.locale
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.as_str())
+        })
+        .unwrap_or(default)
     }
 
     fn new_tty(&mut self) -> Result<(tty::Tty, Receiver<Bytes>), Error> {
@@ -975,6 +1031,11 @@ impl<B: 'static + HandlerBackend + Send + Sync> ChannelSession<B> {
         Ok((tty, recv_from_tty))
     }
 }
+
+/// The environment a client may set: the variables that pick its language.
+const LOCALE_VARS: [&str; 3] = ["LC_ALL", "LC_MESSAGES", "LANG"];
+/// A locale name is short; anything longer is cut before it is kept.
+const LOCALE_MAX: usize = 64;
 
 /// Answer a subsystem request the bastion will not serve, and end the channel.
 fn refuse(session: &mut ru_server::Session, channel: ChannelId) -> Result<(), Error> {
@@ -1111,5 +1172,84 @@ mod tests {
             .await
             .expect("the connection stopped answering after 150 channel requests");
         running.abort();
+    }
+
+    /// Only the locale variables are kept, and they decide the language; the
+    /// rest of the environment is refused, as `sshd` refuses what `AcceptEnv`
+    /// does not list.
+    #[tokio::test]
+    async fn the_client_locale_is_kept_and_the_rest_of_its_environment_refused() {
+        let db = fixture::seed().await;
+        let mut config = Config::default().gen_secret_token();
+        config.database = db.url.clone();
+        let mut server = BastionServer::with_config(config).await.expect("server");
+        grant_login(&server, &db.fixture, db.fixture.user(LUKA)).await;
+
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).expect("host key");
+        let server_config = Arc::new(ru_server::Config {
+            keys: vec![key],
+            ..Default::default()
+        });
+        let handler = ru_server::Server::new_client(&mut server, None);
+        let (server_io, client_io) = tokio::io::duplex(1 << 20);
+        let running = tokio::spawn(async move {
+            ru_server::run_stream(server_config, server_io, handler)
+                .await?
+                .await
+        });
+
+        let flow = async {
+            let mut client = ru_client::connect_stream(
+                Arc::new(ru_client::Config::default()),
+                client_io,
+                AnyHostKey,
+            )
+            .await
+            .expect("connect");
+            let auth = client
+                .authenticate_password(LUKA, PASSWORD)
+                .await
+                .expect("authenticate");
+            assert!(auth.success(), "fixture password rejected");
+            let mut channel = client.channel_open_session().await.expect("open session");
+            let mut answer = async |name: &str, value: &str| {
+                channel.set_env(true, name, value).await.expect("send env");
+                loop {
+                    match channel.wait().await {
+                        Some(ChannelMsg::Success) => return true,
+                        Some(ChannelMsg::Failure) => return false,
+                        None => panic!("channel closed"),
+                        Some(_) => {}
+                    }
+                }
+            };
+            assert!(answer("LANG", "ja_JP.UTF-8").await);
+            assert!(answer("LC_ALL", "C.UTF-8").await);
+            assert!(!answer("PATH", "/tmp/evil").await);
+            assert!(!answer("LD_PRELOAD", "/tmp/evil.so").await);
+        };
+        tokio::time::timeout(Duration::from_secs(10), flow)
+            .await
+            .expect("env requests went unanswered");
+        running.abort();
+    }
+
+    #[test]
+    fn a_session_speaks_the_language_its_locale_names() {
+        use super::ChannelSession;
+        use crate::i18n::Lang;
+        let mut session = ChannelSession::<BastionServer>::new();
+        assert_eq!(
+            session.lang(Lang::Fr),
+            Lang::Fr,
+            "no locale: the configured one"
+        );
+        session.locale.push(("LANG".into(), "zh_TW.UTF-8".into()));
+        assert_eq!(session.lang(Lang::Fr), Lang::ZhHant);
+        // `C` names no language, so `LANG` behind it still counts.
+        session.locale.push(("LC_ALL".into(), "C".into()));
+        assert_eq!(session.lang(Lang::Fr), Lang::ZhHant);
+        session.locale.push(("LC_MESSAGES".into(), "es_ES".into()));
+        assert_eq!(session.lang(Lang::Fr), Lang::Es);
     }
 }

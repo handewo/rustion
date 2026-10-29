@@ -11,8 +11,8 @@ pub(crate) use casbin_rule::{
 };
 pub(crate) use event_log::EventKind;
 pub use event_log::EventLog;
-/// Only the tests reach `RecordingStatus` through here; `connect_target` names it
-/// via `session_recording::`, and the two model structs already re-export it.
+/// `connect_target` names `RecordingStatus` via `session_recording::`; the
+/// tests and the player's table reach it through here.
 pub(crate) use session_recording::{RecordingStatus, RecordingView, SessionRecording};
 pub(crate) use target::{Target, TargetInfo};
 pub(crate) use target_secret::{Secret, SecretInfo, TargetSecret, TargetSecretName};

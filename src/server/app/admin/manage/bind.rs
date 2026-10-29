@@ -1,9 +1,12 @@
+use super::super::validate::describe;
 use crate::database::Uuid;
 use crate::database::models::{SecretInfo, TargetInfo};
 use crate::error::Error;
 use crate::server::app::admin::error::AdminError;
-use crate::server::event_log::EventLogger;
-use crate::server::widgets::{AdminTable, DisplayMode, FieldsToArray, TableData, Theme};
+use crate::server::event_log::{Audit, EventLogger, labelled};
+use crate::server::widgets::{
+    AdminTable, DisplayMode, FieldsToArray, Help, Strings, TableData, Theme,
+};
 use crate::server::widgets::{Message, centered_area, pane_block, render_message_popup};
 use ::log::{error, info};
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -15,10 +18,7 @@ use ratatui::{
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
 
-pub const HELP_TEXT: [&str; 2] = [
-    "(Space) toggle | (←→) switch window | (↑↓) select item",
-    "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
-];
+pub const HELP_TEXT: Help = |tr| [tr.help_bind, tr.help_manage_nav];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum FocusedTable {
@@ -51,7 +51,8 @@ where
     admin_id: Uuid,
     save_error: Option<Error>,
     log: EventLogger<B>,
-    pub help_text: [&'static str; 2],
+    tr: &'static Strings,
+    pub help_text: Help,
 }
 
 impl<B> BindEditor<B>
@@ -65,6 +66,7 @@ where
         handler_id: Uuid,
         admin_id: Uuid,
         log: EventLogger<B>,
+        tr: &'static Strings,
     ) -> Self {
         Self {
             targets: targets.clone(),
@@ -79,6 +81,7 @@ where
             admin_id,
             save_error: None,
             log,
+            tr,
             help_text: HELP_TEXT,
         }
     }
@@ -202,11 +205,13 @@ where
             "[{}] Secret '{}({})' {} target '{}({})' by admin_id={}",
             self.handler_id, s.name, s.id, action, t.name, t.id, self.admin_id
         );
+        let (secret, target) = (labelled(&s.name, s.id), labelled(&t.name, t.id));
         self.log
-            .record(format!(
-                "Secret '{}({})' {} target '{}({})'",
-                s.name, s.id, action, t.name, t.id
-            ))
+            .record(if s.is_bound {
+                Audit::SecretUnbound { secret, target }
+            } else {
+                Audit::SecretBound { secret, target }
+            })
             .await;
         Ok(())
     }
@@ -242,8 +247,17 @@ where
             ])
             .split(area);
 
-        let target_border = pane_block("Targets", self.focused_table == FocusedTable::Left, theme);
-        let secret_border = pane_block("Secrets", self.focused_table == FocusedTable::Right, theme);
+        let tr = self.tr;
+        let target_border = pane_block(
+            tr.tab_targets,
+            self.focused_table == FocusedTable::Left,
+            theme,
+        );
+        let secret_border = pane_block(
+            tr.tab_secrets,
+            self.focused_table == FocusedTable::Right,
+            theme,
+        );
         self.target_table
             .dim(self.focused_table != FocusedTable::Left);
         self.secret_table
@@ -266,6 +280,7 @@ where
             &self.longest_target_lens,
             DisplayMode::Manage,
             theme,
+            tr,
         );
         // Render right table (Secrets)
         self.secret_table.render(
@@ -275,6 +290,7 @@ where
             &self.longest_secret_lens,
             DisplayMode::Manage,
             theme,
+            tr,
         );
 
         if let Some(err) = self.save_error.as_ref() {
@@ -284,22 +300,19 @@ where
                     AdminError::DuplicateTargetUser { .. }
                 ))
             ) {
-                render_message_popup(area, buf, &Message::Error(vec![err.to_string()]), theme);
+                let message = Message::Error(vec![describe(err, tr)]);
+                render_message_popup(area, buf, &message, theme, tr);
             } else {
-                render_message_popup(
-                    area,
-                    buf,
-                    &Message::Error(vec!["Internal error".into()]),
-                    theme,
-                );
+                let message = Message::Error(vec![tr.internal_error.into()]);
+                render_message_popup(area, buf, &message, theme, tr);
             }
         }
     }
 }
 
 impl TableData for Vec<TargetInfo> {
-    fn header(&self) -> Vec<&str> {
-        vec!["name", "hostname", "port"]
+    fn header(&self, tr: &'static Strings) -> Vec<&'static str> {
+        vec![tr.col_name, tr.col_hostname, tr.col_port]
     }
 
     fn as_vec(&self) -> Vec<&dyn FieldsToArray> {
@@ -314,7 +327,7 @@ impl TableData for Vec<TargetInfo> {
 }
 
 impl FieldsToArray for TargetInfo {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, _tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 todo!()
@@ -331,8 +344,8 @@ impl FieldsToArray for TargetInfo {
 }
 
 impl TableData for Vec<SecretInfo> {
-    fn header(&self) -> Vec<&str> {
-        vec!["", "name", "user"]
+    fn header(&self, tr: &'static Strings) -> Vec<&'static str> {
+        vec!["", tr.col_name, tr.col_user]
     }
 
     fn as_vec(&self) -> Vec<&dyn FieldsToArray> {
@@ -347,7 +360,7 @@ impl TableData for Vec<SecretInfo> {
 }
 
 impl FieldsToArray for SecretInfo {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, _tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 todo!()

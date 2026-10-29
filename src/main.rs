@@ -4,6 +4,7 @@ mod common;
 mod config;
 pub mod database;
 pub mod error;
+mod i18n;
 mod server;
 mod terminal;
 mod utils;

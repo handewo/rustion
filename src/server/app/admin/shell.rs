@@ -11,6 +11,8 @@ use tokio::sync::mpsc;
 
 use super::common::*;
 use super::{Status, database, manage};
+use crate::fill;
+use crate::i18n::Lang;
 use crate::server::widgets::Theme;
 use bytes::Bytes;
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste, NoTtyEvent, SenderWriter};
@@ -24,6 +26,7 @@ pub(super) async fn shell<B>(
     handler_id: Uuid,
     backend: Arc<B>,
     log: EventLogger<B>,
+    lang: Lang,
 ) where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
@@ -42,9 +45,10 @@ pub(super) async fn shell<B>(
 
     line_editor = line_editor.with_edit_mode(edit_mode);
 
-    // Shared by the panels below, so a theme picked in one carries over to the
-    // next for the rest of the session.
+    // Shared by the panels below, so a theme or language picked in one carries
+    // over to the next for the rest of the session.
     let mut theme = Theme::of(backend.theme());
+    let mut lang = lang;
 
     let prompt = DefaultPrompt::new(
         DefaultPromptSegment::Basic("admin".to_string()),
@@ -79,6 +83,7 @@ pub(super) async fn shell<B>(
                             SenderWriter::new(send_to_session.clone()),
                             backend.clone(),
                             &mut theme,
+                            &mut lang,
                         )
                         .await;
                     }
@@ -93,6 +98,7 @@ pub(super) async fn shell<B>(
                             backend.clone(),
                             log.clone(),
                             &mut theme,
+                            &mut lang,
                         )
                         .await
                         {
@@ -101,17 +107,18 @@ pub(super) async fn shell<B>(
                         let _ = crossterm::async_execute!(&w, DisableBracketedPaste).await;
                     }
                     CMD_FLUSH_PRIVILEGES => {
+                        let tr = lang.strings();
                         if let Err(e) = backend.load_role_manager().await {
                             let _ = send_to_session
-                                .send(format!("flush previleges error: {}", e).into())
+                                .send(fill!(tr.flush_failed, error = e).into())
                                 .await;
                         } else {
-                            let _ = send_to_session.send("flushed successfully".into()).await;
+                            let _ = send_to_session.send(tr.flushed.into()).await;
                         }
                     }
                     _ => {
                         let _ = send_to_session
-                            .send(format!("Unknown command: {}", p).into())
+                            .send(fill!(lang.strings().unknown_command, command = p).into())
                             .await;
                     }
                 }

@@ -3,6 +3,7 @@ use super::super::validate;
 use crate::database::entity::user;
 use crate::database::models::User;
 use crate::error::Error;
+use crate::fill;
 use crate::server::app::error::AppError;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -23,21 +24,18 @@ pub struct UserEditor {
     pub active_model: user::ActiveModel,
     pub form: FormEditor,
     pub generate_password: bool,
+    tr: &'static Strings,
 }
 
 impl UserEditor {
-    pub fn new(user: User, is_new: bool) -> Self {
+    pub fn new(user: User, is_new: bool, tr: &'static Strings) -> Self {
         let form = FormEditor::new(vec![
-            FormField::text("*Username*", Some(user.username.clone())),
-            FormField::text("Email", user.email.clone()),
-            FormField::checkbox("Generate New Password", false),
-            FormField::checkbox("Force Init Password", user.force_init_pass),
-            FormField::checkbox("Is Active", user.is_active),
-            FormField::multiline(
-                "Authorized Keys (one per line)",
-                user.get_authorized_keys(),
-                8,
-            ),
+            FormField::text(|tr| tr.field_username, Some(user.username.clone())),
+            FormField::text(|tr| tr.field_email, user.email.clone()),
+            FormField::checkbox(|tr| tr.field_generate_password, false),
+            FormField::checkbox(|tr| tr.field_force_init_password, user.force_init_pass),
+            FormField::checkbox(|tr| tr.field_is_active, user.is_active),
+            FormField::multiline(|tr| tr.field_authorized_keys, user.get_authorized_keys(), 8),
         ]);
 
         let active_model = if is_new {
@@ -61,6 +59,7 @@ impl UserEditor {
             active_model,
             form,
             generate_password: false,
+            tr,
         }
     }
 
@@ -76,18 +75,17 @@ impl UserEditor {
                         validate::ValidateError::AuthorizedKeyInvalid(ref idx),
                     ))) = e
                     {
+                        let lines = idx
+                            .iter()
+                            .map(|x| (x + 1).to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ");
                         vec![
-                            String::from("Invalid authorized keys"),
-                            format!(
-                                "Line number: {}",
-                                idx.iter()
-                                    .map(|x| (x + 1).to_string())
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            ),
+                            self.tr.invalid_authorized_keys.to_string(),
+                            fill!(self.tr.line_numbers, lines = lines),
                         ]
                     } else {
-                        vec![e.to_string()]
+                        vec![validate::describe(&e, self.tr)]
                     };
                     self.form.set_save_error(lines);
                     return false;
@@ -155,6 +153,6 @@ impl UserEditor {
 
 impl UserEditor {
     pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
-        self.form.render_ui(area, buf, theme);
+        self.form.render_ui(area, buf, theme, self.tr);
     }
 }

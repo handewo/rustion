@@ -23,21 +23,22 @@ pub struct TargetEditor {
     pub target: Target,
     pub active_model: target::ActiveModel,
     pub form: FormEditor,
+    tr: &'static Strings,
 }
 
 impl TargetEditor {
-    pub fn new(target: Target, is_new: bool) -> Self {
+    pub fn new(target: Target, is_new: bool, tr: &'static Strings) -> Self {
         let form = FormEditor::new(vec![
-            FormField::text("*Name*", Some(target.name.clone())),
-            FormField::text("*Hostname*", Some(target.hostname.clone())),
-            FormField::text("*Port*", Some(target.port.to_string())),
+            FormField::text(|tr| tr.field_name, Some(target.name.clone())),
+            FormField::text(|tr| tr.field_hostname, Some(target.hostname.clone())),
+            FormField::text(|tr| tr.field_port, Some(target.port.to_string())),
             FormField::text(
-                "*Server Public Key*",
+                |tr| tr.field_server_public_key,
                 Some(target.server_public_key.clone()),
             ),
-            FormField::text("Description", target.description.clone()),
-            FormField::text("Proxy", target.proxy.clone()),
-            FormField::checkbox("Is Active", target.is_active),
+            FormField::text(|tr| tr.field_description, target.description.clone()),
+            FormField::text(|tr| tr.field_proxy, target.proxy.clone()),
+            FormField::checkbox(|tr| tr.field_is_active, target.is_active),
         ]);
 
         let active_model = if is_new {
@@ -60,6 +61,7 @@ impl TargetEditor {
             target,
             active_model,
             form,
+            tr,
         }
     }
 
@@ -71,7 +73,8 @@ impl TargetEditor {
         match self.form.handle_key_event(key, modifiers) {
             FormEvent::Save => {
                 if let Err(e) = self.save_target() {
-                    self.form.set_save_error(vec![e.to_string()]);
+                    self.form
+                        .set_save_error(vec![validate::describe(&e, self.tr)]);
                     return false;
                 }
                 true
@@ -141,6 +144,6 @@ impl TargetEditor {
 
 impl TargetEditor {
     pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
-        self.form.render_ui(area, buf, theme);
+        self.form.render_ui(area, buf, theme, self.tr);
     }
 }

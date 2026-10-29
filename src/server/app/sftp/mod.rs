@@ -26,7 +26,7 @@ mod test;
 
 use crate::database::common::SftpActions;
 use crate::server::HandlerBackend;
-use crate::server::event_log::EventLogger;
+use crate::server::event_log::{Audit, EventLogger};
 use crate::server::extend_policy::{ExtendPolicyReq, RequestKind};
 use handles::{HandleKind, HandleTable, Use};
 use log::{debug, info, trace, warn};
@@ -132,7 +132,9 @@ where
             ctx.handler_id, ctx.label, ctx.client_ip, home
         );
         ctx.log
-            .record(format!("sftp session started on {}", ctx.label))
+            .record(Audit::SftpStarted {
+                target: ctx.label.clone(),
+            })
             .await;
         Ok(Self {
             ctx,
@@ -164,25 +166,25 @@ where
     fn drop(&mut self) {
         let open = self.handles.drain_open();
         let t = self.handles.totals();
-        let end = audit::session_end(
-            t.files_read,
-            t.bytes_read,
-            t.files_written,
-            t.bytes_written,
-            t.not_closed,
-        );
-        debug!("[{}] {}", self.ctx.handler_id, end);
-        let rows: Vec<String> = open
+        let end = Audit::SftpEnded {
+            files_read: t.files_read,
+            bytes_read: t.bytes_read,
+            files_written: t.files_written,
+            bytes_written: t.bytes_written,
+            not_closed: t.not_closed,
+        };
+        debug!("[{}] {:?}", self.ctx.handler_id, end);
+        let rows: Vec<Audit> = open
             .iter()
             .filter_map(|h| match h.kind {
-                HandleKind::File { read, write } => Some(audit::file_row(
-                    &h.path,
+                HandleKind::File { read, write } => Some(Audit::SftpFile {
+                    path: h.path.clone(),
                     read,
                     write,
-                    h.bytes_read,
-                    h.bytes_written,
-                    false,
-                )),
+                    bytes_read: h.bytes_read,
+                    bytes_written: h.bytes_written,
+                    closed: false,
+                }),
                 HandleKind::Dir => None,
             })
             .chain(std::iter::once(end))
@@ -240,7 +242,10 @@ where
                 );
                 self.ctx
                     .log
-                    .record(format!("sftp denied {op} {shown}"))
+                    .record(Audit::SftpDenied {
+                        op: op.to_string(),
+                        paths: paths.iter().map(|p| p.to_string()).collect(),
+                    })
                     .await;
                 return Err(ProxyError::status(StatusCode::PermissionDenied));
             }
@@ -429,14 +434,14 @@ where
         {
             self.ctx
                 .log
-                .record(audit::file_row(
-                    &h.path,
+                .record(Audit::SftpFile {
+                    path: h.path.clone(),
                     read,
                     write,
-                    h.bytes_read,
-                    h.bytes_written,
-                    true,
-                ))
+                    bytes_read: h.bytes_read,
+                    bytes_written: h.bytes_written,
+                    closed: true,
+                })
                 .await;
         }
         res.map(|s| s.retag(id))
@@ -560,7 +565,11 @@ where
             self.check(self.ctx.actions.write, "write", &[p.as_str()])
                 .await?;
         }
-        let row = format!("sftp setstat {} {}", audit::path(&p), audit::attrs(&attrs));
+        let row = Audit::SftpSetstat {
+            path: p.clone(),
+            attrs: audit::attrs(&attrs),
+            handle: false,
+        };
         let res = self.session.setstat(p, attrs).await;
         self.mutated(id, "setstat", res, row).await
     }
@@ -581,7 +590,11 @@ where
             self.check(self.ctx.actions.write, "write", &[p.as_str()])
                 .await?;
         }
-        let row = format!("sftp fsetstat {} {}", audit::path(&p), audit::attrs(&attrs));
+        let row = Audit::SftpSetstat {
+            path: p.clone(),
+            attrs: audit::attrs(&attrs),
+            handle: true,
+        };
         let res = self.session.fsetstat(handle, attrs).await;
         self.mutated(id, "fsetstat", res, row).await
     }
@@ -595,7 +608,7 @@ where
         let p = self.resolve("mkdir", id, &path);
         self.check(self.ctx.actions.mkdir, "mkdir", &[p.as_str()])
             .await?;
-        let row = format!("sftp mkdir {}", audit::path(&p));
+        let row = Audit::SftpMkdir { path: p.clone() };
         let res = self.session.mkdir(p, attrs).await;
         self.mutated(id, "mkdir", res, row).await
     }
@@ -604,7 +617,7 @@ where
         let p = self.resolve("remove", id, &filename);
         self.check(self.ctx.actions.delete, "delete", &[p.as_str()])
             .await?;
-        let row = format!("sftp remove {}", audit::path(&p));
+        let row = Audit::SftpRemove { path: p.clone() };
         let res = self.session.remove(p).await;
         self.mutated(id, "remove", res, row).await
     }
@@ -613,7 +626,7 @@ where
         let p = self.resolve("rmdir", id, &path);
         self.check(self.ctx.actions.delete, "delete", &[p.as_str()])
             .await?;
-        let row = format!("sftp rmdir {}", audit::path(&p));
+        let row = Audit::SftpRmdir { path: p.clone() };
         let res = self.session.rmdir(p).await;
         self.mutated(id, "rmdir", res, row).await
     }
@@ -632,7 +645,10 @@ where
             &[old.as_str(), new.as_str()],
         )
         .await?;
-        let row = format!("sftp rename {} -> {}", audit::path(&old), audit::path(&new));
+        let row = Audit::SftpRename {
+            from: old.clone(),
+            to: new.clone(),
+        };
         let res = self.session.rename(old, new).await;
         self.mutated(id, "rename", res, row).await
     }
@@ -655,11 +671,10 @@ where
             &[link.as_str(), target.as_str()],
         )
         .await?;
-        let row = format!(
-            "sftp symlink {} -> {}",
-            audit::path(&link),
-            audit::path(&target)
-        );
+        let row = Audit::SftpSymlink {
+            link: link.clone(),
+            target: target.clone(),
+        };
         let res = self.session.symlink(link, target).await;
         self.mutated(id, "symlink", res, row).await
     }
@@ -675,7 +690,7 @@ where
         id: u32,
         op: &str,
         res: Result<Status, SftpError>,
-        row: String,
+        row: Audit,
     ) -> Result<Status, ProxyError> {
         match res {
             Ok(s) => {

@@ -33,6 +33,7 @@ pub(crate) async fn shell_request<B>(
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
+    let tr = params.lang.strings();
     let (handler_id, user_id, _, backend, tty, mut recv_from_tty, _, app_sender) = params.split();
 
     let mut allowed_targets = backend.list_targets_for_user(&user_id, true).await?;
@@ -138,8 +139,8 @@ where
 
     tokio::spawn(async move {
         // TODO: Classify different target type in future
-        let target_prompt = "Select target";
-        let user_prompt = "Select target user";
+        let target_prompt = tr.select_target;
+        let user_prompt = tr.select_target_user;
         let mut status = TerminalStatus::SelectTarget;
         let mut selected_target_name = String::new();
 
@@ -210,7 +211,7 @@ where
                             if !target_commands.iter().any(|v| v == &p) {
                                 status = TerminalStatus::SelectTarget;
                                 if let Err(e) = send_to_session
-                                    .send(format!("Server: {} doesn't exist", p).into())
+                                    .send(crate::fill!(tr.no_such_target, name = p).into())
                                     .await
                                 {
                                     warn!(
@@ -286,7 +287,7 @@ where
                             if !user_commands.iter().any(|v| v == &p) {
                                 status = TerminalStatus::SelectUser;
                                 if let Err(e) = send_to_session
-                                    .send(format!("System user: {} doesn't exist", p).into())
+                                    .send(crate::fill!(tr.no_such_target_user, name = p).into())
                                     .await
                                 {
                                     warn!(

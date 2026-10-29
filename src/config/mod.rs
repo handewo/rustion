@@ -3,6 +3,7 @@ pub mod error;
 use crate::config::error::ConfigError;
 use crate::database::{DEFAULT_DATABASE_URL, SUPPORTED_SCHEMES, redact_url};
 use crate::error::Error;
+use crate::i18n::Lang;
 use aes_gcm::KeyInit;
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
@@ -174,6 +175,10 @@ pub struct Config {
     pub auth_rejection_time: Duration,
     #[serde(default)]
     pub theme: ThemeName,
+    /// The interface language a session starts in, unless the client sends
+    /// a locale of its own (`LANG` and friends) that names a supported one.
+    #[serde(default)]
+    pub language: Lang,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,6 +232,7 @@ impl Config {
             record_path: default_record_path(),
             auth_rejection_time: default_auth_rejection_time(),
             theme: ThemeName::default(),
+            language: Lang::default(),
         }
     }
 
@@ -387,7 +393,8 @@ impl std::fmt::Display for Config {
             record_input: {}\r
             record_path: {}\r
             auth_rejection_time: {}\r
-            theme: {}\r",
+            theme: {}\r
+            language: {}\r",
             self.listen,
             self.server_key,
             self.server_id,
@@ -411,6 +418,7 @@ impl std::fmt::Display for Config {
             self.record_path,
             humantime::format_duration(self.auth_rejection_time),
             self.theme,
+            self.language,
         )
     }
 }
@@ -441,6 +449,7 @@ mod tests {
             record_path: default_record_path(),
             auth_rejection_time: default_auth_rejection_time(),
             theme: ThemeName::default(),
+            language: Lang::default(),
         };
         assert!(config.parse_listen_addr().is_ok());
 
@@ -464,6 +473,7 @@ mod tests {
             record_path: default_record_path(),
             auth_rejection_time: default_auth_rejection_time(),
             theme: ThemeName::default(),
+            language: Lang::default(),
         };
         let addr = config.parse_listen_addr().unwrap();
         assert_eq!(addr.port(), 2222);
@@ -488,6 +498,7 @@ mod tests {
             record_path: default_record_path(),
             auth_rejection_time: default_auth_rejection_time(),
             theme: ThemeName::default(),
+            language: Lang::default(),
         };
         let addr = config.parse_listen_addr().unwrap();
         assert_eq!(addr.port(), 2222);
@@ -518,6 +529,7 @@ mod tests {
             record_path: default_record_path(),
             auth_rejection_time: default_auth_rejection_time(),
             theme: ThemeName::default(),
+            language: Lang::default(),
         };
         assert!(invalid_config.validate().is_err());
     }
@@ -558,6 +570,26 @@ mod tests {
         assert!(parse(r#"theme = "solarized""#).is_err());
         for name in ThemeName::ALL {
             assert_eq!(parse(&format!("theme = \"{name}\"")).unwrap(), name);
+        }
+    }
+
+    #[test]
+    fn test_language_parsing() {
+        #[derive(Deserialize, Serialize)]
+        struct Only {
+            #[serde(default)]
+            language: Lang,
+        }
+        let parse = |s: &str| toml::from_str::<Only>(s).map(|o| o.language);
+        assert_eq!(parse("").unwrap(), Lang::En);
+        assert_eq!(parse(r#"language = "ja""#).unwrap(), Lang::Ja);
+        assert_eq!(parse(r#"language = "zh-TW""#).unwrap(), Lang::ZhHant);
+        assert_eq!(parse(r#"language = "pt_BR""#).unwrap(), Lang::PtBr);
+        assert!(parse(r#"language = "klingon""#).is_err());
+        // `--generate-config` writes the code back, and it reads as the same language.
+        for lang in Lang::ALL {
+            let written = toml::to_string(&Only { language: lang }).unwrap();
+            assert_eq!(parse(&written).unwrap(), lang);
         }
     }
 }

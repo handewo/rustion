@@ -1,10 +1,11 @@
 use crate::database::common as db_common;
 use crate::database::models::RecordingView;
 use crate::error::Error;
+use crate::fill;
 use crate::server::error::ServerError;
 use crate::server::extend_policy;
 use crate::server::widgets::{
-    AdminTable, DisplayMode, FormEditor, FormEvent, FormField, Message, Theme, centered_area,
+    AdminTable, DisplayMode, FormEditor, FormEvent, FormField, Help, Message, Theme, centered_area,
     common::{DATETIME_LENGTH, MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW},
     footer_height, popup_block, render_footer, render_message_popup, render_status_bar,
     render_title_bar,
@@ -33,7 +34,8 @@ use crate::asciinema::{
     player,
 };
 use crate::database::Uuid;
-use crate::server::event_log::EventKind;
+use crate::i18n::Lang;
+use crate::server::event_log::{Audit, EventKind};
 use log::{debug, warn};
 use tokio::sync::mpsc;
 
@@ -45,10 +47,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 const SCROLLBACK_LEN: usize = 1000;
-const HELP_TEXT: [&str; 2] = [
-    "(Enter) play | (q) quit | (↑↓) select | (s) setting | (r) refresh | (t) theme",
-    "(+/-) zoom in/out | (PgUp/PgDn) page up/down",
-];
+const HELP_TEXT: Help = |tr| [tr.help_player, tr.help_player_nav];
 
 async fn check_permission<B>(
     user_id: Uuid,
@@ -78,6 +77,7 @@ pub(crate) async fn shell_request<B>(
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
+    let lang = params.lang;
     let (handler_id, user_id, client_ip, backend, tty, mut recv_from_tty, log, _) = params.split();
     let uuids = db_common::InternalUuids::get();
     if !check_permission(
@@ -158,7 +158,7 @@ where
         }
     });
 
-    let app = App::new(backend.clone(), handler_id, user_id).await;
+    let app = App::new(backend.clone(), handler_id, user_id, lang).await;
     let w = SenderWriter::new(send_to_session.clone());
     let tty_backend = NottyBackend::new(tty.clone(), w.clone());
     let mut terminal = AsyncTerminal::new(tty_backend)?;
@@ -166,9 +166,7 @@ where
         let _ = app.run(tty, &mut terminal, send_status, w).await;
     });
 
-    log.scoped(EventKind::Player)
-        .record("User login to player")
-        .await;
+    log.scoped(EventKind::Player).record(Audit::Player).await;
     Ok(())
 }
 
@@ -200,15 +198,16 @@ where
 
     setting: Setting,
     theme: &'static Theme,
+    lang: Lang,
 
-    pub help_text: [&'static str; 2],
+    pub help_text: Help,
 }
 
 impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    async fn new(backend: Arc<B>, handler_id: Uuid, user_id: Uuid) -> Self {
+    async fn new(backend: Arc<B>, handler_id: Uuid, user_id: Uuid, lang: Lang) -> Self {
         let mut message = None;
         let items = match backend
             .db_repository()
@@ -221,7 +220,7 @@ where
                     "[{}] List recording view for user: ({}) failed: {}",
                     handler_id, user_id, e
                 );
-                message = Some(Message::Error(vec!["Internal error".into()]));
+                message = Some(Message::Error(vec![lang.strings().internal_error.into()]));
                 Vec::new()
             }
         };
@@ -250,6 +249,7 @@ where
 
             setting: Setting::new(),
             theme,
+            lang,
 
             help_text: HELP_TEXT,
         }
@@ -300,7 +300,9 @@ where
                     "[{}] List recording view for user: ({}) failed: {}",
                     self.handler_id, self.user_id, e
                 );
-                self.message = Some(Message::Error(vec!["Internal error".into()]));
+                self.message = Some(Message::Error(vec![
+                    self.lang.strings().internal_error.into(),
+                ]));
                 return;
             }
         };
@@ -639,7 +641,9 @@ where
             if self.is_playing {
                 if let Err(e) = self.do_play(&tty, terminal).await {
                     warn!("[{}] Play record cast error: {}", self.handler_id, e);
-                    self.message = Some(Message::Error(vec!["Internal error".into()]));
+                    self.message = Some(Message::Error(vec![
+                        self.lang.strings().internal_error.into(),
+                    ]));
                 };
                 self.is_playing = false;
             }
@@ -660,8 +664,11 @@ where
                 if self.setting.editing_mode {
                     match self.setting.form.handle_key_event(key.code, key.modifiers) {
                         FormEvent::Save => {
-                            if let Err(e) = self.setting.verify() {
-                                self.setting.form.set_save_error(vec![e.to_string()]);
+                            if self.setting.verify().is_err() {
+                                let tr = self.lang.strings();
+                                self.setting
+                                    .form
+                                    .set_save_error(vec![tr.v_not_a_number.into()]);
                             } else {
                                 self.setting.editing_mode = false;
                                 self.setting.form.show_cancel_confirmation = false;
@@ -696,6 +703,7 @@ where
                         self.table.dim(true);
                     }
                     KeyCode::Char('t') => self.theme = self.theme.next(),
+                    KeyCode::Char('L') => self.lang = self.lang.next(),
                     KeyCode::Char('q') => break,
                     KeyCode::Char('c') if ctrl_pressed => break,
                     KeyCode::Char('j') | KeyCode::Down => self.table.next_row(items_len),
@@ -717,6 +725,7 @@ where
     fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
         let theme = self.theme;
+        let tr = self.lang.strings();
         theme.paint(area, frame.buffer_mut());
 
         let layout = Layout::vertical([
@@ -728,7 +737,7 @@ where
 
         self.table.size = (table_area.width, table_area.height);
 
-        render_title_bar(header_area, frame.buffer_mut(), "Player", theme);
+        render_title_bar(header_area, frame.buffer_mut(), tr.title_player, theme);
         self.table.render(
             frame.buffer_mut(),
             table_area,
@@ -736,9 +745,10 @@ where
             &self.longest_item_lens,
             DisplayMode::Full,
             theme,
+            tr,
         );
         if let Some(ref msg) = self.message {
-            render_message_popup(table_area, frame.buffer_mut(), msg, theme);
+            render_message_popup(table_area, frame.buffer_mut(), msg, theme, tr);
         }
         if self.setting.editing_mode {
             self.render_setting_popup(frame, table_area);
@@ -747,16 +757,18 @@ where
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        render_footer(area, frame.buffer_mut(), self.help_text(), self.theme);
+        let tr = self.lang.strings();
+        render_footer(area, frame.buffer_mut(), self.help_text(), self.theme, tr);
     }
 
     /// The keys the footer lists: the setting form's while it is open.
     fn help_text(&self) -> [&'static str; 2] {
-        if self.setting.editing_mode {
+        let help = if self.setting.editing_mode {
             self.setting.form.help_text
         } else {
             self.help_text
-        }
+        };
+        help(self.lang.strings())
     }
 
     fn render_setting_popup(&mut self, frame: &mut Frame, area: Rect) {
@@ -770,11 +782,12 @@ where
             )
         };
         let theme = self.theme;
+        let tr = self.lang.strings();
         theme.clear(popup_area, frame.buffer_mut());
-        frame.render_widget(popup_block("Setting", theme), popup_area);
+        frame.render_widget(popup_block(tr.title_setting, theme), popup_area);
         self.setting
             .form
-            .render_ui(popup_area, frame.buffer_mut(), theme);
+            .render_ui(popup_area, frame.buffer_mut(), theme, tr);
     }
 
     fn player_ui(&mut self, f: &mut Frame, screen: &Screen, size: Size) {
@@ -942,18 +955,19 @@ where
             }
         }
 
+        let tr = self.lang.strings();
         let (state, color, help) = if self.is_finished {
-            ("ENDED", theme.muted, "Playback ended | (any key) exit")
+            (tr.state_ended, theme.muted, tr.help_ended)
         } else if self.pause {
-            (
-                "PAUSED",
-                theme.warning,
-                "(Space) play | (.) step | (]) next mark | (PgUp/PgDn) scroll lines",
-            )
+            (tr.state_paused, theme.warning, tr.help_paused)
         } else {
-            ("PLAYING", theme.success, "(Space) pause | (q) exit")
+            (tr.state_playing, theme.success, tr.help_playing)
         };
-        let size = format!("Window size: {}x{}", term_area.width, term_area.height);
+        let size = fill!(
+            tr.window_size,
+            width = term_area.width,
+            height = term_area.height
+        );
         render_status_bar(
             chunks[1],
             f.buffer_mut(),
@@ -1005,10 +1019,10 @@ pub struct Setting {
 impl Setting {
     pub fn new() -> Self {
         let form = FormEditor::new(vec![
-            FormField::text("Speed", Some(1.0f64.to_string())),
-            FormField::text("Idle time limit", Some(1.0f64.to_string())),
-            FormField::checkbox("Pause on markers", false),
-            FormField::checkbox("Auto exit", false),
+            FormField::text(|tr| tr.field_speed, Some(1.0f64.to_string())),
+            FormField::text(|tr| tr.field_idle_time_limit, Some(1.0f64.to_string())),
+            FormField::checkbox(|tr| tr.field_pause_on_markers, false),
+            FormField::checkbox(|tr| tr.field_auto_exit, false),
         ]);
 
         Self {

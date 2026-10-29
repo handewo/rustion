@@ -16,6 +16,8 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 pub struct ExecParams<B: 'static + crate::server::HandlerBackend + Send + Sync> {
+    /// The interface language: the client's locale, or the configured one.
+    pub lang: crate::i18n::Lang,
     pub handler_id: Uuid,
     pub user_id: Uuid,
     pub client_ip: Option<std::net::IpAddr>,
@@ -25,6 +27,8 @@ pub struct ExecParams<B: 'static + crate::server::HandlerBackend + Send + Sync> 
 }
 
 pub struct PtyParams<B: 'static + crate::server::HandlerBackend + Send + Sync> {
+    /// The interface language: the client's locale, or the configured one.
+    pub lang: crate::i18n::Lang,
     pub handler_id: Uuid,
     pub user_id: Uuid,
     pub client_ip: Option<std::net::IpAddr>,

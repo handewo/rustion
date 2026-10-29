@@ -2,10 +2,10 @@ use crate::database::Uuid;
 use crate::database::entity::casbin_rule;
 use crate::database::models::{Ptype, Role};
 use crate::error::Error;
-use crate::server::event_log::EventLogger;
+use crate::server::event_log::{Audit, EventLogger, labelled};
 use crate::server::widgets::{
-    AdminTable, DisplayMode, FieldsToArray, Message, TableData, Theme, centered_area,
-    render_message_popup,
+    AdminTable, DisplayMode, FieldsToArray, Help, Message, Strings, TableData, Theme,
+    centered_area, render_message_popup,
 };
 use ::log::info;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -17,10 +17,7 @@ use sea_orm::ActiveValue::Set;
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
 
-pub const HELP_TEXT: [&str; 2] = [
-    "(Space) toggle | (↑↓) select item",
-    "(Esc) quit | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
-];
+pub const HELP_TEXT: Help = |tr| [tr.help_grant, tr.help_grant_nav];
 
 pub(super) struct GrantRoleEditor<B>
 where
@@ -35,7 +32,8 @@ where
     admin_id: Uuid,
     save_error: Option<Error>,
     log: EventLogger<B>,
-    pub help_text: [&'static str; 2],
+    tr: &'static Strings,
+    pub help_text: Help,
 }
 
 impl<B> GrantRoleEditor<B>
@@ -48,6 +46,7 @@ where
         handler_id: Uuid,
         admin_id: Uuid,
         log: EventLogger<B>,
+        tr: &'static Strings,
     ) -> Self {
         let mut save_error = None;
         let items = match backend
@@ -71,6 +70,7 @@ where
             admin_id,
             save_error,
             log,
+            tr,
             help_text: HELP_TEXT,
         }
     }
@@ -138,10 +138,10 @@ where
                     self.handler_id, t.role, t.casbin_name_id, self.selected_user_id, self.admin_id
                 );
                 self.log
-                    .record(format!(
-                        "Role '{}({})' revoked from user_id={}",
-                        t.role, t.casbin_name_id, self.selected_user_id
-                    ))
+                    .record(Audit::RoleRevoked {
+                        role: labelled(&t.role, t.casbin_name_id),
+                        user: self.selected_user_id.to_string(),
+                    })
                     .await;
                 t.casbin_rule_id = None;
             }
@@ -164,10 +164,10 @@ where
                     self.handler_id, t.role, t.casbin_name_id, self.selected_user_id, self.admin_id
                 );
                 self.log
-                    .record(format!(
-                        "Role '{}({})' granted to user_id={}",
-                        t.role, t.casbin_name_id, self.selected_user_id
-                    ))
+                    .record(Audit::RoleGranted {
+                        role: labelled(&t.role, t.casbin_name_id),
+                        user: self.selected_user_id.to_string(),
+                    })
                     .await;
                 t.casbin_rule_id = Some(cr.id);
             }
@@ -188,22 +188,24 @@ where
             &self.longest_role_lens,
             DisplayMode::Manage,
             theme,
+            self.tr,
         );
 
         if self.save_error.is_some() {
             render_message_popup(
                 area,
                 buf,
-                &Message::Error(vec!["Internal error".into()]),
+                &Message::Error(vec![self.tr.internal_error.into()]),
                 theme,
+                self.tr,
             );
         }
     }
 }
 
 impl TableData for Vec<Role> {
-    fn header(&self) -> Vec<&str> {
-        vec!["", "role"]
+    fn header(&self, tr: &'static Strings) -> Vec<&'static str> {
+        vec!["", tr.col_role]
     }
 
     fn as_vec(&self) -> Vec<&dyn FieldsToArray> {
@@ -218,7 +220,7 @@ impl TableData for Vec<Role> {
 }
 
 impl FieldsToArray for Role {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, _tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 todo!()

@@ -1,5 +1,5 @@
-use super::Theme;
 use super::common::print_short_uuid;
+use super::{Strings, Theme};
 use crate::database::models::*;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Margin, Rect};
@@ -133,14 +133,16 @@ impl AdminTable {
         self.row_height = self.row_height.saturating_sub(1).max(1);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render<T: TableData>(
         &mut self,
         buf: &mut Buffer,
         area: Rect,
         items: &T,
-        longest_item_lens: &Vec<Constraint>,
+        longest_item_lens: &[Constraint],
         mode: DisplayMode,
         theme: &Theme,
+        tr: &'static Strings,
     ) {
         let (header_bg, selected, selected_cell) = if self.dimmed {
             (theme.inactive_bar, theme.inactive, theme.inactive_dim)
@@ -159,8 +161,18 @@ impl AdminTable {
             .add_modifier(Modifier::REVERSED)
             .fg(selected_cell);
 
-        let header = items
-            .header()
+        let headers = items.header(tr);
+        // A column is at least as wide as its header: translated headers are
+        // often wider than the values under them.
+        let widths: Vec<Constraint> = longest_item_lens
+            .iter()
+            .enumerate()
+            .map(|(i, c)| match (c, headers.get(i)) {
+                (Constraint::Length(n), Some(h)) => Constraint::Length((*n).max(h.width() as u16)),
+                (c, _) => *c,
+            })
+            .collect();
+        let header = headers
             .into_iter()
             .map(Cell::from)
             .collect::<Row>()
@@ -175,7 +187,7 @@ impl AdminTable {
                 _ => theme.alt_bg,
             };
 
-            let item = data.to_array(mode);
+            let item = data.to_array(mode, tr);
             item.into_iter()
                 .map(|content| Cell::from(Text::from(content.to_string())))
                 .collect::<Row>()
@@ -184,7 +196,7 @@ impl AdminTable {
         });
 
         let bar = vec!["   ".into(); self.row_height];
-        let t = Table::new(rows, longest_item_lens)
+        let t = Table::new(rows, widths)
             .header(header)
             .row_highlight_style(selected_row_style)
             .column_highlight_style(selected_col_style)
@@ -206,7 +218,7 @@ impl AdminTable {
                 height: below_header.height.min(1),
                 ..below_header
             };
-            Line::styled("No records yet", Style::new().fg(theme.muted).italic())
+            Line::styled(tr.no_records, Style::new().fg(theme.muted).italic())
                 .centered()
                 .render(notice, buf);
             return;
@@ -239,7 +251,7 @@ impl AdminTable {
 }
 
 pub trait TableData {
-    fn header(&self) -> Vec<&str>;
+    fn header(&self, tr: &'static Strings) -> Vec<&'static str>;
     fn as_vec(&self) -> Vec<&dyn FieldsToArray>;
     fn len(&self) -> usize;
 }
@@ -250,12 +262,19 @@ pub enum DisplayMode {
     Manage,
 }
 
+/// The cells of one row. `Full` is the database panel's raw view, so it
+/// shows values as stored; `Manage` words them in `tr`'s language.
 pub trait FieldsToArray {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String>;
+    fn to_array(&self, mode: DisplayMode, tr: &Strings) -> Vec<String>;
+}
+
+/// `true` and `false`, as the manage panel shows them.
+pub fn yes_no(value: bool, tr: &Strings) -> String {
+    if value { tr.yes } else { tr.no }.to_string()
 }
 
 impl FieldsToArray for UserWithRole {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 todo!()
@@ -266,8 +285,8 @@ impl FieldsToArray for UserWithRole {
                     self.user.email.clone().unwrap_or_default(),
                     self.user.print_password(),
                     self.user.print_authorized_keys(),
-                    self.user.force_init_pass.to_string(),
-                    self.user.is_active.to_string(),
+                    yes_no(self.user.force_init_pass, tr),
+                    yes_no(self.user.is_active, tr),
                     self.role.clone(),
                 ]
             }
@@ -276,7 +295,7 @@ impl FieldsToArray for UserWithRole {
 }
 
 impl FieldsToArray for User {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 vec![
@@ -297,8 +316,8 @@ impl FieldsToArray for User {
                     self.email.clone().unwrap_or_default(),
                     self.print_password(),
                     self.print_authorized_keys(),
-                    self.force_init_pass.to_string(),
-                    self.is_active.to_string(),
+                    yes_no(self.force_init_pass, tr),
+                    yes_no(self.is_active, tr),
                 ]
             }
         }
@@ -306,7 +325,7 @@ impl FieldsToArray for User {
 }
 
 impl FieldsToArray for Target {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 vec![
@@ -330,7 +349,7 @@ impl FieldsToArray for Target {
                     self.print_server_key(),
                     self.description.clone().unwrap_or_default(),
                     self.proxy.clone().unwrap_or_default(),
-                    self.is_active.to_string(),
+                    yes_no(self.is_active, tr),
                 ]
             }
         }
@@ -338,7 +357,7 @@ impl FieldsToArray for Target {
 }
 
 impl FieldsToArray for TargetSecret {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, _tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 vec![
@@ -358,7 +377,7 @@ impl FieldsToArray for TargetSecret {
 }
 
 impl FieldsToArray for Secret {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 vec![
@@ -380,7 +399,7 @@ impl FieldsToArray for Secret {
                     self.print_password(),
                     self.print_private_key(),
                     self.print_public_key(),
-                    self.is_active.to_string(),
+                    yes_no(self.is_active, tr),
                 ]
             }
         }
@@ -388,7 +407,7 @@ impl FieldsToArray for Secret {
 }
 
 impl FieldsToArray for CasbinName {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 vec![
@@ -403,15 +422,15 @@ impl FieldsToArray for CasbinName {
             DisplayMode::Manage => {
                 // Convert ptype to friendly name for display
                 let ptype_display = match self.ptype {
-                    NamePtype::G1 => "Role",
-                    NamePtype::G2 => "Target",
-                    NamePtype::G3 => "Action",
+                    NamePtype::G1 => tr.kind_role,
+                    NamePtype::G2 => tr.kind_target,
+                    NamePtype::G3 => tr.kind_action,
                     other => other.as_str(),
                 };
                 vec![
                     ptype_display.to_string(),
                     self.name.clone(),
-                    self.is_active.to_string(),
+                    yes_no(self.is_active, tr),
                 ]
             }
         }
@@ -419,7 +438,7 @@ impl FieldsToArray for CasbinName {
 }
 
 impl FieldsToArray for PermissionPolicy {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, _tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 todo!()
@@ -437,7 +456,7 @@ impl FieldsToArray for PermissionPolicy {
 }
 
 impl FieldsToArray for CasbinRule {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, _tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 vec![
@@ -461,7 +480,7 @@ impl FieldsToArray for CasbinRule {
 }
 
 impl FieldsToArray for EventLog {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, _tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 vec![
@@ -481,7 +500,7 @@ impl FieldsToArray for EventLog {
 }
 
 impl FieldsToArray for SessionRecording {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, _tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 vec![
@@ -505,8 +524,8 @@ impl FieldsToArray for SessionRecording {
 }
 
 impl TableData for Vec<ObjectGroup> {
-    fn header(&self) -> Vec<&str> {
-        vec!["Object", "Is Group"]
+    fn header(&self, tr: &'static Strings) -> Vec<&'static str> {
+        vec![tr.col_object, tr.col_is_group]
     }
 
     fn as_vec(&self) -> Vec<&dyn FieldsToArray> {
@@ -533,27 +552,20 @@ pub fn table_object_group_len_calculator(data: &[ObjectGroup]) -> Vec<Constraint
 }
 
 impl FieldsToArray for ObjectGroup {
-    fn to_array(&self, mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, mode: DisplayMode, tr: &Strings) -> Vec<String> {
         match mode {
             DisplayMode::Full => {
                 todo!()
             }
             DisplayMode::Manage => {
-                vec![
-                    self.name.clone(),
-                    if self.is_group {
-                        "Y".to_string()
-                    } else {
-                        "N".to_string()
-                    },
-                ]
+                vec![self.name.clone(), yes_no(self.is_group, tr)]
             }
         }
     }
 }
 
 impl FieldsToArray for RecordingView {
-    fn to_array(&self, _mode: DisplayMode) -> Vec<String> {
+    fn to_array(&self, _mode: DisplayMode, tr: &Strings) -> Vec<String> {
         let label = if !self.current_label.is_empty() && self.current_label != self.target_label {
             format!("{}({})", self.current_label, self.target_label)
         } else {
@@ -565,14 +577,23 @@ impl FieldsToArray for RecordingView {
             self.ended_at
                 .map(super::common::format_timestamp)
                 .unwrap_or_default(),
-            self.status.to_string(),
+            match self.status {
+                RecordingStatus::Active => tr.status_active,
+                RecordingStatus::Completed => tr.status_completed,
+            }
+            .to_string(),
         ]
     }
 }
 
 impl TableData for Vec<RecordingView> {
-    fn header(&self) -> Vec<&str> {
-        vec!["Target Label", "Started At", "Ended At", "Status"]
+    fn header(&self, tr: &'static Strings) -> Vec<&'static str> {
+        vec![
+            tr.col_target_label,
+            tr.col_started_at,
+            tr.col_ended_at,
+            tr.col_status,
+        ]
     }
 
     fn as_vec(&self) -> Vec<&dyn FieldsToArray> {

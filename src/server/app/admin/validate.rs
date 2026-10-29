@@ -10,6 +10,12 @@
 //! this, exactly as they did when `validate()` hung off the models.
 
 use super::common;
+use super::error::AdminError;
+use crate::error::Error;
+use crate::fill;
+use crate::i18n::{Lang, Strings};
+use crate::server::app::error::AppError;
+use crate::server::error::ServerError;
 use russh::keys::ssh_key::PublicKey;
 use std::str::FromStr;
 use thiserror::Error;
@@ -40,88 +46,63 @@ pub enum ValidateError {
     MissingRuleId,
 }
 
+impl ValidateError {
+    /// What is wrong, in `tr`'s language.
+    pub fn message(&self, tr: &Strings) -> String {
+        use ValidateError::*;
+        let lines = |v: &[usize]| {
+            v.iter()
+                .map(|x| (x + 1).to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        match self {
+            UsernameEmpty => tr.v_username_empty.to_string(),
+            UsernameTooLong => fill!(tr.v_username_too_long, max = common::MAX_USERNAME_LEN),
+            EmailInvalid => tr.v_email_invalid.to_string(),
+            AuthorizedKeyInvalid(v) => fill!(tr.v_authorized_keys, lines = lines(v)),
+            NameEmpty => tr.v_name_empty.to_string(),
+            NameTooLong => fill!(tr.v_name_too_long, max = common::MAX_NAME_LEN),
+            NameStartsWithUnderscore => tr.v_name_underscore.to_string(),
+            HostnameEmpty => tr.v_hostname_empty.to_string(),
+            HostnameTooLong => fill!(tr.v_hostname_too_long, max = common::MAX_NAME_LEN),
+            PortNotNumber => tr.v_port_not_number.to_string(),
+            PortInvalid => tr.v_port_range.to_string(),
+            ServerPublicKey => tr.v_server_public_key.to_string(),
+            ProxyInvalid => tr.v_proxy.to_string(),
+            SecretUserEmpty => tr.v_secret_user_empty.to_string(),
+            SecretUserTooLong => {
+                fill!(tr.v_secret_user_too_long, max = common::MAX_USERNAME_LEN)
+            }
+            SshKeyInvalid(e) => fill!(tr.v_ssh_key, error = e),
+            PtypeInvalid => tr.v_ptype.to_string(),
+            UserRoleEmpty => tr.v_user_role_empty.to_string(),
+            TargetGroupEmpty => tr.v_target_group_empty.to_string(),
+            ActionGroupEmpty => tr.v_action_group_empty.to_string(),
+            MissingRuleId => tr.v_missing_rule_id.to_string(),
+        }
+    }
+}
+
+/// English, for logs.
 impl std::fmt::Display for ValidateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use ValidateError::*;
-        match self {
-            UsernameEmpty => {
-                write!(f, "Username cannot be empty")
-            }
-            UsernameTooLong => {
-                write!(f, "Username is too long, max: {}", common::MAX_USERNAME_LEN)
-            }
-            EmailInvalid => {
-                write!(f, "Invalid email format")
-            }
-            AuthorizedKeyInvalid(v) => {
-                write!(
-                    f,
-                    "Invalid authorized keys, line number: {}",
-                    v.iter()
-                        .map(|x| (x + 1).to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
-            NameEmpty => {
-                write!(f, "Name cannot be empty")
-            }
-            NameTooLong => {
-                write!(f, "Name is too long, max: {}", common::MAX_NAME_LEN)
-            }
-            NameStartsWithUnderscore => {
-                write!(f, "Name cannot start with underscore")
-            }
-            HostnameEmpty => {
-                write!(f, "Hostname cannot be empty")
-            }
-            HostnameTooLong => {
-                write!(f, "Hostname is too long, max: {}", common::MAX_NAME_LEN)
-            }
-            PortNotNumber => {
-                write!(f, "Port is not a number")
-            }
-            PortInvalid => {
-                write!(f, "Port is not within the range of 1-65535")
-            }
-            ServerPublicKey => {
-                write!(f, "Server public key is invalid")
-            }
-            ProxyInvalid => {
-                write!(
-                    f,
-                    "Proxy is invalid, expected format: ssh://<uuid>, http://<url>, or https://<url>[?insecure=true]"
-                )
-            }
-            SecretUserEmpty => {
-                write!(f, "Secret user cannot be empty")
-            }
-            SecretUserTooLong => {
-                write!(
-                    f,
-                    "Secret user is too long, max: {}",
-                    common::MAX_USERNAME_LEN
-                )
-            }
-            SshKeyInvalid(e) => {
-                write!(f, "Invalid ssh key: {}", e)
-            }
-            PtypeInvalid => {
-                write!(f, "Type must be one of g1, g2, g3")
-            }
-            UserRoleEmpty => {
-                write!(f, "User/Role cannot be empty")
-            }
-            TargetGroupEmpty => {
-                write!(f, "Target/Group cannot be empty")
-            }
-            ActionGroupEmpty => {
-                write!(f, "Action/Group cannot be empty")
-            }
-            MissingRuleId => {
-                write!(f, "Rule ID is none for bound role")
-            }
+        f.write_str(&self.message(Lang::En.strings()))
+    }
+}
+
+/// An editor's save error as the dialog says it, in `tr`'s language. What the
+/// operator can fix is worded; anything else is an internal error, shown as it
+/// is so it can be reported.
+pub fn describe(e: &Error, tr: &Strings) -> String {
+    match e {
+        Error::App(AppError::Admin(AdminError::Validate(v))) => v.message(tr),
+        Error::App(AppError::Admin(AdminError::DuplicateTargetUser { target, user })) => {
+            fill!(tr.duplicate_target_user, target = target, user = user)
         }
+        Error::Json(e) => fill!(tr.v_extend_policy, error = e),
+        Error::Server(ServerError::ExtendPolicy(e)) => fill!(tr.v_extend_policy, error = e),
+        e => e.to_string(),
     }
 }
 

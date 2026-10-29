@@ -8,6 +8,9 @@ pub use form::*;
 pub use table::*;
 pub use theme::Theme;
 
+use crate::fill;
+pub use crate::i18n::Strings;
+
 use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
@@ -19,15 +22,22 @@ use ratatui::{
 use tui_textarea::{CursorMove, Input, Key, TextArea};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+/// Text a widget keeps and words only when it draws, so it follows the
+/// session's language when that changes: `|tr| tr.field_name`.
+pub type Label = fn(&Strings) -> &'static str;
+
+/// Help text, as [`Label`] is a label: `(key) what | (key) what`, two lines.
+pub type Help = fn(&Strings) -> [&'static str; 2];
+
 /// Radio button options for selection
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct RadioOption {
-    pub label: &'static str,
+    pub label: Label,
     pub value: &'static str,
 }
 
 impl RadioOption {
-    pub const fn new(label: &'static str, value: &'static str) -> Self {
+    pub const fn new(label: Label, value: &'static str) -> Self {
         Self { label, value }
     }
 }
@@ -97,6 +107,7 @@ impl RadioButtons {
         buf: &mut Buffer,
         editing_mode: bool,
         theme: &Theme,
+        tr: &Strings,
         is_focused: bool,
     ) {
         let radio_layout = Layout::default()
@@ -126,7 +137,7 @@ impl RadioButtons {
             let line = Line::from(vec![
                 Span::styled(symbol, symbol_style),
                 Span::raw(" "),
-                Span::styled(option.label, label_style),
+                Span::styled((option.label)(tr), label_style),
             ]);
 
             let paragraph = Paragraph::new(line).alignment(Alignment::Left);
@@ -135,6 +146,7 @@ impl RadioButtons {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_radio_buttons(
     area: Rect,
     buf: &mut Buffer,
@@ -142,44 +154,24 @@ pub fn render_radio_buttons(
     radio_buttons: &RadioButtons,
     editing_mode: bool,
     theme: &Theme,
+    tr: &Strings,
     is_focused: bool,
 ) {
     let block = field_block(label, editing_mode, theme, is_focused);
     let inner = block.inner(area);
     block.render(area, buf);
 
-    radio_buttons.render_vertical(inner, buf, editing_mode, theme, is_focused);
+    radio_buttons.render_vertical(inner, buf, editing_mode, theme, tr, is_focused);
 }
 
-pub const COMMON_HELP: [&str; 2] = [
-    "(Enter) edit | (i) insert | (a) append | (d) clear",
-    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
-];
-pub const RADIO_HELP: [&str; 2] = [
-    "(Enter) edit",
-    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
-];
-pub const RADIO_EDIT_HELP: [&str; 2] = [
-    "(Enter) confirm | (Up/Down) select",
-    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
-];
-pub const CHECKBOX_HELP: [&str; 2] = [
-    "(Space) toggle",
-    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
-];
-pub const MULTILINES_HELP: [&str; 2] = [
-    "(Enter) activate | (d) clear all",
-    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
-];
-pub const MULTILINES_EDIT_HELP: [&str; 2] = [
-    "(Enter) edit | (i) insert | (a) append | (d) delete line | (o) newline",
-    "(Esc) cancel | (Up) next line | (Down) previous line",
-];
-pub const MULTILINES_INPUT_HELP: [&str; 2] = ["(Enter) newline", "(Esc) quit edit"];
-pub const READONLY_HELP: [&str; 2] = [
-    "(Read-only)",
-    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
-];
+pub const COMMON_HELP: Help = |tr| [tr.help_form_edit, tr.help_form_nav];
+pub const RADIO_HELP: Help = |tr| [tr.help_radio, tr.help_form_nav];
+pub const RADIO_EDIT_HELP: Help = |tr| [tr.help_radio_edit, tr.help_form_nav];
+pub const CHECKBOX_HELP: Help = |tr| [tr.help_checkbox, tr.help_form_nav];
+pub const MULTILINES_HELP: Help = |tr| [tr.help_multiline, tr.help_form_nav];
+pub const MULTILINES_EDIT_HELP: Help = |tr| [tr.help_multiline_edit, tr.help_multiline_edit_nav];
+pub const MULTILINES_INPUT_HELP: Help = |tr| [tr.help_multiline_input, tr.help_multiline_input_nav];
+pub const READONLY_HELP: Help = |tr| [tr.read_only, tr.help_form_nav];
 
 pub fn text_editing_style(color: Color, textarea: &mut TextArea) {
     textarea.set_cursor_line_style(Style::default().add_modifier(Modifier::UNDERLINED));
@@ -428,15 +420,21 @@ impl Message {
     }
 }
 
-pub fn render_message_dialog(area: Rect, buf: &mut Buffer, message: &Message, theme: &Theme) {
+pub fn render_message_dialog(
+    area: Rect,
+    buf: &mut Buffer,
+    message: &Message,
+    theme: &Theme,
+    tr: &Strings,
+) {
     use Message::*;
     let (title, color) = match message {
-        Info(_) => ("Info", theme.accent),
-        Warning(_) => ("Warning", theme.warning),
-        Error(_) => ("Error", theme.error),
-        Success(_) => ("Success", theme.success),
+        Info(_) => (tr.dialog_info, theme.accent),
+        Warning(_) => (tr.dialog_warning, theme.warning),
+        Error(_) => (tr.dialog_error, theme.error),
+        Success(_) => (tr.dialog_success, theme.success),
     };
-    let ok = Line::from(button("OK", color, theme));
+    let ok = Line::from(button(tr.ok, color, theme));
     render_dialog(area, buf, title, color, message.lines(), ok, theme);
 }
 
@@ -448,30 +446,33 @@ pub fn centered_area(area: Rect, x: u16, y: u16) -> Rect {
     area
 }
 
-pub fn render_confirm_dialog(area: Rect, buf: &mut Buffer, lines: &[String], theme: &Theme) {
+pub fn render_confirm_dialog(
+    area: Rect,
+    buf: &mut Buffer,
+    lines: &[String],
+    theme: &Theme,
+    tr: &Strings,
+) {
     render_dialog(
         area,
         buf,
-        "Confirm Delete",
+        tr.confirm_delete,
         theme.error,
         lines,
-        yes_no(theme),
+        yes_no(theme, tr),
         theme,
     );
 }
 
-pub fn render_cancel_dialog(area: Rect, buf: &mut Buffer, theme: &Theme) {
-    let lines = [
-        "Are you sure you want to cancel?".to_string(),
-        "All unsaved changes will be lost.".to_string(),
-    ];
+pub fn render_cancel_dialog(area: Rect, buf: &mut Buffer, theme: &Theme, tr: &Strings) {
+    let lines = [tr.cancel_sure.to_string(), tr.cancel_lost.to_string()];
     render_dialog(
         area,
         buf,
-        "Confirm Cancel",
+        tr.confirm_cancel,
         theme.error,
         &lines,
-        yes_no(theme),
+        yes_no(theme, tr),
         theme,
     );
 }
@@ -597,14 +598,15 @@ fn button(label: &str, color: Color, theme: &Theme) -> Span<'static> {
     )
 }
 
-fn yes_no(theme: &Theme) -> Line<'static> {
+/// The keys stay `Y` and `N` in every language: they are what is pressed.
+fn yes_no(theme: &Theme, tr: &Strings) -> Line<'static> {
     let label = Style::new().fg(theme.fg);
     Line::from(vec![
         button("Y", theme.success, theme),
-        Span::styled(" Yes", label),
+        Span::styled(format!(" {}", tr.yes), label),
         Span::raw("     "),
         button("N", theme.error, theme),
-        Span::styled(" No", label),
+        Span::styled(format!(" {}", tr.no), label),
     ])
 }
 
@@ -935,11 +937,12 @@ pub fn render_status_bar(
     line.render(area, buf);
 }
 
-/// The help footer at the bottom of every panel: a rule naming the theme, then
-/// the key hints in aligned columns, centred as one block. Give it the height
-/// [`footer_height`] asks for; hints beyond that are cut, and the last row
-/// says how many.
-pub fn render_footer(area: Rect, buf: &mut Buffer, lines: [&str; 2], theme: &Theme) {
+/// The help footer at the bottom of every panel: a rule naming the theme and
+/// the language, then the key hints in aligned columns, centred as one block.
+/// Give it the height [`footer_height`] asks for; hints beyond that are cut,
+/// and the last row says how many. The language is left off the rule when
+/// there is no room for both.
+pub fn render_footer(area: Rect, buf: &mut Buffer, lines: [&str; 2], theme: &Theme, tr: &Strings) {
     buf.set_style(area, theme.base());
     if area.height == 0 {
         return;
@@ -947,11 +950,23 @@ pub fn render_footer(area: Rect, buf: &mut Buffer, lines: [&str; 2], theme: &The
     let [rule, hints] = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(area);
 
     let border = Style::new().fg(theme.border);
-    let name = Line::from(vec![
-        Span::styled(" theme ", Style::new().fg(theme.muted)),
+    let label = Style::new().fg(theme.muted);
+    let theme_spans = [
+        Span::styled(format!(" {} ", tr.footer_theme), label),
         Span::styled(format!(" {} ", theme.name), key_style(theme)),
         Span::styled(" ─", border),
-    ]);
+    ];
+    let language_spans = [
+        Span::styled(format!(" {} ", tr.footer_language), label),
+        Span::styled(format!(" {} ", tr.lang_name), key_style(theme)),
+        Span::styled(" ─", border),
+    ];
+    let mut name = Line::from(language_spans.to_vec());
+    name.spans.extend(theme_spans.clone());
+    // Room for a stretch of rule on the left, or it reads as a header.
+    if name.width() + 4 > rule.width as usize {
+        name = Line::from(theme_spans.to_vec());
+    }
     let name_width = (name.width() as u16).min(rule.width);
     Line::styled("─".repeat(rule.width as usize), border).render(rule, buf);
     name.render(
@@ -984,7 +999,7 @@ pub fn render_footer(area: Rect, buf: &mut Buffer, lines: [&str; 2], theme: &The
     if cut {
         let y = hints.y + top + shown as u16;
         let hidden = grid.hints.len() - shown * grid.columns;
-        Line::styled(format!("… {hidden} more"), theme.muted)
+        Line::styled(fill!(tr.footer_more, count = hidden), theme.muted)
             .centered()
             .render(
                 Rect {
@@ -1005,14 +1020,21 @@ pub struct TabBar {
 }
 
 impl TabBar {
+    /// The narrowest a tab gets. Wider labels, as translations often are,
+    /// widen every tab to the widest of them, so all tabs stay one size.
     const TAB_W: usize = 17;
     const DIV_W: usize = 1;
     const ARROW_W: usize = 2; // "◄ " or " ►"
 
     /// Returns (full_tab_count, has_left_arrow, has_right_arrow) for the given
     /// scroll offset and available width. Only counts tabs that fit completely.
-    fn visibility(offset: usize, tab_count: usize, area_width: usize) -> (usize, bool, bool) {
-        let (tab_w, div_w, arrow_w) = (Self::TAB_W, Self::DIV_W, Self::ARROW_W);
+    fn visibility(
+        offset: usize,
+        tab_count: usize,
+        area_width: usize,
+        tab_w: usize,
+    ) -> (usize, bool, bool) {
+        let (div_w, arrow_w) = (Self::DIV_W, Self::ARROW_W);
 
         let has_left = offset > 0;
         let left_res = if has_left { arrow_w } else { 0 };
@@ -1055,7 +1077,10 @@ impl TabBar {
         let area = render_header(area, buf, theme);
         let width = area.width as usize;
         let tab_count = labels.len();
-        let tab_w = Self::TAB_W;
+        let tab_w = labels
+            .iter()
+            .map(|l| l.width() + 2)
+            .fold(Self::TAB_W, usize::max);
         let arrow_w = Self::ARROW_W;
 
         // Scroll left if selected tab is before the visible window
@@ -1065,7 +1090,8 @@ impl TabBar {
 
         // Scroll right if selected tab is beyond the visible window
         loop {
-            let (visible_count, _, _) = Self::visibility(self.scroll_offset, tab_count, width);
+            let (visible_count, _, _) =
+                Self::visibility(self.scroll_offset, tab_count, width, tab_w);
             if visible_count == 0 || selected < self.scroll_offset + visible_count {
                 break;
             }
@@ -1073,7 +1099,7 @@ impl TabBar {
         }
 
         let (visible_count, has_left, has_right) =
-            Self::visibility(self.scroll_offset, tab_count, width);
+            Self::visibility(self.scroll_offset, tab_count, width, tab_w);
 
         if visible_count == 0 {
             return;
@@ -1097,7 +1123,7 @@ impl TabBar {
                 used += 1;
             }
 
-            let label = format!("{:^17}", item);
+            let label = center(item, tab_w);
             let style = if i == selected {
                 tab_style(theme)
             } else {
@@ -1115,8 +1141,8 @@ impl TabBar {
                 // divider + partial label
                 spans.push(Span::raw(" "));
                 let partial_w = leftover - 1; // 1 for divider
-                let full_label = format!("{:^17}", labels[next_idx]);
-                let truncated: String = full_label.chars().take(partial_w).collect();
+                let full_label = center(labels[next_idx], tab_w);
+                let truncated = clip(&full_label, partial_w);
                 spans.push(Span::styled(truncated, dim_style));
             }
             spans.push(Span::styled(" ►", dim_style));
@@ -1126,7 +1152,37 @@ impl TabBar {
     }
 }
 
-pub fn render_message_popup(area: Rect, buf: &mut Buffer, message: &Message, theme: &Theme) {
+/// `text` centred in `width` columns, by display width: a CJK character takes
+/// two, which `format!("{:^n}")` would count as one. Cut when it is wider.
+fn center(text: &str, width: usize) -> String {
+    let text = clip(text, width);
+    let room = width - text.width();
+    let left = room / 2;
+    format!("{}{text}{}", " ".repeat(left), " ".repeat(room - left))
+}
+
+/// The longest start of `text` that fits `width` columns.
+fn clip(text: &str, width: usize) -> String {
+    let mut out = String::new();
+    let mut used = 0;
+    for ch in text.chars() {
+        let w = ch.width().unwrap_or(0);
+        if used + w > width {
+            break;
+        }
+        used += w;
+        out.push(ch);
+    }
+    out
+}
+
+pub fn render_message_popup(
+    area: Rect,
+    buf: &mut Buffer,
+    message: &Message,
+    theme: &Theme,
+    tr: &Strings,
+) {
     let popup_area = if area.width <= common::MAX_POPUP_WINDOW_COL {
         area
     } else {
@@ -1137,13 +1193,16 @@ pub fn render_message_popup(area: Rect, buf: &mut Buffer, message: &Message, the
         )
     };
 
-    render_message_dialog(popup_area, buf, message, theme);
+    render_message_dialog(popup_area, buf, message, theme, tr);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::ThemeName;
+    use crate::i18n::Lang;
+
+    const EN: &Strings = Lang::En.strings();
 
     fn text(buf: &Buffer) -> String {
         buf.content.iter().map(|c| c.symbol()).collect()
@@ -1199,9 +1258,17 @@ mod tests {
                 &table_object_group_len_calculator(&rows),
                 DisplayMode::Manage,
                 theme,
+                EN,
             );
-            render_footer(footer, &mut buf, ["(q) quit | help", "(Read-only)"], theme);
-            render_message_popup(table, &mut buf, &Message::Error(vec!["bad".into()]), theme);
+            render_footer(
+                footer,
+                &mut buf,
+                ["(q) quit | help", "(Read-only)"],
+                theme,
+                EN,
+            );
+            let message = Message::Error(vec!["bad".into()]);
+            render_message_popup(table, &mut buf, &message, theme, EN);
             render_status_bar(
                 tabs,
                 &mut buf,
@@ -1222,7 +1289,13 @@ mod tests {
     fn the_footer_names_the_theme() {
         let area = Rect::new(0, 0, 40, 4);
         let mut buf = Buffer::empty(area);
-        render_footer(area, &mut buf, ["", ""], Theme::of(ThemeName::OledWhite));
+        render_footer(
+            area,
+            &mut buf,
+            ["", ""],
+            Theme::of(ThemeName::OledWhite),
+            EN,
+        );
         assert!(text(&buf).contains(" theme  oled-white "), "{}", text(&buf));
     }
 
@@ -1233,7 +1306,7 @@ mod tests {
         let theme = &theme::NORD;
         let area = Rect::new(0, 0, 60, 4);
         let mut buf = Buffer::empty(area);
-        render_footer(area, &mut buf, ["(Esc) quit | (t) theme", ""], theme);
+        render_footer(area, &mut buf, ["(Esc) quit | (t) theme", ""], theme, EN);
 
         let (x, y) = find(&buf, "Esc");
         let key = &buf[(x, y)];
@@ -1250,13 +1323,13 @@ mod tests {
 
     const MANAGE_HELP: [&str; 2] = [
         "(a) add | (e) edit | (d) delete | (r) grant role | (t) theme | (Esc) quit | (↑↓←→) move around",
-        "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
+        "(Tab/Shift Tab) next/previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
     ];
 
     fn footer(help: [&str; 2], width: u16) -> Buffer {
         let area = Rect::new(0, 0, width, footer_height(help, width));
         let mut buf = Buffer::empty(area);
-        render_footer(area, &mut buf, help, &theme::NORD);
+        render_footer(area, &mut buf, help, &theme::NORD, EN);
         buf
     }
 
@@ -1266,14 +1339,35 @@ mod tests {
     fn the_footer_lines_its_hints_up_in_columns() {
         let buf = footer(MANAGE_HELP, 80);
         // The first column at 80 wide, top to bottom.
-        let column = [("a", "add"), ("r", "grant role"), ("↑↓←→", "move around")];
+        let grid = HintGrid::new(&MANAGE_HELP, 80);
+        let column: Vec<(&str, &str)> = grid
+            .hints
+            .iter()
+            .step_by(grid.columns)
+            .filter_map(|h| match h {
+                Hint::Key(key, what) => Some((*key, *what)),
+                _ => None,
+            })
+            .collect();
+        assert!(column.len() >= 3, "{column:?}");
+        // Row `i` of the grid is the footer's row `i + 1`, under the rule. A
+        // short key like ` d ` can turn up elsewhere, so look only there.
+        let at = |row: usize, needle: &str| {
+            let line = &rows(&buf)[row + 1];
+            let i = line
+                .find(needle)
+                .unwrap_or_else(|| panic!("{needle:?} not in {line:?}"));
+            line[..i].chars().count() as u16
+        };
         let key_ends = column
             .iter()
-            .map(|(key, _)| find(&buf, &format!(" {key} ")).0 + key.chars().count() as u16 + 2)
+            .enumerate()
+            .map(|(row, (key, _))| at(row, &format!(" {key} ")) + key.chars().count() as u16 + 2)
             .collect::<Vec<_>>();
         let starts = column
             .iter()
-            .map(|(_, what)| find(&buf, what).0)
+            .enumerate()
+            .map(|(row, (_, what))| at(row, what))
             .collect::<Vec<_>>();
         assert!(key_ends.windows(2).all(|w| w[0] == w[1]), "{key_ends:?}");
         assert!(starts.windows(2).all(|w| w[0] == w[1]), "{starts:?}");
@@ -1332,6 +1426,7 @@ mod tests {
             &mut buf,
             &Message::Error(vec![message.into()]),
             &theme::NORD,
+            EN,
         );
         for word in message.split_whitespace() {
             find(&buf, word);
@@ -1349,7 +1444,7 @@ mod tests {
         let lines = (0..30).map(|i| format!("line {i}")).collect();
         let area = Rect::new(0, 0, 40, 10);
         let mut buf = Buffer::empty(area);
-        render_message_dialog(area, &mut buf, &Message::Info(lines), &theme::NORD);
+        render_message_dialog(area, &mut buf, &Message::Info(lines), &theme::NORD, EN);
         find(&buf, "line 0");
         find(&buf, "…");
         find(&buf, " OK ");
@@ -1369,6 +1464,7 @@ mod tests {
             &table_object_group_len_calculator(&rows),
             DisplayMode::Manage,
             &theme::DEFAULT,
+            EN,
         );
         find(&buf, "No records yet");
     }
@@ -1384,6 +1480,76 @@ mod tests {
         assert!(shown.starts_with(BRAND), "{shown}");
         assert!(shown.contains("Epsilon"), "{shown}");
         assert!(shown.contains('◄'), "{shown}");
+    }
+
+    #[test]
+    fn the_footer_names_the_language_when_there_is_room() {
+        let ja = Lang::Ja.strings();
+        let area = Rect::new(0, 0, 60, 4);
+        let mut buf = Buffer::empty(area);
+        render_footer(area, &mut buf, ["", ""], &theme::NORD, ja);
+        // A wide character's second cell is blank, so compare without spaces.
+        let shown = text(&buf).replace(' ', "");
+        assert!(shown.contains("言語日本語"), "{shown}");
+        assert!(shown.contains("テーマnord"), "{shown}");
+
+        // Too narrow for both: the theme stays, the language goes.
+        let area = Rect::new(0, 0, 30, 4);
+        let mut buf = Buffer::empty(area);
+        render_footer(area, &mut buf, ["", ""], &theme::NORD, EN);
+        let shown = text(&buf);
+        assert!(shown.contains("nord"), "{shown}");
+        assert!(!shown.contains("English"), "{shown}");
+    }
+
+    /// Every language's help is drawn as key caps: the footer still finds the
+    /// keys once the descriptions are translated, and every one is shown.
+    #[test]
+    fn translated_help_keeps_its_key_caps() {
+        let theme = &theme::NORD;
+        for lang in Lang::ALL {
+            let tr = lang.strings();
+            let help = [tr.help_manage_user, tr.help_manage_nav];
+            let area = Rect::new(0, 0, 120, footer_height(help, 120));
+            let mut buf = Buffer::empty(area);
+            render_footer(area, &mut buf, help, theme, tr);
+            let (x, y) = find(&buf, " Esc ");
+            assert_eq!(buf[(x + 1, y)].bg, theme.bar_bg, "{lang}");
+            assert!(!text(&buf).contains("(Esc)"), "{lang}: {}", text(&buf));
+        }
+    }
+
+    /// A tab is centred by the columns its label takes, so a CJK label fills
+    /// the tab rather than spilling past it.
+    #[test]
+    fn tabs_centre_wide_labels_by_width() {
+        assert_eq!(center("ユーザー", 12), "  ユーザー  ");
+        assert_eq!(center("ab", 5).width(), 5);
+        assert_eq!(center("ターゲットグループ", 17).width(), 17);
+        assert_eq!(clip("ターゲット", 5), "ター");
+    }
+
+    /// A label wider than a tab widens every tab rather than being cut.
+    #[test]
+    fn tabs_widen_for_long_labels() {
+        let labels = ["Utilisateurs", "Hiérarchie des rôles"];
+        let area = Rect::new(0, 0, 80, 1);
+        let mut buf = Buffer::empty(area);
+        TabBar::default().render(area, &mut buf, &labels, 1, &theme::DEFAULT);
+        let shown = text(&buf);
+        assert!(shown.contains("Hiérarchie des rôles"), "{shown}");
+        assert!(shown.contains("Utilisateurs"), "{shown}");
+    }
+
+    #[test]
+    fn dialogs_speak_the_session_language() {
+        let fr = Lang::Fr.strings();
+        let area = Rect::new(0, 0, 60, 12);
+        let mut buf = Buffer::empty(area);
+        render_cancel_dialog(area, &mut buf, &theme::NORD, fr);
+        find(&buf, fr.confirm_cancel);
+        find(&buf, " Oui");
+        find(&buf, " Y ");
     }
 
     fn object_group(name: &str) -> crate::database::models::ObjectGroup {

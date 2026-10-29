@@ -7,7 +7,7 @@ use crate::database::models::{Target, TargetSecretName, User};
 use crate::error::Error;
 use crate::server::app::error::AppError;
 use crate::server::app::sftp::SftpContext;
-use crate::server::event_log::{EventKind, EventLogger};
+use crate::server::event_log::{Audit, EventKind, EventLogger, labelled};
 use crate::server::{error::ServerError, extend_policy};
 use log::{debug, trace};
 use russh::client as ru_client;
@@ -601,18 +601,20 @@ where
                 }
             }
             let _ = handle.close(channel).await;
-            log.record(format!(
-                "target request: {} closed on {}({})",
-                request_str, move_target.name, move_target.id
-            ))
+            log.record(Audit::TargetRequest {
+                request: request_str,
+                target: labelled(&move_target.name, move_target.id),
+                closed: true,
+            })
             .await;
         });
 
         self.log
-            .record(format!(
-                "target request: {} succeed on {}({})",
-                request, self.target.name, self.target.id
-            ))
+            .record(Audit::TargetRequest {
+                request: request.to_string(),
+                target: labelled(&self.target.name, self.target.id),
+                closed: false,
+            })
             .await;
 
         Ok(())

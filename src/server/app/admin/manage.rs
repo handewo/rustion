@@ -1,11 +1,12 @@
-use super::common::*;
 use crate::database::Uuid;
 use crate::database::models::*;
 use crate::error::Error;
-use crate::server::event_log::{EventKind, EventLogger};
+use crate::fill;
+use crate::i18n::{Lang, Strings};
+use crate::server::event_log::{Audit, Change, EventKind, EventLogger, Object};
 use crate::server::widgets::{
-    AdminTable, DisplayMode, FieldsToArray, Message, TabBar, TableData as TD, Theme, centered_area,
-    common::*, footer_height, popup_block, render_confirm_dialog, render_footer,
+    AdminTable, DisplayMode, FieldsToArray, Help, Message, TabBar, TableData as TD, Theme,
+    centered_area, common::*, footer_height, popup_block, render_confirm_dialog, render_footer,
     render_message_popup,
 };
 use ::log::{error, info, warn};
@@ -18,7 +19,6 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::widgets::Paragraph;
 use ratatui_core::terminal::AsyncTerminal;
-use std::fmt;
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
 
@@ -31,16 +31,11 @@ mod secret;
 mod target;
 mod user;
 
-const HELP_TEXT: [&str; 2] = [
-    "(a) add | (e) edit | (d) delete | (t) theme | (Esc) quit | (↑↓←→) move around",
-    "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
-];
+const HELP_TEXT: Help = |tr| [tr.help_manage, tr.help_manage_nav];
 
-const USER_HELP_TEXT: [&str; 2] = [
-    "(a) add | (e) edit | (d) delete | (r) grant role | (t) theme | (Esc) quit | (↑↓←→) move around",
-    "(Tab) next tab | (Shift Tab) previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
-];
+const USER_HELP_TEXT: Help = |tr| [tr.help_manage_user, tr.help_manage_nav];
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn manage<B>(
     tty: NoTtyEvent,
     writer: SenderWriter,
@@ -49,6 +44,7 @@ pub(super) async fn manage<B>(
     backend: Arc<B>,
     log: EventLogger<B>,
     theme: &mut &'static Theme,
+    lang: &mut Lang,
 ) -> Result<(), Error>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
@@ -56,10 +52,12 @@ where
     let tty_backend = NottyBackend::new(tty.clone(), writer.clone());
     let mut terminal = AsyncTerminal::new(tty_backend)?;
     crossterm::async_execute!(&writer, EnterAlternateScreen).await?;
-    let mut app = App::new(backend, user_id, handler_id, log, theme).await;
+    let mut app = App::new(backend, user_id, handler_id, log, theme, *lang).await;
     let result = app.run(tty, &mut terminal).await;
-    // The shell starts the next panel in the theme this one ended with.
+    // The shell starts the next panel in the theme and language this one
+    // ended with.
     *theme = app.theme;
+    *lang = app.lang;
     result?;
     crossterm::async_execute!(&writer, LeaveAlternateScreen).await?;
     Ok(())
@@ -87,23 +85,22 @@ enum SelectedTab {
     ActionGroup = 8,
 }
 
-impl fmt::Display for SelectedTab {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SelectedTab::Users => write!(f, "{}", MANAGE_USERS),
-            SelectedTab::Targets => write!(f, "{}", MANAGE_TARGETS),
-            SelectedTab::Secrets => write!(f, "{}", MANAGE_SECRETS),
-            SelectedTab::Bind => write!(f, "{}", MANAGE_BIND),
-            SelectedTab::Permissions => write!(f, "{}", MANAGE_PERMISSIONS),
-            SelectedTab::CasbinNames => write!(f, "{}", MANAGE_CASBIN_NAMES),
-            SelectedTab::RoleHierarchy => write!(f, "{}", MANAGE_ROLE_HIERARCHY),
-            SelectedTab::TargetGroup => write!(f, "{}", MANAGE_TARGET_GROUP),
-            SelectedTab::ActionGroup => write!(f, "{}", MANAGE_ACTION_GROUP),
-        }
-    }
-}
-
 impl SelectedTab {
+    /// The tab's label, in the order of the tabs.
+    fn labels(tr: &Strings) -> [&'static str; 9] {
+        [
+            tr.tab_users,
+            tr.tab_targets,
+            tr.tab_secrets,
+            tr.tab_bind,
+            tr.tab_permissions,
+            tr.tab_groups,
+            tr.tab_role_hierarchy,
+            tr.tab_target_group,
+            tr.tab_action_group,
+        ]
+    }
+
     fn next(&self) -> Self {
         match self {
             SelectedTab::Users => SelectedTab::Targets,
@@ -144,6 +141,7 @@ where
     last_selected_tab: SelectedTab,
     popup: Popup,
     theme: &'static Theme,
+    lang: Lang,
     backend: Arc<B>,
     handler_id: Uuid,
     admin_id: Uuid,
@@ -163,6 +161,7 @@ where
         handler_id: Uuid,
         log: EventLogger<B>,
         theme: &'static Theme,
+        lang: Lang,
     ) -> Self {
         let data = TableData::Users(
             match backend.db_repository().list_users_with_role(false).await {
@@ -178,6 +177,7 @@ where
             table: AdminTable::new(&data),
             longest_item_lens: data.constraint_len_calculator(),
             theme,
+            lang,
             selected_tab: SelectedTab::Users,
             last_selected_tab: SelectedTab::Users,
             popup: Popup::None,
@@ -218,12 +218,14 @@ where
                 self.editor = Editor::User(Box::new(user::UserEditor::new(
                     User::new(self.admin_id),
                     true,
+                    self.lang.strings(),
                 )))
             }
             SelectedTab::Targets => {
                 self.editor = Editor::Target(Box::new(target::TargetEditor::new(
                     Target::new(self.admin_id),
                     true,
+                    self.lang.strings(),
                 )))
             }
             SelectedTab::Secrets => {
@@ -231,12 +233,19 @@ where
                     Secret::new(self.admin_id),
                     true,
                     self.backend.clone(),
+                    self.lang.strings(),
                 )))
             }
             SelectedTab::Permissions => {
                 let perm = PermissionPolicy::new(self.admin_id);
                 self.editor = Editor::Permission(Box::new(
-                    permission::PermissionEditor::new(perm, true, self.backend.clone()).await,
+                    permission::PermissionEditor::new(
+                        perm,
+                        true,
+                        self.backend.clone(),
+                        self.lang.strings(),
+                    )
+                    .await,
                 ))
             }
             SelectedTab::CasbinNames => {
@@ -244,6 +253,7 @@ where
                     // `G1` matches the radio's first option in `casbin_name.rs`.
                     CasbinName::new(NamePtype::G1, String::new(), true, self.admin_id),
                     true,
+                    self.lang.strings(),
                 )))
             }
             SelectedTab::Bind => unreachable!(),
@@ -269,6 +279,7 @@ where
                 self.handler_id,
                 self.admin_id,
                 self.log.clone(),
+                self.lang.strings(),
             )
             .await,
         ));
@@ -288,7 +299,11 @@ where
                     }
                 };
                 user.updated_by = self.admin_id;
-                self.editor = Editor::User(Box::new(user::UserEditor::new(user, false)));
+                self.editor = Editor::User(Box::new(user::UserEditor::new(
+                    user,
+                    false,
+                    self.lang.strings(),
+                )));
             }
             SelectedTab::Targets => {
                 let idx = self.table.state.selected().unwrap();
@@ -299,7 +314,11 @@ where
                     }
                 };
                 target.updated_by = self.admin_id;
-                self.editor = Editor::Target(Box::new(target::TargetEditor::new(target, false)));
+                self.editor = Editor::Target(Box::new(target::TargetEditor::new(
+                    target,
+                    false,
+                    self.lang.strings(),
+                )));
             }
             SelectedTab::Secrets => {
                 let idx = self.table.state.selected().unwrap();
@@ -314,6 +333,7 @@ where
                     secret,
                     false,
                     self.backend.clone(),
+                    self.lang.strings(),
                 )));
             }
             SelectedTab::Permissions => {
@@ -326,8 +346,13 @@ where
                 };
                 permission.rule.updated_by = self.admin_id;
                 self.editor = Editor::Permission(Box::new(
-                    permission::PermissionEditor::new(permission, false, self.backend.clone())
-                        .await,
+                    permission::PermissionEditor::new(
+                        permission,
+                        false,
+                        self.backend.clone(),
+                        self.lang.strings(),
+                    )
+                    .await,
                 ));
             }
             SelectedTab::CasbinNames => {
@@ -342,6 +367,7 @@ where
                 self.editor = Editor::CasbinName(Box::new(casbin_name::CasbinNameEditor::new(
                     casbin_name,
                     false,
+                    self.lang.strings(),
                 )));
             }
             SelectedTab::Bind => unreachable!(),
@@ -361,7 +387,9 @@ where
                     let result = self.backend.db_repository().delete_user(u.id).await;
 
                     if let Err(e) = result {
-                        self.message = Some(Message::Error(vec!["Internal error".into()]));
+                        self.message = Some(Message::Error(vec![
+                            self.lang.strings().internal_error.into(),
+                        ]));
                         warn!(
                             "[{}] Delete user '{}({})' failed by admin_id={}: {}",
                             self.handler_id, u.username, u.id, self.admin_id, e
@@ -373,10 +401,9 @@ where
                         "[{}] User '{}({})' deleted by admin_id={}",
                         self.handler_id, u.username, u.id, self.admin_id
                     );
-                    self.log
-                        .record(format!("User '{}({})' deleted", u.username, u.id))
-                        .await;
-                    self.message = Some(Message::Success(vec!["User deleted".into()]));
+                    let event = Audit::saved(Object::User, Change::Deleted, &u.username, u.id);
+                    self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
+                    self.log.record(event).await;
                     self.refresh_data().await;
                 }
             }
@@ -385,7 +412,9 @@ where
                     let result = self.backend.db_repository().delete_target(t.id).await;
 
                     if let Err(e) = result {
-                        self.message = Some(Message::Error(vec!["Internal error".into()]));
+                        self.message = Some(Message::Error(vec![
+                            self.lang.strings().internal_error.into(),
+                        ]));
                         warn!(
                             "[{}] Delete target '{}({})' failed by admin_id={}: {}",
                             self.handler_id, t.name, t.id, self.admin_id, e
@@ -397,10 +426,9 @@ where
                         "[{}] Target '{}({})' deleted by admin_id={}",
                         self.handler_id, t.name, t.id, self.admin_id
                     );
-                    self.log
-                        .record(format!("Target '{}({})' deleted", t.name, t.id))
-                        .await;
-                    self.message = Some(Message::Success(vec!["Target deleted".into()]));
+                    let event = Audit::saved(Object::Target, Change::Deleted, &t.name, t.id);
+                    self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
+                    self.log.record(event).await;
                     self.refresh_data().await;
                 }
             }
@@ -409,7 +437,9 @@ where
                     let result = self.backend.db_repository().delete_secret(s.id).await;
 
                     if let Err(e) = result {
-                        self.message = Some(Message::Error(vec!["Internal error".into()]));
+                        self.message = Some(Message::Error(vec![
+                            self.lang.strings().internal_error.into(),
+                        ]));
                         warn!(
                             "[{}] Delete secret '{}({})' failed by admin_id={}: {}",
                             self.handler_id, s.name, s.id, self.admin_id, e
@@ -421,10 +451,9 @@ where
                         "[{}] Secret '{}({})' deleted by admin_id={}",
                         self.handler_id, s.name, s.id, self.admin_id
                     );
-                    self.log
-                        .record(format!("Secret '{}({})' deleted", s.name, s.id))
-                        .await;
-                    self.message = Some(Message::Success(vec!["Secret deleted".into()]));
+                    let event = Audit::saved(Object::Secret, Change::Deleted, &s.name, s.id);
+                    self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
+                    self.log.record(event).await;
                     self.refresh_data().await;
                 }
             }
@@ -437,7 +466,9 @@ where
                         .await;
 
                     if let Err(e) = result {
-                        self.message = Some(Message::Error(vec!["Internal error".into()]));
+                        self.message = Some(Message::Error(vec![
+                            self.lang.strings().internal_error.into(),
+                        ]));
                         warn!(
                             "[{}] Delete permission '({})' failed by admin_id={}: {}",
                             self.handler_id, p.rule.id, self.admin_id, e
@@ -449,10 +480,9 @@ where
                         "[{}] Permission '({})' deleted by admin_id={}",
                         self.handler_id, p.rule.id, self.admin_id
                     );
-                    self.log
-                        .record(format!("Permission '({})' deleted", p.rule.id))
-                        .await;
-                    self.message = Some(Message::Success(vec!["Permission deleted".into()]));
+                    let event = Audit::saved(Object::Permission, Change::Deleted, "", p.rule.id);
+                    self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
+                    self.log.record(event).await;
                     self.refresh_data().await;
                 }
             }
@@ -461,7 +491,9 @@ where
                     let result = self.backend.db_repository().delete_casbin_name(c.id).await;
 
                     if let Err(e) = result {
-                        self.message = Some(Message::Error(vec!["Internal error".into()]));
+                        self.message = Some(Message::Error(vec![
+                            self.lang.strings().internal_error.into(),
+                        ]));
                         warn!(
                             "[{}] Delete casbin name '{}({})' failed by admin_id={}: {}",
                             self.handler_id, c.name, c.id, self.admin_id, e
@@ -473,10 +505,9 @@ where
                         "[{}] Casbin name '{}({})' deleted by admin_id={}",
                         self.handler_id, c.name, c.id, self.admin_id
                     );
-                    self.log
-                        .record(format!("Casbin name '{}({})' deleted", c.name, c.id))
-                        .await;
-                    self.message = Some(Message::Success(vec!["Group deleted".into()]));
+                    let event = Audit::saved(Object::Group, Change::Deleted, &c.name, c.id);
+                    self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
+                    self.log.record(event).await;
                     self.refresh_data().await;
                 }
             }
@@ -585,6 +616,7 @@ where
                             KeyCode::Char('+') => self.table.zoom_in(),
                             KeyCode::Char('-') => self.table.zoom_out(),
                             KeyCode::Char('t') => self.theme = self.theme.next(),
+                            KeyCode::Char('L') => self.lang = self.lang.next(),
                             KeyCode::Tab => self.next_tab().await,
                             KeyCode::BackTab => self.previous_tab().await,
                             KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
@@ -624,7 +656,9 @@ where
                     }
                     Popup::Add | Popup::Edit => {
                         if let Err(e) = self.do_edit(key).await {
-                            self.message = Some(Message::Error(vec!["Internal error".into()]));
+                            self.message = Some(Message::Error(vec![
+                                self.lang.strings().internal_error.into(),
+                            ]));
                             warn!("[{}] Failed to edit: {}", self.handler_id, e);
                         }
                     }
@@ -682,11 +716,11 @@ where
 
                         let (action, result) = match self.popup {
                             Popup::Add => (
-                                "added",
+                                Change::Added,
                                 self.backend.db_repository().create_user(active_model).await,
                             ),
                             Popup::Edit => (
-                                "updated",
+                                Change::Updated,
                                 self.backend.db_repository().update_user(active_model).await,
                             ),
                             _ => unreachable!(),
@@ -696,8 +730,8 @@ where
                             Ok(u) => u,
                             Err(ref err) => {
                                 let msg = match err {
-                                    e if e.is_unique_violation() => "Username already exists",
-                                    _ => "Internal error",
+                                    e if e.is_unique_violation() => self.lang.strings().user_exists,
+                                    _ => self.lang.strings().internal_error,
                                 };
                                 warn!("[{}] Failed to {} user: {}", self.handler_id, action, err);
                                 self.message = Some(Message::Error(vec![msg.into()]));
@@ -709,13 +743,13 @@ where
                             "[{}] User '{}({})' {} by admin_id={}",
                             self.handler_id, user.username, user.id, action, self.admin_id
                         );
-                        self.log
-                            .record(format!("User '{}({})' {}", user.username, user.id, action))
-                            .await;
-                        let mut msg = vec![format!("User {}", action)];
+                        let event = Audit::saved(Object::User, action, &user.username, user.id);
+                        let tr = self.lang.strings();
+                        let mut msg = vec![event.notice(tr)];
                         if !password.is_empty() {
-                            msg.push(format!("New password: {}", password));
+                            msg.push(fill!(tr.new_password, password = password));
                         }
+                        self.log.record(event).await;
                         self.message = Some(Message::Success(msg));
                     }
 
@@ -731,14 +765,14 @@ where
 
                         let (action, result) = match self.popup {
                             Popup::Add => (
-                                "added",
+                                Change::Added,
                                 self.backend
                                     .db_repository()
                                     .create_target(active_model)
                                     .await,
                             ),
                             Popup::Edit => (
-                                "updated",
+                                Change::Updated,
                                 self.backend
                                     .db_repository()
                                     .update_target(active_model)
@@ -751,8 +785,10 @@ where
                             Ok(t) => t,
                             Err(ref err) => {
                                 let msg = match err {
-                                    e if e.is_unique_violation() => "Target already exists",
-                                    _ => "Internal error",
+                                    e if e.is_unique_violation() => {
+                                        self.lang.strings().target_exists
+                                    }
+                                    _ => self.lang.strings().internal_error,
                                 };
                                 warn!("[{}] Failed to {} target: {}", self.handler_id, action, err);
                                 self.message = Some(Message::Error(vec![msg.into()]));
@@ -764,13 +800,9 @@ where
                             "[{}] Target '{}({})' {} by admin_id={}",
                             self.handler_id, target.name, target.id, action, self.admin_id
                         );
-                        self.log
-                            .record(format!(
-                                "Target '{}({})' {}",
-                                target.name, target.id, action
-                            ))
-                            .await;
-                        let msg = vec![format!("Target {}", action)];
+                        let event = Audit::saved(Object::Target, action, &target.name, target.id);
+                        let msg = vec![event.notice(self.lang.strings())];
+                        self.log.record(event).await;
                         self.message = Some(Message::Success(msg));
                     }
 
@@ -785,14 +817,14 @@ where
                         let active_model = e.active_model.to_owned();
                         let (action, result) = match self.popup {
                             Popup::Add => (
-                                "added",
+                                Change::Added,
                                 self.backend
                                     .db_repository()
                                     .create_secret(active_model)
                                     .await,
                             ),
                             Popup::Edit => (
-                                "updated",
+                                Change::Updated,
                                 self.backend
                                     .db_repository()
                                     .update_secret(active_model)
@@ -805,8 +837,10 @@ where
                             Ok(s) => s,
                             Err(ref err) => {
                                 let msg = match err {
-                                    e if e.is_unique_violation() => "Secret already exists",
-                                    _ => "Internal error",
+                                    e if e.is_unique_violation() => {
+                                        self.lang.strings().secret_exists
+                                    }
+                                    _ => self.lang.strings().internal_error,
                                 };
                                 warn!("[{}] Failed to {} secret: {}", self.handler_id, action, err);
                                 self.message = Some(Message::Error(vec![msg.into()]));
@@ -818,13 +852,9 @@ where
                             "[{}] Secret '{}({})' {} by admin_id={}",
                             self.handler_id, secret.name, secret.id, action, self.admin_id
                         );
-                        self.log
-                            .record(format!(
-                                "Secret '{}({})' {}",
-                                secret.name, secret.id, action
-                            ))
-                            .await;
-                        let msg = vec![format!("Secret {}", action)];
+                        let event = Audit::saved(Object::Secret, action, &secret.name, secret.id);
+                        let msg = vec![event.notice(self.lang.strings())];
+                        self.log.record(event).await;
                         self.message = Some(Message::Success(msg));
                     }
                     self.clear_form();
@@ -838,14 +868,14 @@ where
                         let active_model = e.active_model.to_owned();
                         let (action, result) = match self.popup {
                             Popup::Add => (
-                                "added",
+                                Change::Added,
                                 self.backend
                                     .db_repository()
                                     .create_casbin_rule(active_model)
                                     .await,
                             ),
                             Popup::Edit => (
-                                "updated",
+                                Change::Updated,
                                 self.backend
                                     .db_repository()
                                     .update_casbin_rule(active_model)
@@ -858,8 +888,10 @@ where
                             Ok(s) => s,
                             Err(ref err) => {
                                 let msg = match err {
-                                    e if e.is_unique_violation() => "Permission already exists",
-                                    _ => "Internal error",
+                                    e if e.is_unique_violation() => {
+                                        self.lang.strings().permission_exists
+                                    }
+                                    _ => self.lang.strings().internal_error,
                                 };
                                 warn!(
                                     "[{}] Failed to {} permission: {}",
@@ -874,10 +906,9 @@ where
                             "[{}] Permission '({})' {} by admin_id={}",
                             self.handler_id, rule.id, action, self.admin_id
                         );
-                        self.log
-                            .record(format!("Permission '({})' {}", rule.id, action))
-                            .await;
-                        let msg = vec![format!("Permission {}", action)];
+                        let event = Audit::saved(Object::Permission, action, "", rule.id);
+                        let msg = vec![event.notice(self.lang.strings())];
+                        self.log.record(event).await;
                         self.message = Some(Message::Success(msg));
                     }
                     self.clear_form();
@@ -899,14 +930,14 @@ where
 
                         let (action, result) = match self.popup {
                             Popup::Add => (
-                                "added",
+                                Change::Added,
                                 self.backend
                                     .db_repository()
                                     .create_casbin_name(active_model)
                                     .await,
                             ),
                             Popup::Edit => (
-                                "updated",
+                                Change::Updated,
                                 self.backend
                                     .db_repository()
                                     .update_casbin_name(active_model)
@@ -919,8 +950,10 @@ where
                             Ok(s) => s,
                             Err(ref err) => {
                                 let msg = match err {
-                                    e if e.is_unique_violation() => "Group already exists",
-                                    _ => "Internal error",
+                                    e if e.is_unique_violation() => {
+                                        self.lang.strings().group_exists
+                                    }
+                                    _ => self.lang.strings().internal_error,
                                 };
                                 warn!(
                                     "[{}] Failed to {} casbin name: {}",
@@ -939,13 +972,10 @@ where
                             action,
                             self.admin_id
                         );
-                        self.log
-                            .record(format!(
-                                "Casbin name '{}({})' {}",
-                                casbin_name.name, casbin_name.id, action
-                            ))
-                            .await;
-                        let msg = vec![format!("Group {}", action)];
+                        let event =
+                            Audit::saved(Object::Group, action, &casbin_name.name, casbin_name.id);
+                        let msg = vec![event.notice(self.lang.strings())];
+                        self.log.record(event).await;
                         self.message = Some(Message::Success(msg));
                     }
                     self.clear_form();
@@ -963,10 +993,11 @@ where
     fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
         let theme = self.theme;
+        let tr = self.lang.strings();
         theme.paint(area, frame.buffer_mut());
 
         if area.width < MIN_WINDOW_COL || area.height < MIN_WINDOW_ROW {
-            self.render_notice(frame, area, "window is too small");
+            self.render_notice(frame, area, self.lang.strings().window_too_small);
             return;
         }
 
@@ -1021,12 +1052,13 @@ where
                     &self.longest_item_lens,
                     DisplayMode::Manage,
                     theme,
+                    tr,
                 );
             }
         }
         self.render_popup(frame, table_area);
         if let Some(ref msg) = self.message {
-            render_message_popup(table_area, frame.buffer_mut(), msg, theme);
+            render_message_popup(table_area, frame.buffer_mut(), msg, theme, tr);
         }
         self.render_footer(frame, footer_area);
     }
@@ -1086,6 +1118,7 @@ where
                     self.handler_id,
                     self.admin_id,
                     self.log.clone(),
+                    self.lang.strings(),
                 )));
             }
             SelectedTab::Permissions => {
@@ -1114,6 +1147,7 @@ where
                         self.admin_id,
                         GroupType::Subject,
                         self.log.clone(),
+                        self.lang.strings(),
                     )
                     .await,
                 ));
@@ -1126,6 +1160,7 @@ where
                         self.admin_id,
                         GroupType::Object,
                         self.log.clone(),
+                        self.lang.strings(),
                     )
                     .await,
                 ));
@@ -1138,6 +1173,7 @@ where
                         self.admin_id,
                         GroupType::Action,
                         self.log.clone(),
+                        self.lang.strings(),
                     )
                     .await,
                 ));
@@ -1151,7 +1187,7 @@ where
         self.tabs.render(
             area,
             frame.buffer_mut(),
-            &MANAGE_LIST,
+            &SelectedTab::labels(self.lang.strings()),
             self.selected_tab as usize,
             self.theme,
         );
@@ -1180,25 +1216,26 @@ where
             )
         };
 
+        let tr = self.lang.strings();
         let title = match self.popup {
             Popup::Add => match self.editor {
-                Editor::User(_) => "Add New User",
-                Editor::Target(_) => "Add New Target",
-                Editor::Secret(_) => "Add New Secret",
-                Editor::Permission(_) => "Add New Permission",
-                Editor::CasbinName(_) => "Add New Group",
+                Editor::User(_) => tr.title_add_user,
+                Editor::Target(_) => tr.title_add_target,
+                Editor::Secret(_) => tr.title_add_secret,
+                Editor::Permission(_) => tr.title_add_permission,
+                Editor::CasbinName(_) => tr.title_add_group,
                 Editor::GrantRole(_) => unreachable!(),
                 Editor::Bind(_) => unreachable!(),
                 Editor::CasbinGroup(_) => unreachable!(),
                 Editor::None => unreachable!(),
             },
             Popup::Edit => match self.editor {
-                Editor::User(_) => "Edit User",
-                Editor::Target(_) => "Edit Target",
-                Editor::Secret(_) => "Edit Secret",
-                Editor::Permission(_) => "Edit Permission",
-                Editor::GrantRole(_) => "Grant Role",
-                Editor::CasbinName(_) => "Edit Group",
+                Editor::User(_) => tr.title_edit_user,
+                Editor::Target(_) => tr.title_edit_target,
+                Editor::Secret(_) => tr.title_edit_secret,
+                Editor::Permission(_) => tr.title_edit_permission,
+                Editor::GrantRole(_) => tr.title_grant_role,
+                Editor::CasbinName(_) => tr.title_edit_group,
                 Editor::Bind(_) => unreachable!(),
                 Editor::CasbinGroup(_) => unreachable!(),
                 Editor::None => unreachable!(),
@@ -1209,40 +1246,45 @@ where
                         render_confirm_dialog(
                             popup_area,
                             frame.buffer_mut(),
-                            &["Delete selected user?".to_string()],
+                            &[tr.delete_user_q.to_string()],
                             self.theme,
+                            tr,
                         );
                     }
                     SelectedTab::Targets => {
                         render_confirm_dialog(
                             popup_area,
                             frame.buffer_mut(),
-                            &["Delete selected target?".to_string()],
+                            &[tr.delete_target_q.to_string()],
                             self.theme,
+                            tr,
                         );
                     }
                     SelectedTab::Secrets => {
                         render_confirm_dialog(
                             popup_area,
                             frame.buffer_mut(),
-                            &["Delete selected secret?".to_string()],
+                            &[tr.delete_secret_q.to_string()],
                             self.theme,
+                            tr,
                         );
                     }
                     SelectedTab::Permissions => {
                         render_confirm_dialog(
                             popup_area,
                             frame.buffer_mut(),
-                            &["Delete selected permission?".to_string()],
+                            &[tr.delete_permission_q.to_string()],
                             self.theme,
+                            tr,
                         );
                     }
                     SelectedTab::CasbinNames => {
                         render_confirm_dialog(
                             popup_area,
                             frame.buffer_mut(),
-                            &["Delete selected group?".to_string()],
+                            &[tr.delete_group_q.to_string()],
                             self.theme,
+                            tr,
                         );
                     }
                     SelectedTab::Bind => unreachable!(),
@@ -1261,12 +1303,13 @@ where
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        render_footer(area, frame.buffer_mut(), self.help_text(), self.theme);
+        let tr = self.lang.strings();
+        render_footer(area, frame.buffer_mut(), self.help_text(), self.theme, tr);
     }
 
     /// The keys the footer lists: the open editor's, or the table's.
     fn help_text(&self) -> [&'static str; 2] {
-        match self.editor {
+        let help: Help = match self.editor {
             Editor::User(ref e) => e.as_ref().form.help_text,
             Editor::Target(ref e) => e.as_ref().form.help_text,
             Editor::Secret(ref e) => e.as_ref().form.help_text,
@@ -1282,7 +1325,8 @@ where
                     HELP_TEXT
                 }
             }
-        }
+        };
+        help(self.lang.strings())
     }
 }
 
@@ -1554,38 +1598,41 @@ impl crate::server::widgets::TableData for TableData {
         }
     }
 
-    fn header(&self) -> Vec<&str> {
+    fn header(&self, tr: &'static Strings) -> Vec<&'static str> {
         match self {
             Self::Users(_) => vec![
-                "username",
-                "email",
-                "password_hash",
-                "authorized_keys",
-                "force_init_pass",
-                "is_active",
-                "role",
+                tr.col_username,
+                tr.col_email,
+                tr.col_password_hash,
+                tr.col_authorized_keys,
+                tr.col_force_init_pass,
+                tr.col_is_active,
+                tr.col_role,
             ],
             Self::Targets(_) => vec![
-                "name",
-                "hostname",
-                "port",
-                "server_public_key",
-                "description",
-                "proxy",
-                "is_active",
+                tr.col_name,
+                tr.col_hostname,
+                tr.col_port,
+                tr.col_server_public_key,
+                tr.col_description,
+                tr.col_proxy,
+                tr.col_is_active,
             ],
             Self::Secrets(_) => vec![
-                "name",
-                "user",
-                "password",
-                "private_key",
-                "public_key",
-                "is_active",
+                tr.col_name,
+                tr.col_user,
+                tr.col_password,
+                tr.col_private_key,
+                tr.col_public_key,
+                tr.col_is_active,
             ],
-            Self::CasbinNames(_) => vec!["Type", "name", "is_active"],
-            Self::Permissions(_) => {
-                vec!["user/role", "target/group", "action/group", "extend policy"]
-            }
+            Self::CasbinNames(_) => vec![tr.col_type, tr.col_name, tr.col_is_active],
+            Self::Permissions(_) => vec![
+                tr.col_user_role,
+                tr.col_target_group,
+                tr.col_action_group,
+                tr.col_extend_policy,
+            ],
         }
     }
 }

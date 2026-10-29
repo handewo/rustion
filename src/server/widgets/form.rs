@@ -19,7 +19,7 @@ pub enum FormFieldWidget {
 /// A single field in a form: label, layout height, and widget.
 #[derive(Debug)]
 pub struct FormField {
-    pub label: &'static str,
+    pub label: Label,
     pub height: u16,
     pub widget: FormFieldWidget,
     /// Whether the user can edit this field. Read-only fields can still be
@@ -28,7 +28,7 @@ pub struct FormField {
 }
 
 impl FormField {
-    pub fn text(label: &'static str, initial: Option<String>) -> Self {
+    pub fn text(label: Label, initial: Option<String>) -> Self {
         Self {
             label,
             height: 3,
@@ -37,7 +37,7 @@ impl FormField {
         }
     }
 
-    pub fn text_masked(label: &'static str, initial: Option<String>, mask: char) -> Self {
+    pub fn text_masked(label: Label, initial: Option<String>, mask: char) -> Self {
         let mut text = SingleLineText::new(initial);
         text.textarea.set_mask_char(mask);
         Self {
@@ -48,7 +48,7 @@ impl FormField {
         }
     }
 
-    pub fn multiline(label: &'static str, lines: Option<&[String]>, height: u16) -> Self {
+    pub fn multiline(label: Label, lines: Option<&[String]>, height: u16) -> Self {
         Self {
             label,
             height,
@@ -57,7 +57,7 @@ impl FormField {
         }
     }
 
-    pub fn checkbox(label: &'static str, checked: bool) -> Self {
+    pub fn checkbox(label: Label, checked: bool) -> Self {
         Self {
             label,
             height: 3,
@@ -67,7 +67,7 @@ impl FormField {
     }
 
     pub fn radio(
-        label: &'static str,
+        label: Label,
         options: &'static [RadioOption],
         initial: &str,
         height: u16,
@@ -83,7 +83,7 @@ impl FormField {
     /// Builder: mark this field as read-only.
     ///
     /// ```ignore
-    /// FormField::text("*ID*", Some(id)).readonly()
+    /// FormField::text(|tr| tr.field_name, Some(id)).readonly()
     /// ```
     pub fn readonly(mut self) -> Self {
         self.editable = false;
@@ -118,7 +118,7 @@ pub struct FormEditor {
     pub show_cancel_confirmation: bool,
     editing_mode: bool,
     save_error: Option<Vec<String>>,
-    pub help_text: [&'static str; 2],
+    pub help_text: Help,
 }
 
 impl FormEditor {
@@ -393,7 +393,7 @@ impl FormEditor {
         self.fields.len().saturating_sub(1)
     }
 
-    pub fn render_ui(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+    pub fn render_ui(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme, tr: &Strings) {
         self.cursor_color = theme.accent_dim;
         let height = self.window_height();
         let inner_area = centered_area(area, area.width - 2, area.height - 2);
@@ -427,9 +427,9 @@ impl FormEditor {
             // Read-only fields never show the "editing" border and get a lock marker.
             let editing = self.editing_mode && field.editable;
             let label = if field.editable {
-                field.label.to_string()
+                (field.label)(tr).to_string()
             } else {
-                format!("{} (Read-only)", field.label)
+                format!("{} {}", (field.label)(tr), tr.read_only)
             };
             match &field.widget {
                 FormFieldWidget::Text(t) => {
@@ -472,6 +472,7 @@ impl FormEditor {
                         r,
                         editing,
                         theme,
+                        tr,
                         is_focused,
                     );
                 }
@@ -509,11 +510,11 @@ impl FormEditor {
 
         // Dialogs
         if self.show_cancel_confirmation {
-            render_cancel_dialog(area, buf, theme);
+            render_cancel_dialog(area, buf, theme, tr);
         }
 
         if let Some(ref lines) = self.save_error {
-            render_message_dialog(area, buf, &Message::Error(lines.clone()), theme);
+            render_message_dialog(area, buf, &Message::Error(lines.clone()), theme, tr);
         }
     }
 }

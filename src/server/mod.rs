@@ -110,6 +110,8 @@ pub(super) trait HandlerBackend: Send + Clone {
     fn record_path(&self) -> &str;
     /// The TUI theme a session starts with.
     fn theme(&self) -> crate::config::ThemeName;
+    /// The interface language of a session whose client sent no locale.
+    fn language(&self) -> crate::i18n::Lang;
 
     fn set_password(&self, user: &mut user::ActiveModel, password: &str) -> Result<(), Error>;
     fn load_role_manager(&self) -> impl Future<Output = Result<(), Error>> + Send;

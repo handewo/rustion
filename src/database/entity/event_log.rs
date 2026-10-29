@@ -25,10 +25,15 @@ use serde::{Deserialize, Serialize};
 /// `detail` is a bounded `varchar` rather than `text` because MySQL cannot index
 /// a `TEXT` column in a key without a prefix length. That reason lapsed with the
 /// composite key, but the bound is kept: details can carry client-supplied SFTP
-/// paths, so `EventLogger::record` bounds every detail to 512 characters
-/// (`server::event_log::DETAIL_MAX`) and the SFTP proxy bounds each path within
-/// it. Widening it later is a compatible change; narrowing is not. SQLite ignores `varchar` lengths
-/// entirely, so existing rows are unaffected either way.
+/// paths, so `Audit::encode` bounds every detail to 512 characters
+/// (`server::event_log::DETAIL_MAX`), cutting the event's text fields rather
+/// than the JSON. Widening it later is a compatible change; narrowing is not.
+/// SQLite ignores `varchar` lengths entirely, so existing rows are unaffected
+/// either way.
+///
+/// What `detail` holds is a `server::event_log::Audit` as JSON, worded in the
+/// reader's language when the log is shown. Rows written before that are
+/// English text, and are shown as they are.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "event_log")]
 pub struct Model {

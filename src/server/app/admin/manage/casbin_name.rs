@@ -11,9 +11,9 @@ use sea_orm::ActiveValue::{Set, Unchanged};
 
 // Radio button options for ptype selection (static for RadioButtons widget)
 const PTYPE_OPTIONS: [RadioOption; 3] = [
-    RadioOption::new("Role", "g1"),   // g1 - user groups/roles
-    RadioOption::new("Target", "g2"), // g2 - object groups
-    RadioOption::new("Action", "g3"), // g3 - action groups
+    RadioOption::new(|tr| tr.kind_role, "g1"), // g1 - user groups/roles
+    RadioOption::new(|tr| tr.kind_target, "g2"), // g2 - object groups
+    RadioOption::new(|tr| tr.kind_action, "g3"), // g3 - action groups
 ];
 
 // Field indices
@@ -26,19 +26,24 @@ pub struct CasbinNameEditor {
     pub casbin_name: CasbinName,
     pub active_model: casbin_name::ActiveModel,
     pub form: FormEditor,
+    tr: &'static Strings,
 }
 
 impl CasbinNameEditor {
-    pub fn new(casbin_name: CasbinName, is_new: bool) -> Self {
-        let mut type_radio =
-            FormField::radio("*Type*", &PTYPE_OPTIONS, casbin_name.ptype.as_str(), 5);
+    pub fn new(casbin_name: CasbinName, is_new: bool, tr: &'static Strings) -> Self {
+        let mut type_radio = FormField::radio(
+            |tr| tr.field_type,
+            &PTYPE_OPTIONS,
+            casbin_name.ptype.as_str(),
+            5,
+        );
         if !is_new {
             type_radio = type_radio.readonly()
         }
         let form = FormEditor::new(vec![
             type_radio,
-            FormField::text("*Name*", Some(casbin_name.name.clone())),
-            FormField::checkbox("Is Active", casbin_name.is_active),
+            FormField::text(|tr| tr.field_name, Some(casbin_name.name.clone())),
+            FormField::checkbox(|tr| tr.field_is_active, casbin_name.is_active),
         ]);
 
         let active_model = if is_new {
@@ -61,6 +66,7 @@ impl CasbinNameEditor {
             casbin_name,
             active_model,
             form,
+            tr,
         }
     }
 
@@ -72,7 +78,8 @@ impl CasbinNameEditor {
         match self.form.handle_key_event(key, modifiers) {
             FormEvent::Save => {
                 if let Err(e) = self.save_casbin_name() {
-                    self.form.set_save_error(vec![e.to_string()]);
+                    self.form
+                        .set_save_error(vec![validate::describe(&e, self.tr)]);
                     return false;
                 }
                 true
@@ -117,6 +124,6 @@ impl CasbinNameEditor {
 
 impl CasbinNameEditor {
     pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
-        self.form.render_ui(area, buf, theme);
+        self.form.render_ui(area, buf, theme, self.tr);
     }
 }

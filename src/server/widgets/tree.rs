@@ -59,6 +59,7 @@ fn set_style(rg: &RuleNode) -> Span<'static> {
 pub fn empty_group_item(
     rid: uuid::Uuid,
     name: String,
+    tr: &crate::i18n::Strings,
 ) -> Result<TreeItem<'static, Identifier>, std::io::Error> {
     let iden = Identifier {
         uid: uuid::Uuid::new_v4(),
@@ -69,7 +70,7 @@ pub fn empty_group_item(
         iden,
         Line::from(vec![
             name.set_style(Style::default().bold()),
-            "(empty group)".set_style(Style::default().italic()),
+            format!(" {}", tr.empty_group).set_style(Style::default().italic()),
         ]),
         Vec::new(),
     )
@@ -78,6 +79,7 @@ pub fn empty_group_item(
 pub fn build_tree(
     graph: &StableDiGraph<RuleNode, ()>,
     all_groups: Vec<&ObjectGroup>,
+    tr: &crate::i18n::Strings,
 ) -> Result<Vec<TreeItem<'static, Identifier>>, std::io::Error> {
     let roots: Vec<_> = graph
         .node_indices()
@@ -94,7 +96,7 @@ pub fn build_tree(
     for i in all_groups
         .iter()
         .filter(|v| !tree_groups.contains(&v.id))
-        .map(|v| empty_group_item(v.id, v.name.clone()))
+        .map(|v| empty_group_item(v.id, v.name.clone(), tr))
     {
         items.push(i?);
     }

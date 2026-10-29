@@ -2,7 +2,9 @@ use super::PtyParams;
 use crate::database::entity::user;
 use crate::database::models::User;
 use crate::error::Error;
-use crate::server::event_log::EventKind;
+use crate::fill;
+use crate::i18n::Strings;
+use crate::server::event_log::{Audit, EventKind};
 use bytes::Bytes;
 use crossterm::event::SenderWriter;
 use inquire::{
@@ -17,73 +19,72 @@ use tokio::sync::mpsc;
 
 // Custom validators for password requirements
 #[derive(Clone)]
-struct HasDigitValidator;
+struct HasDigitValidator(&'static Strings);
 
 impl StringValidator for HasDigitValidator {
     fn validate(&self, input: &str) -> Result<Validation, inquire::error::CustomUserError> {
         Ok(if input.chars().any(|c| c.is_ascii_digit()) {
             Validation::Valid
         } else {
-            Validation::Invalid("At least one digit (0-9) is required".into())
+            Validation::Invalid(self.0.pw_digit.into())
         })
     }
 }
 
 #[derive(Clone)]
-struct OldPasswordValidator(User);
+struct OldPasswordValidator(User, &'static Strings);
 
 impl StringValidator for OldPasswordValidator {
     fn validate(&self, input: &str) -> Result<Validation, inquire::error::CustomUserError> {
         Ok(if !self.0.verify_password(input) {
             Validation::Valid
         } else {
-            Validation::Invalid(
-                "The new password cannot be the same as the original password".into(),
-            )
+            Validation::Invalid(self.1.pw_same.into())
         })
     }
 }
 
 #[derive(Clone)]
-struct HasUppercaseValidator;
+struct HasUppercaseValidator(&'static Strings);
 
 impl StringValidator for HasUppercaseValidator {
     fn validate(&self, input: &str) -> Result<Validation, inquire::error::CustomUserError> {
         Ok(if input.chars().any(|c| c.is_ascii_uppercase()) {
             Validation::Valid
         } else {
-            Validation::Invalid("At least one uppercase letter (A-Z) is required".into())
+            Validation::Invalid(self.0.pw_uppercase.into())
         })
     }
 }
 
 #[derive(Clone)]
-struct HasLowercaseValidator;
+struct HasLowercaseValidator(&'static Strings);
 
 impl StringValidator for HasLowercaseValidator {
     fn validate(&self, input: &str) -> Result<Validation, inquire::error::CustomUserError> {
         Ok(if input.chars().any(|c| c.is_ascii_lowercase()) {
             Validation::Valid
         } else {
-            Validation::Invalid("At least one lowercase letter (a-z) is required".into())
+            Validation::Invalid(self.0.pw_lowercase.into())
         })
     }
 }
 
 #[derive(Clone)]
-struct HasSpecialCharValidator;
+struct HasSpecialCharValidator(&'static Strings);
 
 impl StringValidator for HasSpecialCharValidator {
     fn validate(&self, input: &str) -> Result<Validation, inquire::error::CustomUserError> {
         Ok(if input.chars().any(|c| c.is_ascii_punctuation()) {
             Validation::Valid
         } else {
-            Validation::Invalid(
-                "At least one special character (e.g., !@#$%^&*) is required".into(),
-            )
+            Validation::Invalid(self.0.pw_special.into())
         })
     }
 }
+
+/// The shortest new password accepted.
+const MIN_LENGTH: usize = 8;
 
 enum Status {
     Finish(String),
@@ -99,6 +100,7 @@ pub(crate) async fn shell_request<B>(
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
+    let tr = params.lang.strings();
     let (handler_id, _, _, backend, tty, mut recv_from_tty, log, _) = params.split();
     let handle_prompt = session.handle();
     let (send_status, mut recv_status) = mpsc::channel(1);
@@ -170,13 +172,13 @@ where
                                     if backend.update_user_password(password, active_model).await.is_err() {
                                         exit_status = 1;
                                         warn!("[{}] Password update failed for user '{}({})'", handler_id, username, user_id);
-                                        handle_prompt.data(channel, "Password updated failed.\r\n"
+                                        handle_prompt.data(channel, format!("{}\r\n", tr.pw_failed)
                                             ).await.is_err().then(|| warn!("[{}] Fail to send password prompt to session from prompt", handler_id));
                                     } else {
                                         debug!("[{}] Password updated successfully for user '{}({})'", handler_id, username, user_id);
-                                        handle_prompt.data(channel, "Password updated successfully.\r\n"
+                                        handle_prompt.data(channel, format!("{}\r\n", tr.pw_updated)
                                             ).await.is_err().then(|| warn!("[{}] Fail to send password prompt to session from prompt", handler_id));
-                                        log.record("password updated successfully").await;
+                                        log.record(Audit::PasswordChanged).await;
                                     }
                                     if handle_prompt.exit_status_request(channel, exit_status).await.is_err() {
                                         warn!("[{}] Fail to send exit status", handler_id);
@@ -216,21 +218,25 @@ where
 
     tokio::spawn(async move {
         let validators: &[Box<dyn StringValidator>] = &[
-            Box::new(min_length!(8)),
-            Box::new(HasDigitValidator),
-            Box::new(HasUppercaseValidator),
-            Box::new(HasLowercaseValidator),
-            Box::new(HasSpecialCharValidator),
-            Box::new(OldPasswordValidator(user_for_prompt)),
+            Box::new(min_length!(
+                MIN_LENGTH,
+                fill!(tr.pw_min_length, min = MIN_LENGTH)
+            )),
+            Box::new(HasDigitValidator(tr)),
+            Box::new(HasUppercaseValidator(tr)),
+            Box::new(HasLowercaseValidator(tr)),
+            Box::new(HasSpecialCharValidator(tr)),
+            Box::new(OldPasswordValidator(user_for_prompt, tr)),
         ];
 
-        let res = Password::new("New Password: ")
+        let res = Password::new(tr.pw_prompt)
             .with_display_toggle_enabled()
             .with_display_mode(PasswordDisplayMode::Hidden)
             .with_validators(validators)
             .with_formatter(&|_| String::new())
-            .with_help_message("Please change your password")
-            .with_custom_confirmation_error_message("Passwords don't match.")
+            .with_help_message(tr.pw_help)
+            .with_custom_confirmation_message(tr.pw_confirm)
+            .with_custom_confirmation_error_message(tr.pw_mismatch)
             .prompt(tty, SenderWriter::new(send_to_session))
             .await;
 
@@ -262,15 +268,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::Lang;
     use inquire::validator::StringValidator;
+
+    const EN: &Strings = Lang::En.strings();
 
     fn validate_all(input: &str) -> bool {
         let validators: &[Box<dyn StringValidator>] = &[
             Box::new(min_length!(8)),
-            Box::new(HasDigitValidator),
-            Box::new(HasUppercaseValidator),
-            Box::new(HasLowercaseValidator),
-            Box::new(HasSpecialCharValidator),
+            Box::new(HasDigitValidator(EN)),
+            Box::new(HasUppercaseValidator(EN)),
+            Box::new(HasLowercaseValidator(EN)),
+            Box::new(HasSpecialCharValidator(EN)),
         ];
         validators
             .iter()
@@ -295,10 +304,10 @@ mod tests {
     #[test]
     fn individual_validators() {
         let min_len = min_length!(8);
-        let digit = HasDigitValidator;
-        let upper = HasUppercaseValidator;
-        let lower = HasLowercaseValidator;
-        let special = HasSpecialCharValidator;
+        let digit = HasDigitValidator(EN);
+        let upper = HasUppercaseValidator(EN);
+        let lower = HasLowercaseValidator(EN);
+        let special = HasSpecialCharValidator(EN);
 
         // Test min length validator
         assert!(matches!(
@@ -328,5 +337,13 @@ mod tests {
             special.validate("abc"),
             Ok(Validation::Invalid(_))
         ));
+    }
+
+    /// The reason a password is refused is in the session's language.
+    #[test]
+    fn refusals_are_worded_in_the_session_language() {
+        let ja = Lang::Ja.strings();
+        let refused = HasDigitValidator(ja).validate("abc").unwrap();
+        assert_eq!(refused, Validation::Invalid(ja.pw_digit.into()));
     }
 }

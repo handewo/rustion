@@ -2,10 +2,11 @@ use crate::database::Uuid;
 use crate::database::entity::casbin_rule;
 use crate::database::models::{GroupType, ObjectGroup};
 use crate::error::Error;
-use crate::server::event_log::EventLogger;
+use crate::fill;
+use crate::server::event_log::{Audit, EventLogger, MemberKind, labelled};
 use crate::server::widgets::tree;
 use crate::server::widgets::{
-    AdminTable, DisplayMode, Message, Theme, centered_area, common::*, popup_block,
+    AdminTable, DisplayMode, Help, Message, Strings, Theme, centered_area, common::*, popup_block,
     render_confirm_dialog, render_message_popup, table_object_group_len_calculator,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -20,15 +21,9 @@ use sea_orm::ActiveValue::Set;
 use std::sync::Arc;
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 
-pub const HELP_TEXT: [&str; 2] = [
-    "(←→) collapse/expand | (a) add | (d) delete",
-    "(Tab) next tab | (Shift Tab) previous tab | (↑↓) move around | (PgUp/PgDn) page up/down",
-];
+pub const HELP_TEXT: Help = |tr| [tr.help_group, tr.help_group_nav];
 
-pub const HELP_TABLE: [&str; 2] = [
-    "(Space/Enter) select and save",
-    "(↑↓) move around | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
-];
+pub const HELP_TABLE: Help = |tr| [tr.help_group_pick, tr.help_pick_nav];
 
 pub(super) struct CasbinGroupEditor<B>
 where
@@ -48,7 +43,8 @@ where
     pub is_deleting: bool,
     win_size: (u16, u16),
     message: Option<Message>,
-    pub help_text: [&'static str; 2],
+    tr: &'static Strings,
+    pub help_text: Help,
 }
 
 type BuildTreeResult = (
@@ -67,13 +63,14 @@ where
         admin_id: Uuid,
         group_type: GroupType,
         log: EventLogger<B>,
+        tr: &'static Strings,
     ) -> Self {
         let mut message = None;
         let (state, items, selector_items) =
-            match CasbinGroupEditor::build_tree(handler_id, &backend, group_type).await {
+            match CasbinGroupEditor::build_tree(handler_id, &backend, group_type, tr).await {
                 Ok(res) => res,
                 Err(_) => {
-                    message = Some(Message::Error(vec!["Internal error".into()]));
+                    message = Some(Message::Error(vec![tr.internal_error.into()]));
                     (TreeState::default(), Vec::new(), Vec::new())
                 }
             };
@@ -93,6 +90,7 @@ where
             is_deleting: false,
             win_size: (0, 0),
             message,
+            tr,
             help_text: HELP_TEXT,
         }
     }
@@ -101,6 +99,7 @@ where
         handler_id: Uuid,
         backend: &Arc<B>,
         group_type: GroupType,
+        tr: &Strings,
     ) -> Result<BuildTreeResult, Error>
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
@@ -132,6 +131,7 @@ where
         let mut items = match tree::build_tree(
             &graph,
             selector_items.iter().filter(|v| v.is_group).collect(),
+            tr,
         ) {
             Ok(i) => i,
             Err(e) => {
@@ -252,9 +252,7 @@ where
             KeyCode::Char('a') => {
                 let iden = self.state.selected();
                 if iden.is_empty() {
-                    self.message = Some(Message::Error(vec![String::from(
-                        "Please select one group.",
-                    )]));
+                    self.message = Some(Message::Error(vec![self.tr.select_one_group.into()]));
                     return false;
                 }
                 self.help_text = HELP_TABLE;
@@ -264,9 +262,7 @@ where
                 let iden = self.state.selected();
                 match iden.len() {
                     0 => {
-                        self.message = Some(Message::Error(vec![String::from(
-                            "Please select one group.",
-                        )]));
+                        self.message = Some(Message::Error(vec![self.tr.select_one_group.into()]));
                         return false;
                     }
                     1 => {
@@ -281,12 +277,12 @@ where
                                     "[{}] Couldn't find group name by ID: {}",
                                     self.handler_id, id
                                 );
-                                "Unknown".to_string()
+                                self.tr.unknown.to_string()
                             });
 
-                        self.message = Some(Message::Error(vec![format!(
-                            "Please select one item in group: {}",
-                            g_name
+                        self.message = Some(Message::Error(vec![fill!(
+                            self.tr.select_item_in_group,
+                            group = g_name
                         )]));
                         return false;
                     }
@@ -326,18 +322,22 @@ where
     async fn refreash_data(&mut self) {
         if let Err(e) = self.backend.load_role_manager().await {
             error!("[{}] Load role manager error: {}", self.handler_id, e);
-            self.message = Some(Message::Error(vec!["Internal error".into()]));
+            self.message = Some(Message::Error(vec![self.tr.internal_error.into()]));
         }
-        let (state, items, selector_items) =
-            match CasbinGroupEditor::build_tree(self.handler_id, &self.backend, self.group_type)
-                .await
-            {
-                Ok(res) => res,
-                Err(_) => {
-                    self.message = Some(Message::Error(vec!["Internal error".into()]));
-                    (TreeState::default(), Vec::new(), Vec::new())
-                }
-            };
+        let (state, items, selector_items) = match CasbinGroupEditor::build_tree(
+            self.handler_id,
+            &self.backend,
+            self.group_type,
+            self.tr,
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(_) => {
+                self.message = Some(Message::Error(vec![self.tr.internal_error.into()]));
+                (TreeState::default(), Vec::new(), Vec::new())
+            }
+        };
 
         self.state = state;
         self.items = items;
@@ -357,29 +357,27 @@ where
             {
                 Ok(res) => {
                     if res {
+                        let (kind, member, group) =
+                            self.member_labels(item_iden.rid, group_iden.rid);
                         self.log
-                            .record(format!(
-                                "Deleted {} '{}' from group '{}' (ptype={}, v0={}, v1={})",
-                                self.group_type,
-                                item_iden.rid,
-                                group_iden.rid,
-                                self.group_type,
-                                item_iden.rid,
-                                group_iden.rid
-                            ))
+                            .record(Audit::MemberRemoved {
+                                kind,
+                                member,
+                                group,
+                            })
                             .await;
                         info!(
                             "[{}] Deleted casbin_rule successfully: ptype={}, v0={}, v1={}",
                             self.handler_id, self.group_type, item_iden.rid, group_iden.rid
                         );
-                        self.message = Some(Message::Success(vec!["Deleted successfully".into()]));
+                        self.message = Some(Message::Success(vec![self.tr.deleted.into()]));
                         self.refreash_data().await;
                     } else {
                         warn!(
                             "[{}] Delete casbin_rule not effect, ptype={}, v0={}, v1={}",
                             self.handler_id, self.group_type, item_iden.rid, group_iden.rid
                         );
-                        self.message = Some(Message::Error(vec!["Internal error".into()]));
+                        self.message = Some(Message::Error(vec![self.tr.internal_error.into()]));
                     }
                 }
                 Err(e) => {
@@ -387,7 +385,7 @@ where
                         "[{}] Failed to delete casbin_rule, ptype={}, v0={}, v1={}, error: {}",
                         self.handler_id, self.group_type, item_iden.rid, group_iden.rid, e
                     );
-                    self.message = Some(Message::Error(vec!["Internal error".into()]));
+                    self.message = Some(Message::Error(vec![self.tr.internal_error.into()]));
                 }
             }
         }
@@ -399,7 +397,7 @@ where
         let iden = match self.state.selected().first() {
             Some(i) => i,
             None => {
-                self.message = Some(Message::Error(vec!["Internal error".into()]));
+                self.message = Some(Message::Error(vec![self.tr.internal_error.into()]));
                 return;
             }
         };
@@ -413,7 +411,7 @@ where
                     "[{}] Couldn't find group name by ID: {}",
                     self.handler_id, iden.rid
                 );
-                "Unknown".to_string()
+                self.tr.unknown.to_string()
             });
         let cr = casbin_rule::ActiveModel {
             id: Set(Uuid::now_v7()),
@@ -427,22 +425,13 @@ where
             updated_by: Set(self.admin_id),
             ..Default::default()
         };
-        let t_type = if obj.is_group {
-            String::from("Group")
-        } else {
-            match self.group_type {
-                GroupType::Subject => String::from("User"),
-                GroupType::Object => String::from("Target"),
-                GroupType::Action => String::from("Action"),
-            }
-        };
+        let kind = member_kind(obj.is_group, self.group_type);
+        let t_type = kind.text(self.tr);
 
         // Prevent cycle when adding group-to-group relationship
         if obj.is_group {
             if obj.id == iden.rid {
-                self.message = Some(Message::Error(vec![
-                    "Cannot add a group to itself".to_string(),
-                ]));
+                self.message = Some(Message::Error(vec![self.tr.group_self.into()]));
                 return;
             }
             let graph = self.backend.get_graph(self.group_type).await;
@@ -466,9 +455,9 @@ where
                         "[{}] Cycle detected: adding group '{}' to group '{}' would create a cycle",
                         self.handler_id, obj.name, g_name
                     );
-                    self.message = Some(Message::Error(vec![format!(
-                        "Cannot add {}: would create a cycle in group hierarchy",
-                        obj.name
+                    self.message = Some(Message::Error(vec![fill!(
+                        self.tr.group_cycle,
+                        name = obj.name
                     )]));
                     return;
                 }
@@ -478,18 +467,21 @@ where
         match self.backend.db_repository().create_casbin_rule(cr).await {
             Ok(cr) => {
                 self.log
-                    .record(format!(
-                        "{} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
-                        t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1
-                    ))
+                    .record(Audit::MemberAdded {
+                        kind,
+                        member: labelled(&obj.name, cr.v0),
+                        group: labelled(&g_name, cr.v1),
+                    })
                     .await;
                 info!(
                     "[{}] {} '{}' added to group '{}' (ptype={}, v0={}, v1={})",
                     self.handler_id, t_type, obj.name, g_name, cr.ptype, cr.v0, cr.v1
                 );
-                self.message = Some(Message::Success(vec![format!(
-                    "{}: {} added in {}",
-                    t_type, obj.name, g_name
+                self.message = Some(Message::Success(vec![fill!(
+                    self.tr.member_added,
+                    kind = t_type,
+                    name = obj.name,
+                    group = g_name
                 )]));
                 self.refreash_data().await;
             }
@@ -500,14 +492,19 @@ where
                             "[{}] Duplicate entry: {} '{}' already exists in group '{}'",
                             self.handler_id, t_type, obj.name, g_name
                         );
-                        format!("{}: {} has already existed in {}", t_type, obj.name, g_name)
+                        fill!(
+                            self.tr.member_exists,
+                            kind = t_type,
+                            name = obj.name,
+                            group = g_name
+                        )
                     }
                     _ => {
                         error!(
                             "[{}] Failed to add {} '{}' to group '{}': {}",
                             self.handler_id, t_type, obj.name, g_name, err
                         );
-                        "Internal error".to_string()
+                        self.tr.internal_error.to_string()
                     }
                 };
                 self.message = Some(Message::Error(vec![msg]));
@@ -563,7 +560,7 @@ where
             self.draw_delete(popup_area, buf, theme);
         }
         if let Some(ref msg) = self.message {
-            render_message_popup(popup_area, buf, msg, theme);
+            render_message_popup(popup_area, buf, msg, theme, self.tr);
         }
     }
 
@@ -572,7 +569,7 @@ where
         if iden_list.len() > 1 {
             let group_iden = self.state.selected().first().unwrap();
             let item_iden = self.state.selected().get(1).unwrap();
-            let mut g_name = String::from("Unknown");
+            let mut g_name = self.tr.unknown.to_string();
             let mut i_name = g_name.clone();
             for i in self.selector_items.iter() {
                 if i.id == group_iden.rid {
@@ -585,8 +582,13 @@ where
             render_confirm_dialog(
                 area,
                 buf,
-                &[format!("Delete {} in group: {}?", i_name, g_name)],
+                &[fill!(
+                    self.tr.delete_member_q,
+                    name = i_name,
+                    group = g_name
+                )],
                 theme,
+                self.tr,
             );
         }
     }
@@ -594,7 +596,7 @@ where
         let iden = match self.state.selected().first() {
             Some(i) => i,
             None => {
-                self.message = Some(Message::Error(vec!["Internal error".into()]));
+                self.message = Some(Message::Error(vec![self.tr.internal_error.into()]));
                 return;
             }
         };
@@ -608,9 +610,9 @@ where
                     "[{}] Couldn't find group name by ID: {}",
                     self.handler_id, iden.rid
                 );
-                "Unknown".to_string()
+                self.tr.unknown.to_string()
             });
-        let popup = popup_block(&format!("Add to Group: {}", g_name), theme);
+        let popup = popup_block(&fill!(self.tr.title_add_to_group, group = g_name), theme);
         use ratatui::widgets::Widget;
         theme.clear(area, buf);
         popup.render(area, buf);
@@ -624,6 +626,34 @@ where
             &self.longest_item_lens,
             DisplayMode::Manage,
             theme,
+            self.tr,
         );
+    }
+
+    /// The kind of a group's member and both their `name(id)`s, for the row
+    /// that records taking it out. A member the selector does not list (a
+    /// user, under a role) is stored by its id alone: the row is stored in no
+    /// language, so it cannot say "unknown".
+    fn member_labels(&self, member: Uuid, group: Uuid) -> (MemberKind, String, String) {
+        let find = |id: Uuid| self.selector_items.iter().find(|v| v.id == id);
+        let label = |id: Uuid| find(id).map_or(id.to_string(), |v| labelled(&v.name, id));
+        let is_group = find(member).is_some_and(|v| v.is_group);
+        (
+            member_kind(is_group, self.group_type),
+            label(member),
+            label(group),
+        )
+    }
+}
+
+/// What a group's member is: another group, or what this kind of group holds.
+fn member_kind(is_group: bool, group_type: GroupType) -> MemberKind {
+    if is_group {
+        return MemberKind::Group;
+    }
+    match group_type {
+        GroupType::Subject => MemberKind::User,
+        GroupType::Object => MemberKind::Target,
+        GroupType::Action => MemberKind::Action,
     }
 }

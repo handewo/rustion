@@ -4,8 +4,10 @@ use crate::database::common::{
 };
 use crate::database::models::*;
 use crate::error::Error;
+use crate::i18n::Lang;
+use crate::server::event_log;
 use crate::server::widgets::{
-    AdminTable, DisplayMode, FieldsToArray, TabBar, TableData as TD, Theme, footer_height,
+    AdminTable, DisplayMode, FieldsToArray, Help, TabBar, TableData as TD, Theme, footer_height,
     render_footer,
 };
 use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent, SenderWriter};
@@ -17,10 +19,7 @@ use ratatui_core::terminal::AsyncTerminal;
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
 
-const INFO_TEXT: [&str; 2] = [
-    "(Esc) quit | (t) theme | (↑) move up | (↓) move down | (←) move left | (→) move right",
-    "(Tab) next tab | (Shift Tab) previous tab | (+) zoom in | (-) zoom out | (PgUp) page up | (PgDn) page down",
-];
+const INFO_TEXT: Help = |tr| [tr.help_database, tr.help_manage_nav];
 
 const LENGTH_UUID: u16 = 36;
 const LENGTH_SHORT_UUID: u16 = 19;
@@ -31,6 +30,7 @@ pub(super) async fn query_table<B>(
     writer: SenderWriter,
     backend: Arc<B>,
     theme: &mut &'static Theme,
+    lang: &mut Lang,
 ) -> Result<(), Error>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
@@ -38,10 +38,12 @@ where
     let tty_backend = NottyBackend::new(tty.clone(), writer.clone());
     let mut terminal = AsyncTerminal::new(tty_backend)?;
     crossterm::async_execute!(&writer, EnterAlternateScreen).await?;
-    let mut app = App::new(backend, theme).await;
+    let mut app = App::new(backend, theme, *lang).await;
     let result = app.run(tty, &mut terminal).await;
-    // The shell starts the next panel in the theme this one ended with.
+    // The shell starts the next panel in the theme and language this one
+    // ended with.
     *theme = app.theme;
+    *lang = app.lang;
     result?;
     crossterm::async_execute!(&writer, LeaveAlternateScreen).await?;
     Ok(())
@@ -58,6 +60,7 @@ where
     last_selected_tab: usize,
     tabs: TabBar,
     theme: &'static Theme,
+    lang: Lang,
     backend: Arc<B>,
 }
 
@@ -65,7 +68,7 @@ impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    async fn new(backend: Arc<B>, theme: &'static Theme) -> Self {
+    async fn new(backend: Arc<B>, theme: &'static Theme, lang: Lang) -> Self {
         let data = TableData::Users(
             backend
                 .db_repository()
@@ -80,6 +83,7 @@ where
             last_selected_tab: 0,
             tabs: TabBar::default(),
             theme,
+            lang,
             backend,
             items: data,
         }
@@ -124,6 +128,13 @@ where
                     KeyCode::Char('+') => self.table.zoom_in(),
                     KeyCode::Char('-') => self.table.zoom_out(),
                     KeyCode::Char('t') => self.theme = self.theme.next(),
+                    KeyCode::Char('L') => {
+                        self.lang = self.lang.next();
+                        // The log's details are worded as they are loaded.
+                        if TABLE_LIST[self.selected_tab] == TABLE_LOGS {
+                            self.refresh_data().await;
+                        }
+                    }
                     KeyCode::Tab => self.next_tab().await,
                     KeyCode::BackTab => self.previous_tab().await,
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
@@ -138,11 +149,12 @@ where
     }
 
     fn render(&mut self, frame: &mut Frame) {
+        let tr = self.lang.strings();
         self.theme.paint(frame.area(), frame.buffer_mut());
         let layout = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(5),
-            Constraint::Length(footer_height(INFO_TEXT, frame.area().width)),
+            Constraint::Length(footer_height(INFO_TEXT(tr), frame.area().width)),
         ]);
         let [header_area, table_area, footer_area] = layout.areas(frame.area());
 
@@ -156,6 +168,7 @@ where
             &self.longest_item_lens,
             DisplayMode::Full,
             self.theme,
+            tr,
         );
         self.render_footer(frame, footer_area);
     }
@@ -217,13 +230,18 @@ where
                 );
             }
             TABLE_LOGS => {
-                self.items = TableData::Logs(
-                    self.backend
-                        .db_repository()
-                        .list_logs()
-                        .await
-                        .unwrap_or_default(),
-                );
+                let tr = self.lang.strings();
+                let mut logs = self
+                    .backend
+                    .db_repository()
+                    .list_logs()
+                    .await
+                    .unwrap_or_default();
+                // Stored as events in no language; worded here, in the reader's.
+                for l in &mut logs {
+                    l.detail = event_log::render(&l.detail, tr);
+                }
+                self.items = TableData::Logs(logs);
             }
             TABLE_SESSION_RECORDINGS => {
                 self.items = TableData::SessionRecordings(
@@ -253,7 +271,8 @@ where
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        render_footer(area, frame.buffer_mut(), INFO_TEXT, self.theme);
+        let tr = self.lang.strings();
+        render_footer(area, frame.buffer_mut(), INFO_TEXT(tr), self.theme, tr);
     }
 }
 
@@ -576,7 +595,9 @@ impl crate::server::widgets::TableData for TableData {
         }
     }
 
-    fn header(&self) -> Vec<&str> {
+    /// The database's own column names, in every language: this panel shows
+    /// the tables as stored.
+    fn header(&self, _tr: &'static crate::i18n::Strings) -> Vec<&'static str> {
         match self {
             Self::Users(_) => {
                 vec![

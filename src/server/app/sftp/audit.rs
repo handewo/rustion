@@ -1,24 +1,22 @@
-//! Wording of the `event_log` details the proxy writes. Pure, so the exact text
-//! is tested here rather than through a proxy session.
+//! Pieces of what the proxy reports: paths for its log lines, and the
+//! attributes a `setstat` sets for its audit rows. The rows themselves are
+//! `event_log::Audit` events, worded when they are shown.
 //!
 //! Paths are client-controlled and always formatted through [`path`], which
 //! uses `{:?}` to escape newlines and control characters so a crafted name
-//! cannot forge a row.
+//! cannot forge a log line.
 
 use russh_sftp::protocol::FileAttributes;
 
-/// The most characters of one escaped path a row shows, quotes excluded.
+/// The most characters of one escaped path a log line shows, quotes excluded.
 pub(super) const PATH_MAX: usize = 240;
 /// How much of [`PATH_MAX`] goes to the head; the tail gets the rest after `…`.
 const HEAD_MAX: usize = 120;
 
-/// A path for an audit row: quoted and escaped, and at most [`PATH_MAX`]
-/// characters between the quotes, keeping its head and tail around a `…`.
-///
-/// `EventLogger::record` cuts a whole row to `event_log`'s 512 characters,
-/// which would drop the destination of a `rename` or `symlink` behind a long
-/// source; bounding each path keeps both ends of every path in the row, and
-/// the row within 512.
+/// A path for a log line: quoted and escaped, and at most [`PATH_MAX`]
+/// characters between the quotes, keeping its head and tail around a `…`, so
+/// a client cannot fill the log with one name and both ends of a `rename`
+/// stay in view.
 ///
 /// The bound is on the *escaped* text. Escaping can multiply a path's length
 /// (a control byte becomes `\u{1}`), so cutting the raw path first would let a
@@ -65,7 +63,8 @@ pub(super) fn path(p: &str) -> String {
     format!("\"{head}…{}\"", tail.concat())
 }
 
-/// The attributes a `setstat`/`fsetstat` sets, e.g. `uid=0 mode=0644`.
+/// The attributes a `setstat`/`fsetstat` sets, e.g. `uid=0 mode=0644`; empty
+/// when it sets none, which the row words in the reader's language.
 pub(super) fn attrs(a: &FileAttributes) -> String {
     let mut out = Vec::new();
     if let Some(v) = a.size {
@@ -86,46 +85,7 @@ pub(super) fn attrs(a: &FileAttributes) -> String {
     if let Some(v) = a.mtime {
         out.push(format!("mtime={v}"));
     }
-    if out.is_empty() {
-        "no attributes".to_string()
-    } else {
-        out.join(" ")
-    }
-}
-
-/// One row per file handle: `sftp read "/p" (10 bytes)`. The verb follows the
-/// mode the file was opened in, not the bytes that moved, so a file opened for
-/// writing and never written still says `wrote`.
-pub(super) fn file_row(
-    p: &str,
-    read: bool,
-    write: bool,
-    bytes_read: u64,
-    bytes_written: u64,
-    closed: bool,
-) -> String {
-    let tail = if closed { "" } else { ", not closed" };
-    let p = path(p);
-    match (read, write) {
-        (true, true) => {
-            format!("sftp read+wrote {p} (r {bytes_read}, w {bytes_written}{tail})")
-        }
-        (false, true) => format!("sftp wrote {p} ({bytes_written} bytes{tail})"),
-        _ => format!("sftp read {p} ({bytes_read} bytes{tail})"),
-    }
-}
-
-pub(super) fn session_end(
-    files_read: u64,
-    bytes_read: u64,
-    files_written: u64,
-    bytes_written: u64,
-    not_closed: u64,
-) -> String {
-    format!(
-        "sftp session ended: {files_read} read ({bytes_read} bytes), \
-         {files_written} written ({bytes_written} bytes), {not_closed} not closed"
-    )
+    out.join(" ")
 }
 
 #[cfg(test)]
@@ -140,35 +100,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(attrs(&a), "uid=0 mode=0644");
-        assert_eq!(attrs(&FileAttributes::default()), "no attributes");
-    }
-
-    #[test]
-    fn file_rows_follow_the_open_mode() {
-        assert_eq!(
-            file_row("/a", true, false, 10, 0, true),
-            r#"sftp read "/a" (10 bytes)"#
-        );
-        assert_eq!(
-            file_row("/b", false, true, 0, 0, true),
-            r#"sftp wrote "/b" (0 bytes)"#
-        );
-        assert_eq!(
-            file_row("/c", true, true, 0, 64, true),
-            r#"sftp read+wrote "/c" (r 0, w 64)"#
-        );
-        assert_eq!(
-            file_row("/d", false, true, 0, 5, false),
-            r#"sftp wrote "/d" (5 bytes, not closed)"#
-        );
-    }
-
-    #[test]
-    fn session_end_summary() {
-        assert_eq!(
-            session_end(3, 12, 1, 512, 2),
-            "sftp session ended: 3 read (12 bytes), 1 written (512 bytes), 2 not closed"
-        );
+        assert_eq!(attrs(&FileAttributes::default()), "");
     }
 
     #[test]
@@ -193,8 +125,7 @@ mod tests {
     }
 
     /// Escaping can make a path several times longer. The bound must hold on
-    /// what is written, or a name of control bytes pushes the rest of the row
-    /// (a `rename` destination) past `event_log`'s 512.
+    /// what is written, or a name of control bytes floods the log line.
     #[test]
     fn the_bound_is_on_the_escaped_path() {
         let raw = "\u{1}".repeat(600) + "/end";
@@ -215,14 +146,6 @@ mod tests {
         // Short but escape-heavy: under the raw bound, over the escaped one.
         let out = path(&"\u{1}".repeat(200));
         assert!(out.chars().count() <= PATH_MAX + 2);
-
-        let row = format!(
-            "sftp rename {} -> {}",
-            path(&"\u{1}".repeat(4000)),
-            path("/home/u/dest")
-        );
-        assert!(row.chars().count() <= 512);
-        assert!(row.ends_with(r#"-> "/home/u/dest""#));
     }
 
     #[test]
@@ -230,12 +153,5 @@ mod tests {
         let out = path("/a\nb");
         assert!(!out.contains('\n'));
         assert!(out.contains(r"\n"));
-    }
-
-    #[test]
-    fn paths_cannot_forge_a_row() {
-        let row = file_row("/a\nsftp mkdir \"/fake\"", true, false, 0, 0, true);
-        assert!(!row.contains('\n'));
-        assert!(row.contains(r"\n"));
     }
 }

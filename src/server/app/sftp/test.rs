@@ -9,7 +9,8 @@ use crate::database::common::*;
 use crate::database::entity::casbin_rule;
 use crate::database::fixture::{self, S_MON};
 use crate::database::models::Ptype;
-use crate::server::event_log::{EventKind, EventLogger};
+use crate::i18n::Lang;
+use crate::server::event_log::{self, EventKind, EventLogger};
 use crate::server::extend_policy::ExtendPolicyReq;
 use crate::server::{BastionServer, HandlerBackend};
 use russh_sftp::client::{RawSftpSession, error::Error as SftpError};
@@ -273,8 +274,9 @@ impl Env {
         (client, target)
     }
 
-    /// `event_log` details for this subject, oldest first. Waits briefly,
-    /// because rows written from `Drop` land on a spawned task.
+    /// `event_log` details for this subject, oldest first, worded in English
+    /// as the log view shows them. Waits briefly, because rows written from
+    /// `Drop` land on a spawned task.
     async fn rows(&self, at_least: usize) -> Vec<String> {
         for _ in 0..50 {
             let mut rows: Vec<String> = self
@@ -285,7 +287,7 @@ impl Env {
                 .unwrap()
                 .into_iter()
                 .filter(|l| l.user_id == self.user && l.log_type == EventKind::Sftp)
-                .map(|l| l.detail)
+                .map(|l| event_log::render(&l.detail, Lang::En.strings()))
                 .collect();
             if rows.len() >= at_least {
                 rows.reverse();

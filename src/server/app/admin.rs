@@ -2,7 +2,7 @@ use super::{ExecParams, PtyParams};
 use crate::database::common as db_common;
 use crate::error::Error;
 use crate::server::error::ServerError;
-use crate::server::event_log::EventKind;
+use crate::server::event_log::{Audit, EventKind};
 use crate::server::extend_policy;
 use bytes::Bytes;
 
@@ -74,6 +74,7 @@ pub(crate) async fn exec_request_without_pty<B>(
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
+    let tr = params.lang.strings();
     let (handler_id, user_id, client_ip, backend, mut recv, _log) = params.split();
     let uuids = db_common::InternalUuids::get();
     if !check_permission(
@@ -114,7 +115,9 @@ Input "exit" or "quit" will exit demo gracefully.
             });
         }
         _ => {
-            let _ = handle_session.data(channel, "Command not found.\r\n").await;
+            let _ = handle_session
+                .data(channel, format!("{}\r\n", tr.command_not_found))
+                .await;
             let _ = handle_session.exit_status_request(channel, 1).await;
             let _ = handle_session.close(channel).await;
         }
@@ -131,6 +134,7 @@ pub(crate) async fn shell_request<B>(
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
+    let lang = app_params.lang;
     let (handler_id, user_id, client_ip, backend, tty, mut recv_from_tty, log, _) =
         app_params.split();
     let uuids = db_common::InternalUuids::get();
@@ -217,11 +221,12 @@ where
             handler_id,
             backend,
             shell_log,
+            lang,
         )
         .await
     });
 
-    log.record("User login to admin system").await;
+    log.record(Audit::Admin).await;
     Ok(())
 }
 

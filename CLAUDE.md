@@ -43,6 +43,8 @@ main.rs → cli.rs (clap) → Config (TOML) → BastionServer::with_config()
 - **`server/app/sftp/`** — SFTP proxy: per-operation actions (`SftpActions`), regex `sftp_path` rules in `ExtendPolicy`, lexical path resolution against the target's home, handle table, audit rows under `EventKind::Sftp`.
 - **`server/app/admin/`** — TUI admin interface using ratatui + reedline. CRUD for users, targets, secrets, roles, permissions, and bindings.
 - **`server/widgets/`** — Widgets shared by the admin panels and the replay player. `theme.rs` holds the colour themes; widgets take a `&Theme` at render time instead of keeping colours, and `TabBar`, `render_footer`, `popup_block` and the dialogs keep the panels looking the same. `t` cycles the theme in any panel; the admin shell carries the choice from one panel to the next. Help text is written `(key) what it does | (key) …` and drawn as key caps in aligned columns (size the footer with `footer_height`, which grows it on narrow terminals); message and confirm dialogs size themselves to their text and word-wrap it.
+- **`i18n/`** — Interface languages: `en`, `zh-CN`, `zh-TW`, `ja`, `ru`, `fr`, `es`, `pt-BR`. One `Strings` constant per language, so a missing translation is a compile error; templates use `{name}` placeholders filled by `fill!`. Widgets take the session's `&Strings` at render time like the `Theme`; text a widget keeps (form labels, help) is a `Label`/`Help` fn of `&Strings`, so `L` (cycle the language in any panel) rewords it. Help keys stay as on the keyboard; only what they do is translated. The tests hold every language to the English placeholders and keys.
+- **`server/event_log.rs`** — Audit events. `detail` stores an `Audit` as JSON, in no language, and `event_log::render` words it in the reader's language when the log is shown; rows from before are English text and shown as they are. The JSON tags and field names are the stored format: never rename them.
 - **`asciinema/`** — Session recording in Asciinema v3 format.
 
 ### Key Traits
@@ -71,6 +73,11 @@ Runtime config is in `rustion.toml` (TOML format). Key settings: listen address,
 `theme` picks the TUI theme sessions start with: `default`, `oled-black`,
 `oled-white`, `nord` or `gruvbox` (omitted means `default`). `default` keeps the
 terminal's own background and text colour; the others paint every cell.
+
+`language` picks the interface language of a session whose client sends no
+locale: `en` (the default), `zh-CN`, `zh-TW`, `ja`, `ru`, `fr`, `es` or `pt-BR`.
+A client that sends `LC_ALL`, `LC_MESSAGES` or `LANG` (OpenSSH's `SendEnv`)
+naming one of these gets it instead; other environment variables are refused.
 
 `database` is a sea-orm connection URL, passed to sea-orm verbatim. The scheme
 selects the driver, so it is the whole of the backend choice
@@ -113,6 +120,10 @@ Tests are inline (`#[cfg(test)]` modules) in:
   are tested inline in `sftp/{path,audit,handles,client}.rs`.
 - `server/widgets/{mod,theme}.rs` — Themes, and the shared widgets rendered into a
   `Buffer`: outside `default`, no cell is left at the terminal's default colours.
+- `i18n/mod.rs` — Locale parsing, and every language against English: the same
+  placeholders, the same help keys.
+- `server/event_log.rs` — The stored form of audit events, rendering in each
+  language, and the 512-character bound.
 - `server/extend_policy.rs` — Extended-policy parsing and matching, including
   the regex `sftp_path` rules.
 - `server/app/change_password.rs` — Password change logic

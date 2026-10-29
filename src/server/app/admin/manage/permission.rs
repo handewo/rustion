@@ -1,5 +1,6 @@
 use super::super::error::AdminError;
 use super::super::validate;
+use super::super::validate::describe;
 use crate::database::entity::casbin_rule;
 use crate::database::models::{ObjectGroup, PermissionPolicy};
 use crate::error::Error;
@@ -7,9 +8,9 @@ use crate::server::app::error::AppError;
 use crate::server::error::ServerError;
 use crate::server::extend_policy::ExtendPolicy;
 use crate::server::widgets::{
-    AdminTable, COMMON_HELP, DisplayMode, Message, SingleLineText, Theme, centered_area,
-    render_cancel_dialog, render_message_popup, render_textarea, table_object_group_len_calculator,
-    text_editing_style, text_input_position, theme,
+    AdminTable, COMMON_HELP, DisplayMode, Help, Message, SingleLineText, Strings, Theme,
+    centered_area, render_cancel_dialog, render_message_popup, render_textarea,
+    table_object_group_len_calculator, text_editing_style, text_input_position, theme,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
@@ -21,14 +22,8 @@ use ratatui::{
 use sea_orm::ActiveValue::{Set, Unchanged};
 use std::sync::Arc;
 
-pub const HELP_TABLE: [&str; 2] = [
-    "(Space/Enter) select",
-    "(↑↓) move around | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
-];
-pub const HELP_EDITOR: [&str; 2] = [
-    "(Enter/e) edit",
-    "(Ctrl+s) save | (Esc) cancel | (Tab) next | (Shift Tab) previous",
-];
+pub const HELP_TABLE: Help = |tr| [tr.help_pick, tr.help_pick_nav];
+pub const HELP_EDITOR: Help = |tr| [tr.help_permission, tr.help_form_nav];
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum InputField {
     User,
@@ -77,11 +72,17 @@ pub(super) struct PermissionEditor {
     pub show_cancel_confirmation: bool,
     editing_mode: bool,
     save_error: Option<Error>,
-    pub help_text: [&'static str; 2],
+    tr: &'static Strings,
+    pub help_text: Help,
 }
 
 impl PermissionEditor {
-    pub async fn new<B>(perm: PermissionPolicy, is_new: bool, backend: Arc<B>) -> Self
+    pub async fn new<B>(
+        perm: PermissionPolicy,
+        is_new: bool,
+        backend: Arc<B>,
+        tr: &'static Strings,
+    ) -> Self
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
@@ -158,6 +159,7 @@ impl PermissionEditor {
             show_cancel_confirmation: false,
             editing_mode: false,
             save_error,
+            tr,
             help_text: HELP_EDITOR,
         }
     }
@@ -426,7 +428,7 @@ impl PermissionEditor {
         render_textarea(
             chunks[0],
             &mut editor_buf,
-            "*User/Role*",
+            self.tr.field_user_role,
             &SingleLineText::new(Some(self.perm.user_role.clone())),
             false,
             theme,
@@ -437,7 +439,7 @@ impl PermissionEditor {
         render_textarea(
             chunks[1],
             &mut editor_buf,
-            "*Target/Group*",
+            self.tr.field_target_group,
             &SingleLineText::new(Some(self.perm.target_group.clone())),
             false,
             theme,
@@ -448,7 +450,7 @@ impl PermissionEditor {
         render_textarea(
             chunks[2],
             &mut editor_buf,
-            "*Action/Group*",
+            self.tr.field_action_group,
             &SingleLineText::new(Some(self.perm.action_group.clone())),
             false,
             theme,
@@ -459,7 +461,7 @@ impl PermissionEditor {
         render_textarea(
             chunks[3],
             &mut editor_buf,
-            "Extend Policy",
+            self.tr.field_extend_policy,
             &self.extend_policy_text,
             self.editing_mode,
             theme,
@@ -509,6 +511,7 @@ impl PermissionEditor {
                         &self.longest_user_lens,
                         DisplayMode::Manage,
                         theme,
+                        self.tr,
                     );
                 }
                 InputField::Target => {
@@ -520,6 +523,7 @@ impl PermissionEditor {
                         &self.longest_target_lens,
                         DisplayMode::Manage,
                         theme,
+                        self.tr,
                     );
                 }
                 InputField::Action => {
@@ -531,6 +535,7 @@ impl PermissionEditor {
                         &self.longest_action_lens,
                         DisplayMode::Manage,
                         theme,
+                        self.tr,
                     );
                 }
                 InputField::ExtendPolicy => unreachable!(),
@@ -541,11 +546,12 @@ impl PermissionEditor {
 
         // Render cancel confirmation dialog if needed
         if self.show_cancel_confirmation {
-            render_cancel_dialog(area, buf, theme);
+            render_cancel_dialog(area, buf, theme, self.tr);
         }
 
         if let Some(err) = self.save_error.as_ref() {
-            render_message_popup(area, buf, &Message::Error(vec![err.to_string()]), theme);
+            let message = Message::Error(vec![describe(err, self.tr)]);
+            render_message_popup(area, buf, &message, theme, self.tr);
         }
     }
 }

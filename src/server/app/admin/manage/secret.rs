@@ -30,19 +30,24 @@ where
     pub active_model: secret::ActiveModel,
     pub form: FormEditor,
     backend: Arc<B>,
+    tr: &'static Strings,
 }
 
 impl<B> SecretEditor<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    pub fn new(secret: Secret, is_new: bool, backend: Arc<B>) -> Self {
+    pub fn new(secret: Secret, is_new: bool, backend: Arc<B>, tr: &'static Strings) -> Self {
         let form = FormEditor::new(vec![
-            FormField::text("*Name*", Some(secret.name.clone())),
-            FormField::text("*User*", Some(secret.user.clone())),
-            FormField::text_masked("Password", Some(secret.print_password()), '*'),
-            FormField::checkbox("Is Active", secret.is_active),
-            FormField::multiline("Private Key", Some(&[secret.print_private_key()]), 8),
+            FormField::text(|tr| tr.field_name, Some(secret.name.clone())),
+            FormField::text(|tr| tr.field_secret_user, Some(secret.user.clone())),
+            FormField::text_masked(|tr| tr.field_password, Some(secret.print_password()), '*'),
+            FormField::checkbox(|tr| tr.field_is_active, secret.is_active),
+            FormField::multiline(
+                |tr| tr.field_private_key,
+                Some(&[secret.print_private_key()]),
+                8,
+            ),
         ]);
 
         let active_model = if is_new {
@@ -65,6 +70,7 @@ where
             active_model,
             form,
             backend,
+            tr,
         }
     }
 
@@ -76,7 +82,8 @@ where
         match self.form.handle_key_event(key, modifiers) {
             FormEvent::Save => {
                 if let Err(e) = self.save_secret() {
-                    self.form.set_save_error(vec![e.to_string()]);
+                    self.form
+                        .set_save_error(vec![validate::describe(&e, self.tr)]);
                     return false;
                 }
                 true
@@ -154,6 +161,6 @@ where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
     pub fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
-        self.form.render_ui(area, buf, theme);
+        self.form.render_ui(area, buf, theme, self.tr);
     }
 }

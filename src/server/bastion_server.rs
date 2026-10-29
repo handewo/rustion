@@ -703,6 +703,10 @@ impl super::HandlerBackend for BastionServer {
         self.config.theme
     }
 
+    fn language(&self) -> crate::i18n::Lang {
+        self.config.language
+    }
+
     async fn load_role_manager(&self) -> Result<(), Error> {
         self.do_load_role_manager().await
     }
