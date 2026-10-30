@@ -292,6 +292,19 @@ strings! {
     delete_secret_q,
     delete_permission_q,
     delete_group_q,
+    /// Heads the list of what a delete takes along, in the confirm dialog.
+    also_removes,
+    // What a delete takes along. Labels, not counted nouns: `dep_item` puts the
+    // count beside them, so no language needs plural forms.
+    dep_bindings,
+    dep_memberships,
+    dep_permissions,
+    /// `{label}`, `{count}`
+    dep_item,
+    /// Between the items of a list.
+    list_separator,
+    /// `{event}`: the delete's sentence; `{items}`: `dep_item`s, separated.
+    a_deleted_with,
     user_exists,
     target_exists,
     secret_exists,

@@ -1,4 +1,5 @@
 pub(crate) mod casbin_rule;
+pub(crate) mod dependents;
 pub mod event_log;
 pub(crate) mod session_recording;
 pub(crate) mod target;
@@ -9,6 +10,7 @@ pub(crate) use casbin_rule::{
     CasbinName, CasbinRule, CasbinRuleGroup, GroupType, NamePtype, ObjectGroup, PermissionPolicy,
     Ptype, Role,
 };
+pub(crate) use dependents::Dependents;
 pub(crate) use event_log::EventKind;
 pub use event_log::EventLog;
 /// `connect_target` names `RecordingStatus` via `session_recording::`; the

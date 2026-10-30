@@ -10,8 +10,9 @@ use chrono::Utc;
 use log::{debug, info};
 use sea_orm::ActiveValue::{Set, Unchanged};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait,
-    QueryFilter, QueryOrder, QuerySelect, Schema,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectOptions, ConnectionTrait, Database,
+    DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Schema,
+    TransactionTrait,
 };
 use uuid::Uuid;
 
@@ -20,9 +21,9 @@ use crate::database::entity::{
 };
 use crate::database::error::DatabaseError;
 use crate::database::models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, EventLog, GroupType, NamePtype, ObjectGroup,
-    PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo, SessionRecording, Target,
-    TargetInfo, TargetSecret, TargetSecretName, User, UserWithRole,
+    CasbinName, CasbinRule, CasbinRuleGroup, Dependents, EventLog, GroupType, NamePtype,
+    ObjectGroup, PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo,
+    SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName, User, UserWithRole,
 };
 use crate::database::{DatabaseRepository, redact_url};
 use crate::error::Error;
@@ -153,14 +154,17 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(res.into())
     }
 
-    async fn delete_user(&self, id: Uuid) -> Result<bool, Error> {
+    async fn delete_user(&self, id: Uuid) -> Result<Option<Dependents>, Error> {
         debug!("Deleting user: id={}", id);
-        let res = user::Entity::delete_by_id(id).exec(&self.db).await?;
+        let txn = self.db.begin().await?;
+        let removed = delete_dependents(&txn, id).await?;
+        let res = user::Entity::delete_by_id(id).exec(&txn).await?;
+        txn.commit().await?;
         let deleted = res.rows_affected > 0;
         if deleted {
-            debug!("User deleted successfully: id={}", id);
+            debug!("User deleted successfully: id={} with {:?}", id, removed);
         }
-        Ok(deleted)
+        Ok(deleted.then_some(removed))
     }
 
     async fn list_users(&self, active_only: bool) -> Result<Vec<User>, Error> {
@@ -217,14 +221,17 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(res.into())
     }
 
-    async fn delete_target(&self, id: Uuid) -> Result<bool, Error> {
+    async fn delete_target(&self, id: Uuid) -> Result<Option<Dependents>, Error> {
         debug!("Deleting target: id={}", id);
-        let res = target::Entity::delete_by_id(id).exec(&self.db).await?;
+        let txn = self.db.begin().await?;
+        let removed = delete_dependents(&txn, id).await?;
+        let res = target::Entity::delete_by_id(id).exec(&txn).await?;
+        txn.commit().await?;
         let deleted = res.rows_affected > 0;
         if deleted {
-            debug!("Target deleted successfully: id={}", id);
+            debug!("Target deleted successfully: id={} with {:?}", id, removed);
         }
-        Ok(deleted)
+        Ok(deleted.then_some(removed))
     }
 
     async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, Error> {
@@ -304,14 +311,17 @@ impl DatabaseRepository for SeaOrmRepository {
             .map(Secret::from))
     }
 
-    async fn delete_secret(&self, id: Uuid) -> Result<bool, Error> {
+    async fn delete_secret(&self, id: Uuid) -> Result<Option<Dependents>, Error> {
         debug!("Deleting secret: id={}", id);
-        let res = secret::Entity::delete_by_id(id).exec(&self.db).await?;
+        let txn = self.db.begin().await?;
+        let removed = delete_dependents(&txn, id).await?;
+        let res = secret::Entity::delete_by_id(id).exec(&txn).await?;
+        txn.commit().await?;
         let deleted = res.rows_affected > 0;
         if deleted {
-            debug!("Secret deleted successfully: id={}", id);
+            debug!("Secret deleted successfully: id={} with {:?}", id, removed);
         }
-        Ok(deleted)
+        Ok(deleted.then_some(removed))
     }
 
     async fn create_secrets_batch(&self, secrets: Vec<Secret>) -> Result<u64, Error> {
@@ -365,11 +375,17 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(res.into())
     }
 
-    async fn delete_target_secret(&self, id: Uuid) -> Result<bool, Error> {
-        let res = target_secret::Entity::delete_by_id(id)
-            .exec(&self.db)
-            .await?;
-        Ok(res.rows_affected > 0)
+    async fn delete_target_secret(&self, id: Uuid) -> Result<Option<Dependents>, Error> {
+        let txn = self.db.begin().await?;
+        let removed = delete_dependents(&txn, id).await?;
+        let res = target_secret::Entity::delete_by_id(id).exec(&txn).await?;
+        txn.commit().await?;
+        Ok((res.rows_affected > 0).then_some(removed))
+    }
+
+    async fn dependents(&self, id: Uuid) -> Result<Dependents, Error> {
+        let (bindings, rules) = find_dependents(&self.db, id).await?;
+        Ok(count_dependents(&bindings, &rules))
     }
 
     /// Upsert the binding between a target and a secret.
@@ -562,7 +578,7 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(res.into())
     }
 
-    async fn delete_casbin_name(&self, id: Uuid) -> Result<bool, Error> {
+    async fn delete_casbin_name(&self, id: Uuid) -> Result<Option<Dependents>, Error> {
         debug!("Deleting casbin_name: id={}", id);
 
         if let Some(casbin_name) = casbin_name::Entity::find_by_id(id)
@@ -574,12 +590,18 @@ impl DatabaseRepository for SeaOrmRepository {
             return Err(Error::Database(DatabaseError::InternalTypeModification));
         }
 
-        let res = casbin_name::Entity::delete_by_id(id).exec(&self.db).await?;
+        let txn = self.db.begin().await?;
+        let removed = delete_dependents(&txn, id).await?;
+        let res = casbin_name::Entity::delete_by_id(id).exec(&txn).await?;
+        txn.commit().await?;
         let deleted = res.rows_affected > 0;
         if deleted {
-            debug!("Casbin_name deleted successfully: id={}", id);
+            debug!(
+                "Casbin_name deleted successfully: id={} with {:?}",
+                id, removed
+            );
         }
-        Ok(deleted)
+        Ok(deleted.then_some(removed))
     }
 
     async fn get_casbin_name_by_name(&self, name: &str) -> Result<Option<CasbinName>, Error> {
@@ -832,6 +854,72 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn list_permission_polices(&self) -> Result<Vec<PermissionPolicy>, Error> {
         super::query::list_permission_polices(&self.db).await
     }
+}
+
+/// The rows that cannot outlive `id`: the bindings of a target or a secret,
+/// and the `casbin_rule` rows naming `id` or one of those bindings.
+///
+/// `v0`–`v2` are polymorphic (a user, a binding or a name, by `ptype`), so no
+/// foreign key can find the rules. Ids are uuids, unique across tables, so a
+/// match in any of the three columns is a reference, and one query serves
+/// every kind of row. A rule left behind points at nothing, and the readers
+/// that label rules have to skip it.
+async fn find_dependents<C: ConnectionTrait>(
+    db: &C,
+    id: Uuid,
+) -> Result<(Vec<Uuid>, Vec<casbin_rule::Model>), Error> {
+    let bindings: Vec<Uuid> = target_secret::Entity::find()
+        .filter(
+            Condition::any()
+                .add(target_secret::Column::TargetId.eq(id))
+                .add(target_secret::Column::SecretId.eq(id)),
+        )
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|m| m.id)
+        .collect();
+    let named: Vec<Uuid> = bindings.iter().copied().chain([id]).collect();
+    let rules = casbin_rule::Entity::find()
+        .filter(
+            Condition::any()
+                .add(casbin_rule::Column::V0.is_in(named.clone()))
+                .add(casbin_rule::Column::V1.is_in(named.clone()))
+                .add(casbin_rule::Column::V2.is_in(named)),
+        )
+        .all(db)
+        .await?;
+    Ok((bindings, rules))
+}
+
+fn count_dependents(bindings: &[Uuid], rules: &[casbin_rule::Model]) -> Dependents {
+    let permissions = rules.iter().filter(|r| r.ptype == Ptype::Policy).count() as u64;
+    Dependents {
+        bindings: bindings.len() as u64,
+        memberships: rules.len() as u64 - permissions,
+        permissions,
+    }
+}
+
+/// Delete what cannot outlive `id`, before `id` itself goes, in the caller's
+/// transaction. The foreign key would cascade the bindings on its own but not
+/// the rules, so the rules are found while the bindings can still be.
+async fn delete_dependents<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<Dependents, Error> {
+    let (bindings, rules) = find_dependents(db, id).await?;
+    let removed = count_dependents(&bindings, &rules);
+    if !rules.is_empty() {
+        casbin_rule::Entity::delete_many()
+            .filter(casbin_rule::Column::Id.is_in(rules.iter().map(|r| r.id)))
+            .exec(db)
+            .await?;
+    }
+    if !bindings.is_empty() {
+        target_secret::Entity::delete_many()
+            .filter(target_secret::Column::Id.is_in(bindings))
+            .exec(db)
+            .await?;
+    }
+    Ok(removed)
 }
 
 #[cfg(test)]

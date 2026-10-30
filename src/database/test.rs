@@ -6,7 +6,6 @@
 //! Seeding is not free (85 bindings, 124 rules, and an Argon2 hash per user), so
 //! tests are grouped by area rather than one per method.
 
-use crate::database::Uuid;
 use crate::database::common::{
     ACT_EXEC, ACT_LOGIN, ACT_SHELL, INTERNAL_ACTIONS, OBJ_ADMIN, OBJ_LOGIN, OBJ_PLAYER,
 };
@@ -17,8 +16,9 @@ use crate::database::entity::{
 use crate::database::error::DatabaseError;
 use crate::database::fixture::{self, *};
 use crate::database::models::{
-    EventKind, EventLog, GroupType, NamePtype, Ptype, RecordingStatus, SessionRecording,
+    Dependents, EventKind, EventLog, GroupType, NamePtype, Ptype, RecordingStatus, SessionRecording,
 };
+use crate::database::{DatabaseRepository, Uuid};
 use crate::error::Error;
 use sea_orm::ActiveValue::{NotSet, Set, Unchanged};
 use sea_orm::EntityTrait;
@@ -343,14 +343,14 @@ async fn user_writes_are_partial_and_deletes_are_idempotent() {
     assert_eq!(cleared.get_authorized_keys(), None);
     assert!(cleared.verify_password(PASSWORD));
 
-    assert!(repo.delete_user(f.user(JOE)).await.unwrap());
+    assert!(repo.delete_user(f.user(JOE)).await.unwrap().is_some());
     assert!(
-        !repo.delete_user(f.user(JOE)).await.unwrap(),
-        "second delete reports false rather than erroring"
+        repo.delete_user(f.user(JOE)).await.unwrap().is_none(),
+        "second delete reports None rather than erroring"
     );
     assert!(repo.get_user_by_id(f.user(JOE)).await.unwrap().is_none());
     assert_eq!(repo.list_users(false).await.unwrap().len(), USERS - 1);
-    assert!(!repo.delete_user(Uuid::now_v7()).await.unwrap());
+    assert!(repo.delete_user(Uuid::now_v7()).await.unwrap().is_none());
 }
 
 // ---------------------------------------------------------------- target reads
@@ -558,8 +558,8 @@ async fn target_writes_and_the_binding_cascade() {
     assert_eq!(renamed.hostname, "pluto.fixture.test", "hostname clobbered");
     assert_eq!(renamed.server_public_key, HOST_PUBLIC_KEY);
 
-    // `target_secret` has a real cascading foreign key, unlike the `casbin_rule`
-    // rows that reference bindings.
+    // `target_secret` has a real cascading foreign key; the `casbin_rule`
+    // rows that name the bindings are deleted by `delete_target` itself.
     let sun = f.target("sun");
     assert_eq!(
         repo.list_secrets_by_target_id(sun)
@@ -570,16 +570,148 @@ async fn target_writes_and_the_binding_cascade() {
             .count(),
         SECRETS
     );
-    assert!(repo.delete_target(sun).await.unwrap());
+    let bindings: HashSet<Uuid> = repo
+        .list_target_secrets(false)
+        .await
+        .unwrap()
+        .iter()
+        .filter(|b| b.target_id == sun)
+        .map(|b| b.id)
+        .collect();
+    let naming = rules_naming(repo, &bindings).await;
+    assert!(naming > 0, "the fixture groups sun's bindings");
+    let preview = repo.dependents(sun).await.unwrap();
+    assert_eq!(preview.bindings, SECRETS as u64);
+    assert_eq!(preview.memberships + preview.permissions, naming as u64);
+
+    assert_eq!(repo.delete_target(sun).await.unwrap(), Some(preview));
     assert_eq!(
         repo.list_target_secrets(false).await.unwrap().len(),
         TARGET_SECRETS - SECRETS,
         "sun's four bindings did not cascade"
     );
-    assert!(!repo.delete_target(sun).await.unwrap());
-    // The `g2` rules that named those bindings are still there — no foreign key
-    // reaches them, which is the documented asymmetry.
-    assert_eq!(repo.list_casbin_rules().await.unwrap().len(), CASBIN_RULES);
+    assert!(repo.delete_target(sun).await.unwrap().is_none());
+    // No foreign key reaches the rules that named those bindings, so the delete
+    // takes them itself: left behind, they kept the server from starting.
+    assert_eq!(rules_naming(repo, &bindings).await, 0);
+    assert_eq!(
+        repo.list_casbin_rules().await.unwrap().len(),
+        CASBIN_RULES - naming
+    );
+    assert_every_rule_resolves(repo).await;
+}
+
+/// How many `casbin_rule` rows name any of `ids`, in any column.
+async fn rules_naming(repo: &dyn DatabaseRepository, ids: &HashSet<Uuid>) -> usize {
+    repo.list_casbin_rules()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| ids.contains(&r.v0) || ids.contains(&r.v1) || ids.contains(&r.v2))
+        .count()
+}
+
+/// Every group rule has a label on both ends, and every policy is listed: what
+/// the server needs to start, and the manage panel to show the permissions.
+async fn assert_every_rule_resolves(repo: &dyn DatabaseRepository) {
+    for ptype in [Ptype::G1, Ptype::G2, Ptype::G3] {
+        let labelled = repo.list_casbin_rule_group_by_ptype(ptype).await.unwrap();
+        let raw = repo.list_casbin_rules_by_ptype(ptype).await.unwrap();
+        assert_eq!(labelled.len(), raw.len());
+        for row in labelled {
+            assert!(
+                row.v0_object_label.is_some() || row.v0_group_label.is_some(),
+                "{ptype:?} rule {} names a deleted v0",
+                row.id
+            );
+            assert!(
+                row.v1_object_label.is_some() || row.v1_group_label.is_some(),
+                "{ptype:?} rule {} names a deleted v1",
+                row.id
+            );
+        }
+    }
+    assert_eq!(
+        repo.list_permission_polices().await.unwrap().len(),
+        repo.list_casbin_rules_by_ptype(Ptype::Policy)
+            .await
+            .unwrap()
+            .len(),
+        "a policy names a deleted row"
+    );
+}
+
+/// What deleting `id` should take, worked out from the rows themselves.
+async fn expected_dependents(repo: &dyn DatabaseRepository, id: Uuid) -> Dependents {
+    let mut named: HashSet<Uuid> = repo
+        .list_target_secrets(false)
+        .await
+        .unwrap()
+        .iter()
+        .filter(|b| b.target_id == id || b.secret_id == id)
+        .map(|b| b.id)
+        .collect();
+    let bindings = named.len() as u64;
+    named.insert(id);
+    let rules: Vec<_> = repo
+        .list_casbin_rules()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| named.contains(&r.v0) || named.contains(&r.v1) || named.contains(&r.v2))
+        .collect();
+    let permissions = rules.iter().filter(|r| r.ptype == Ptype::Policy).count() as u64;
+    Dependents {
+        bindings,
+        memberships: rules.len() as u64 - permissions,
+        permissions,
+    }
+}
+
+/// Deleting a user, a secret, a binding or a group takes the rules that name it,
+/// whichever column they name it in; a secret takes its bindings too. The
+/// count shown before the delete is what the delete reports taking.
+#[tokio::test]
+async fn deletes_take_the_rules_that_name_the_row() {
+    let db = fixture::seed().await;
+    let repo = db.repo();
+    let f = &db.fixture;
+
+    let cases = [
+        ("user", f.user(JOHN)),
+        ("group", f.name(TG_SATURN)),
+        ("secret", f.secret(S_MON)),
+        ("binding", f.binding("sun", S_DEV)),
+    ];
+    for (what, id) in cases {
+        let expected = expected_dependents(repo, id).await;
+        assert!(!expected.is_empty(), "{what} takes nothing in the fixture");
+        assert_eq!(repo.dependents(id).await.unwrap(), expected, "{what}");
+        let removed = match what {
+            "user" => repo.delete_user(id).await,
+            "group" => repo.delete_casbin_name(id).await,
+            "secret" => repo.delete_secret(id).await,
+            _ => repo.delete_target_secret(id).await,
+        };
+        assert_eq!(removed.unwrap(), Some(expected), "{what}");
+        assert_eq!(
+            repo.dependents(id).await.unwrap(),
+            Dependents::default(),
+            "{what} left something behind"
+        );
+        assert_every_rule_resolves(repo).await;
+    }
+
+    // A user holds roles and may be named by a policy; a secret only has
+    // bindings and their group memberships.
+    let mike = expected_dependents(repo, f.user(MIKE)).await;
+    assert_eq!(mike.bindings, 0);
+    assert!(mike.memberships > 0);
+
+    // Counting deletes nothing.
+    let rules = repo.list_casbin_rules().await.unwrap().len();
+    repo.dependents(f.target("sun")).await.unwrap();
+    assert_eq!(repo.list_casbin_rules().await.unwrap().len(), rules);
 }
 
 // --------------------------------------------------------------- secret writes
@@ -635,13 +767,18 @@ async fn secret_writes_keep_unset_ciphertext() {
     assert_eq!(cleared.take_password(), None);
 
     assert_eq!(repo.list_secrets(false).await.unwrap().len(), SECRETS + 1);
-    assert!(repo.delete_secret(id).await.unwrap());
-    assert!(!repo.delete_secret(id).await.unwrap());
+    assert!(repo.delete_secret(id).await.unwrap().is_some());
+    assert!(repo.delete_secret(id).await.unwrap().is_none());
     assert_eq!(repo.list_secrets(false).await.unwrap().len(), SECRETS);
 
     // Deleting a bound secret cascades its bindings, the mirror of the target
     // side. `s_root` is bound to `sun` alone.
-    assert!(repo.delete_secret(f.secret(S_ROOT)).await.unwrap());
+    assert!(
+        repo.delete_secret(f.secret(S_ROOT))
+            .await
+            .unwrap()
+            .is_some()
+    );
     assert_eq!(
         repo.list_target_secrets(false).await.unwrap().len(),
         TARGET_SECRETS - 1
@@ -769,8 +906,8 @@ async fn upsert_binding_preserves_the_id_across_a_toggle() {
     assert!(!deactivated.is_active);
     assert_eq!(deactivated.target_id, mars1);
 
-    assert!(repo.delete_target_secret(fresh.id).await.unwrap());
-    assert!(!repo.delete_target_secret(fresh.id).await.unwrap());
+    assert!(repo.delete_target_secret(fresh.id).await.unwrap().is_some());
+    assert!(repo.delete_target_secret(fresh.id).await.unwrap().is_none());
 }
 
 // ------------------------------------------------------------ casbin_rule reads
@@ -1353,8 +1490,8 @@ async fn internal_names_are_protected_from_rename_and_delete() {
         .await
         .unwrap();
     assert_eq!(renamed.name, "r_temp2");
-    assert!(repo.delete_casbin_name(id).await.unwrap());
-    assert!(!repo.delete_casbin_name(id).await.unwrap());
+    assert!(repo.delete_casbin_name(id).await.unwrap().is_some());
+    assert!(repo.delete_casbin_name(id).await.unwrap().is_none());
     assert_eq!(
         repo.list_casbin_names(false).await.unwrap().len(),
         CASBIN_NAMES
@@ -1585,7 +1722,12 @@ async fn recordings_open_close_and_list_per_user_and_target() {
 
     // A recording outlives its target, and so does its label. Deleting the target
     // must not fail on a foreign key, which is why the relation is `skip_fk`.
-    assert!(repo.delete_target(f.target("mars1")).await.unwrap());
+    assert!(
+        repo.delete_target(f.target("mars1"))
+            .await
+            .unwrap()
+            .is_some()
+    );
     let after = repo
         .list_recording_view_for_user(f.user(JOHN))
         .await

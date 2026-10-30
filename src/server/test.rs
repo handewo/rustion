@@ -812,6 +812,63 @@ mod tests {
         }
     }
 
+    /// A database whose rules name deleted rows, as deletes left them before
+    /// they took their rules along, still starts. The dangling rules grant
+    /// nothing, and the rest of the graph is untouched.
+    #[tokio::test]
+    async fn rules_naming_deleted_rows_do_not_stop_the_server() {
+        let db = fixture::seed().await;
+        let gone = Uuid::now_v7();
+        let f = &db.fixture;
+        let (shell, tg_all) = (f.name(ACT_SHELL), f.name(TG_ALL));
+        for (ptype, v0, v1) in [
+            (Ptype::G1, f.name(R_OPS), gone),
+            (Ptype::G1, gone, f.user(JOHN)),
+            (Ptype::G2, gone, tg_all),
+            (Ptype::G3, gone, f.name(AG_ALL)),
+        ] {
+            db.repo()
+                .create_casbin_rule(casbin_rule::ActiveModel {
+                    id: Set(Uuid::now_v7()),
+                    ptype: Set(ptype),
+                    v0: Set(v0),
+                    v1: Set(v1),
+                    v2: Set(Uuid::default()),
+                    v3: Set(String::new()),
+                    v4: Set(String::new()),
+                    v5: Set(String::new()),
+                    updated_by: Set(f.admin_id),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+
+        let env = Env::on(db).await;
+        env.reload().await;
+
+        // `r_ops` reaches login through `r_staff`; the rule that put the deleted
+        // user in `r_ops` is skipped, so it passes nothing on.
+        let (obj, act) = (env.f().name(OBJ_LOGIN), env.f().name(ACT_LOGIN));
+        assert!(!env.allows(gone, obj, act).await);
+        for user in [ADMIN, JOHN, MIKE, LUKA] {
+            assert!(
+                env.allows(env.f().user(user), obj, act).await,
+                "{user} lost login to a dangling rule"
+            );
+        }
+        assert!(!env.allows(env.f().user(JOE), obj, act).await);
+
+        // A policy naming a deleted user is left out of the manage panel's list,
+        // which would otherwise have no label to show for it.
+        let policies = env.repo().list_permission_polices().await.unwrap().len();
+        env.add_policy(gone, tg_all, shell, "{}").await;
+        assert_eq!(
+            env.repo().list_permission_polices().await.unwrap().len(),
+            policies
+        );
+    }
+
     // ------------------------------------------------- list_targets_for_user
 
     /// Each user sees exactly the bindings their policies reach.

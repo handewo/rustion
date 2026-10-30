@@ -3,7 +3,7 @@ use crate::database::models::*;
 use crate::error::Error;
 use crate::fill;
 use crate::i18n::{Lang, Strings};
-use crate::server::event_log::{Audit, Change, EventKind, EventLogger, Object};
+use crate::server::event_log::{Audit, Change, EventKind, EventLogger, Object, dependents_items};
 use crate::server::widgets::{
     AdminTable, DisplayMode, FieldsToArray, Help, Message, TabBar, TableData as TD, Theme,
     centered_area, common::*, footer_height, popup_block, render_confirm_dialog, render_footer,
@@ -68,7 +68,8 @@ enum Popup {
     None,
     Add,
     Edit,
-    Delete(usize),
+    /// The row, and what deleting it would take along, for the dialog.
+    Delete(usize, Dependents),
 }
 
 #[repr(usize)]
@@ -386,22 +387,25 @@ where
                 if let Some(u) = self.items.get_user(idx) {
                     let result = self.backend.db_repository().delete_user(u.id).await;
 
-                    if let Err(e) = result {
-                        self.message = Some(Message::Error(vec![
-                            self.lang.strings().internal_error.into(),
-                        ]));
-                        warn!(
-                            "[{}] Delete user '{}({})' failed by admin_id={}: {}",
-                            self.handler_id, u.username, u.id, self.admin_id, e
-                        );
-                        return;
-                    }
+                    let removed = match result {
+                        Ok(removed) => removed.unwrap_or_default(),
+                        Err(e) => {
+                            self.message = Some(Message::Error(vec![
+                                self.lang.strings().internal_error.into(),
+                            ]));
+                            warn!(
+                                "[{}] Delete user '{}({})' failed by admin_id={}: {}",
+                                self.handler_id, u.username, u.id, self.admin_id, e
+                            );
+                            return;
+                        }
+                    };
 
                     info!(
-                        "[{}] User '{}({})' deleted by admin_id={}",
-                        self.handler_id, u.username, u.id, self.admin_id
+                        "[{}] User '{}({})' deleted by admin_id={}, with {:?}",
+                        self.handler_id, u.username, u.id, self.admin_id, removed
                     );
-                    let event = Audit::saved(Object::User, Change::Deleted, &u.username, u.id);
+                    let event = Audit::deleted(Object::User, &u.username, u.id, removed);
                     self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
                     self.log.record(event).await;
                     self.refresh_data().await;
@@ -411,22 +415,25 @@ where
                 if let Some(t) = self.items.get_target(idx) {
                     let result = self.backend.db_repository().delete_target(t.id).await;
 
-                    if let Err(e) = result {
-                        self.message = Some(Message::Error(vec![
-                            self.lang.strings().internal_error.into(),
-                        ]));
-                        warn!(
-                            "[{}] Delete target '{}({})' failed by admin_id={}: {}",
-                            self.handler_id, t.name, t.id, self.admin_id, e
-                        );
-                        return;
-                    }
+                    let removed = match result {
+                        Ok(removed) => removed.unwrap_or_default(),
+                        Err(e) => {
+                            self.message = Some(Message::Error(vec![
+                                self.lang.strings().internal_error.into(),
+                            ]));
+                            warn!(
+                                "[{}] Delete target '{}({})' failed by admin_id={}: {}",
+                                self.handler_id, t.name, t.id, self.admin_id, e
+                            );
+                            return;
+                        }
+                    };
 
                     info!(
-                        "[{}] Target '{}({})' deleted by admin_id={}",
-                        self.handler_id, t.name, t.id, self.admin_id
+                        "[{}] Target '{}({})' deleted by admin_id={}, with {:?}",
+                        self.handler_id, t.name, t.id, self.admin_id, removed
                     );
-                    let event = Audit::saved(Object::Target, Change::Deleted, &t.name, t.id);
+                    let event = Audit::deleted(Object::Target, &t.name, t.id, removed);
                     self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
                     self.log.record(event).await;
                     self.refresh_data().await;
@@ -436,22 +443,25 @@ where
                 if let Some(s) = self.items.get_secret(idx) {
                     let result = self.backend.db_repository().delete_secret(s.id).await;
 
-                    if let Err(e) = result {
-                        self.message = Some(Message::Error(vec![
-                            self.lang.strings().internal_error.into(),
-                        ]));
-                        warn!(
-                            "[{}] Delete secret '{}({})' failed by admin_id={}: {}",
-                            self.handler_id, s.name, s.id, self.admin_id, e
-                        );
-                        return;
-                    }
+                    let removed = match result {
+                        Ok(removed) => removed.unwrap_or_default(),
+                        Err(e) => {
+                            self.message = Some(Message::Error(vec![
+                                self.lang.strings().internal_error.into(),
+                            ]));
+                            warn!(
+                                "[{}] Delete secret '{}({})' failed by admin_id={}: {}",
+                                self.handler_id, s.name, s.id, self.admin_id, e
+                            );
+                            return;
+                        }
+                    };
 
                     info!(
-                        "[{}] Secret '{}({})' deleted by admin_id={}",
-                        self.handler_id, s.name, s.id, self.admin_id
+                        "[{}] Secret '{}({})' deleted by admin_id={}, with {:?}",
+                        self.handler_id, s.name, s.id, self.admin_id, removed
                     );
-                    let event = Audit::saved(Object::Secret, Change::Deleted, &s.name, s.id);
+                    let event = Audit::deleted(Object::Secret, &s.name, s.id, removed);
                     self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
                     self.log.record(event).await;
                     self.refresh_data().await;
@@ -490,22 +500,25 @@ where
                 if let Some(c) = self.items.get_casbin_name(idx) {
                     let result = self.backend.db_repository().delete_casbin_name(c.id).await;
 
-                    if let Err(e) = result {
-                        self.message = Some(Message::Error(vec![
-                            self.lang.strings().internal_error.into(),
-                        ]));
-                        warn!(
-                            "[{}] Delete casbin name '{}({})' failed by admin_id={}: {}",
-                            self.handler_id, c.name, c.id, self.admin_id, e
-                        );
-                        return;
-                    }
+                    let removed = match result {
+                        Ok(removed) => removed.unwrap_or_default(),
+                        Err(e) => {
+                            self.message = Some(Message::Error(vec![
+                                self.lang.strings().internal_error.into(),
+                            ]));
+                            warn!(
+                                "[{}] Delete casbin name '{}({})' failed by admin_id={}: {}",
+                                self.handler_id, c.name, c.id, self.admin_id, e
+                            );
+                            return;
+                        }
+                    };
 
                     info!(
-                        "[{}] Casbin name '{}({})' deleted by admin_id={}",
-                        self.handler_id, c.name, c.id, self.admin_id
+                        "[{}] Casbin name '{}({})' deleted by admin_id={}, with {:?}",
+                        self.handler_id, c.name, c.id, self.admin_id, removed
                     );
-                    let event = Audit::saved(Object::Group, Change::Deleted, &c.name, c.id);
+                    let event = Audit::deleted(Object::Group, &c.name, c.id, removed);
                     self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
                     self.log.record(event).await;
                     self.refresh_data().await;
@@ -515,6 +528,22 @@ where
             SelectedTab::RoleHierarchy => unreachable!(),
             SelectedTab::TargetGroup => unreachable!(),
             SelectedTab::ActionGroup => unreachable!(),
+        }
+    }
+
+    /// What deleting the row at `idx` would take along. A permission is a
+    /// rule itself, and nothing names it.
+    async fn dependents(&self, idx: usize) -> Result<Dependents, Error> {
+        let id = match self.selected_tab {
+            SelectedTab::Users => self.items.get_user(idx).map(|u| u.id),
+            SelectedTab::Targets => self.items.get_target(idx).map(|t| t.id),
+            SelectedTab::Secrets => self.items.get_secret(idx).map(|s| s.id),
+            SelectedTab::CasbinNames => self.items.get_casbin_name(idx).map(|c| c.id),
+            _ => None,
+        };
+        match id {
+            Some(id) => self.backend.db_repository().dependents(id).await,
+            None => Ok(Dependents::default()),
         }
     }
 
@@ -630,7 +659,19 @@ where
                                 let idx = self.table.state.selected().unwrap();
 
                                 if self.could_delete(idx) {
-                                    self.popup = Popup::Delete(idx);
+                                    match self.dependents(idx).await {
+                                        Ok(d) => self.popup = Popup::Delete(idx, d),
+                                        Err(e) => {
+                                            self.message = Some(Message::Error(vec![
+                                                self.lang.strings().internal_error.into(),
+                                            ]));
+                                            warn!(
+                                                "[{}] Counting what a delete takes failed: {}",
+                                                self.handler_id, e
+                                            );
+                                            self.clear_form();
+                                        }
+                                    }
                                 } else {
                                     self.clear_form();
                                 }
@@ -662,7 +703,7 @@ where
                             warn!("[{}] Failed to edit: {}", self.handler_id, e);
                         }
                     }
-                    Popup::Delete(i) => match key.code {
+                    Popup::Delete(i, _) => match key.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') => {
                             self.do_delete(i).await;
                         }
@@ -1240,13 +1281,23 @@ where
                 Editor::CasbinGroup(_) => unreachable!(),
                 Editor::None => unreachable!(),
             },
-            Popup::Delete(_) => {
+            Popup::Delete(_, removes) => {
+                let lines = |question: &str| {
+                    let mut lines = vec![question.to_string()];
+                    let items = dependents_items(&removes, tr);
+                    if !items.is_empty() {
+                        lines.push(String::new());
+                        lines.push(tr.also_removes.to_string());
+                        lines.extend(items);
+                    }
+                    lines
+                };
                 match self.selected_tab {
                     SelectedTab::Users => {
                         render_confirm_dialog(
                             popup_area,
                             frame.buffer_mut(),
-                            &[tr.delete_user_q.to_string()],
+                            &lines(tr.delete_user_q),
                             self.theme,
                             tr,
                         );
@@ -1255,7 +1306,7 @@ where
                         render_confirm_dialog(
                             popup_area,
                             frame.buffer_mut(),
-                            &[tr.delete_target_q.to_string()],
+                            &lines(tr.delete_target_q),
                             self.theme,
                             tr,
                         );
@@ -1264,7 +1315,7 @@ where
                         render_confirm_dialog(
                             popup_area,
                             frame.buffer_mut(),
-                            &[tr.delete_secret_q.to_string()],
+                            &lines(tr.delete_secret_q),
                             self.theme,
                             tr,
                         );
@@ -1273,7 +1324,7 @@ where
                         render_confirm_dialog(
                             popup_area,
                             frame.buffer_mut(),
-                            &[tr.delete_permission_q.to_string()],
+                            &lines(tr.delete_permission_q),
                             self.theme,
                             tr,
                         );
@@ -1282,7 +1333,7 @@ where
                         render_confirm_dialog(
                             popup_area,
                             frame.buffer_mut(),
-                            &[tr.delete_group_q.to_string()],
+                            &lines(tr.delete_group_q),
                             self.theme,
                             tr,
                         );

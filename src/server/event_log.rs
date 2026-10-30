@@ -21,6 +21,7 @@
 //! fail an administrative action that already succeeded.
 
 use crate::database::Uuid;
+use crate::database::models::Dependents;
 use crate::i18n::Strings;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -143,6 +144,10 @@ pub(crate) enum Audit {
         /// Empty for a permission, which has no name.
         name: String,
         id: String,
+        /// What a delete took along. Left out of the row when nothing went,
+        /// which is every row from before it was recorded.
+        #[serde(default, skip_serializing_if = "Dependents::is_empty")]
+        removed: Dependents,
     },
     RoleGranted {
         role: String,
@@ -242,6 +247,23 @@ impl Audit {
             change,
             name: name.to_string(),
             id: id.to_string(),
+            removed: Dependents::default(),
+        }
+    }
+
+    /// A delete, with what went along with the row.
+    pub(crate) fn deleted(
+        object: Object,
+        name: &str,
+        id: impl std::fmt::Display,
+        removed: Dependents,
+    ) -> Self {
+        Audit::Saved {
+            object,
+            change: Change::Deleted,
+            name: name.to_string(),
+            id: id.to_string(),
+            removed,
         }
     }
 
@@ -314,6 +336,7 @@ impl Audit {
                 change,
                 name,
                 id,
+                removed,
             } => {
                 use {Change::*, Object::*};
                 let t = match (object, change) {
@@ -333,7 +356,8 @@ impl Audit {
                     (Group, Updated) => tr.a_group_updated,
                     (Group, Deleted) => tr.a_group_deleted,
                 };
-                fill!(t, name = plain(&labelled(name, id)), id = plain(id))
+                let event = fill!(t, name = plain(&labelled(name, id)), id = plain(id));
+                with_dependents(event, removed, tr)
             }
             Audit::RoleGranted { role, user } => {
                 fill!(tr.a_role_granted, role = plain(role), user = plain(user))
@@ -467,17 +491,23 @@ impl Audit {
             Audit::Saved {
                 object: Object::Permission,
                 change,
+                removed,
                 ..
-            } => match change {
-                Change::Added => tr.permission_added,
-                Change::Updated => tr.permission_updated,
-                Change::Deleted => tr.permission_deleted,
-            }
-            .to_string(),
+            } => with_dependents(
+                match change {
+                    Change::Added => tr.permission_added,
+                    Change::Updated => tr.permission_updated,
+                    Change::Deleted => tr.permission_deleted,
+                }
+                .to_string(),
+                removed,
+                tr,
+            ),
             Audit::Saved {
                 object,
                 change,
                 name,
+                removed,
                 ..
             } => {
                 use {Change::*, Object::*};
@@ -496,7 +526,7 @@ impl Audit {
                     (Group, Deleted) => tr.a_group_deleted,
                     (Permission, _) => unreachable!("matched above"),
                 };
-                fill!(t, name = plain(name))
+                with_dependents(fill!(t, name = plain(name)), removed, tr)
             }
             other => other.text(tr),
         }
@@ -512,6 +542,30 @@ impl MemberKind {
             MemberKind::Group => tr.kind_group,
         }
     }
+}
+
+/// What a delete takes along, one `dep_item` per kind that is not zero.
+pub(crate) fn dependents_items(d: &Dependents, tr: &Strings) -> Vec<String> {
+    use crate::fill;
+    [
+        (tr.dep_bindings, d.bindings),
+        (tr.dep_memberships, d.memberships),
+        (tr.dep_permissions, d.permissions),
+    ]
+    .into_iter()
+    .filter(|(_, n)| *n > 0)
+    .map(|(label, count)| fill!(tr.dep_item, label = label, count = count))
+    .collect()
+}
+
+/// `event`, followed by what went with it when anything did.
+fn with_dependents(event: String, d: &Dependents, tr: &Strings) -> String {
+    use crate::fill;
+    if d.is_empty() {
+        return event;
+    }
+    let items = dependents_items(d, tr).join(tr.list_separator);
+    fill!(tr.a_deleted_with, event = event, items = items)
 }
 
 /// A stored `detail` as a sentence in `tr`'s language. A row that is not an
@@ -708,6 +762,49 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A delete records what went with the row, and says so in the log and
+    /// the dialog. A row without it, as every row before it, reads as it did.
+    #[test]
+    fn a_delete_says_what_went_with_it() {
+        let removed = Dependents {
+            bindings: 4,
+            memberships: 3,
+            permissions: 0,
+        };
+        let event = Audit::deleted(Object::Target, "sun", "id1", removed);
+        let row = event.encode();
+        assert_eq!(
+            row,
+            r#"{"event":"saved","object":"target","change":"deleted","name":"sun","id":"id1","removed":{"bindings":4,"memberships":3,"permissions":0}}"#
+        );
+        assert_eq!(
+            render(&row, Lang::En.strings()),
+            "Target 'sun(id1)' deleted; also removed Bindings: 4, Group memberships: 3"
+        );
+        assert_eq!(
+            event.notice(Lang::En.strings()),
+            "Target 'sun' deleted; also removed Bindings: 4, Group memberships: 3"
+        );
+        for lang in Lang::ALL {
+            let tr = lang.strings();
+            for shown in [render(&row, tr), event.notice(tr)] {
+                assert!(
+                    shown.contains('4') && shown.contains('3') && !shown.contains('{'),
+                    "{lang}: {shown}"
+                );
+            }
+        }
+
+        let nothing = Audit::deleted(Object::Target, "sun", "id1", Dependents::default());
+        assert_eq!(
+            nothing.encode(),
+            Audit::saved(Object::Target, Change::Deleted, "sun", "id1").encode()
+        );
+        assert_eq!(en(&nothing), "Target 'sun(id1)' deleted");
+        let old = r#"{"event":"saved","object":"user","change":"deleted","name":"bob","id":"7"}"#;
+        assert_eq!(render(old, Lang::En.strings()), "User 'bob(7)' deleted");
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::error::ServerError;
+use log::warn;
 use {
     crate::database::models::{CasbinRule, CasbinRuleGroup, GroupType},
     petgraph::stable_graph::{NodeIndex, StableDiGraph},
@@ -250,6 +251,18 @@ fn build_graph(
     let mut g = StableDiGraph::<RuleNode, ()>::new();
 
     for r in rules.into_iter() {
+        // An end with no label names a row that was deleted, from before deletes
+        // took their rules with them. It can match nothing, so the rule is
+        // dropped rather than keeping the server from starting.
+        if (r.v0_object_label.is_none() && r.v0_group_label.is_none())
+            || (r.v1_object_label.is_none() && r.v1_group_label.is_none())
+        {
+            warn!(
+                "Skipping casbin_rule {}: it names a deleted row (v0={}, v1={})",
+                r.id, r.v0, r.v1
+            );
+            continue;
+        }
         let r_v0 = r.v0;
         let r_v1 = r.v1;
         let (v0_rg, v1_rg) = RuleNode::from(r)?;

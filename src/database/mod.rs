@@ -26,9 +26,9 @@ use crate::{
 };
 use async_trait::async_trait;
 use models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, EventLog, GroupType, NamePtype, ObjectGroup,
-    PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo, SessionRecording, Target,
-    TargetInfo, TargetSecret, TargetSecretName, User,
+    CasbinName, CasbinRule, CasbinRuleGroup, Dependents, EventLog, GroupType, NamePtype,
+    ObjectGroup, PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo,
+    SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName, User,
 };
 pub use uuid::Uuid;
 
@@ -145,12 +145,11 @@ pub trait DatabaseRepository: Send + Sync {
     /// editing from it.
     async fn update_user(&self, user: user::ActiveModel) -> Result<User, Error>;
 
-    /// Delete a user; `false` when no such row.
+    /// Delete a user, returning what went with it; `None` when no such row.
     ///
-    /// Rows that reference the user by id — `casbin_rule.v1` bindings, logs,
-    /// recordings — are not cleaned up, and no foreign key does it either. See
-    /// the note on [`Self::delete_casbin_name`].
-    async fn delete_user(&self, id: Uuid) -> Result<bool, Error>;
+    /// The `casbin_rule` rows naming the user go with it, in one transaction.
+    /// Logs and recordings keep the id: they are history.
+    async fn delete_user(&self, id: Uuid) -> Result<Option<Dependents>, Error>;
 
     /// All users, ordered by username.
     async fn list_users(&self, active_only: bool) -> Result<Vec<User>, Error>;
@@ -200,11 +199,11 @@ pub trait DatabaseRepository: Send + Sync {
     /// Apply a partial update and return the whole stored row.
     async fn update_target(&self, target: target_entity::ActiveModel) -> Result<Target, Error>;
 
-    /// Delete a target; `false` when no such row.
+    /// Delete a target, returning what went with it; `None` when no such row.
     ///
-    /// `target_secret` rows do have a real cascading foreign key here, so the
-    /// bindings go with it — unlike the `casbin_rule` rows that referenced them.
-    async fn delete_target(&self, id: Uuid) -> Result<bool, Error>;
+    /// Its bindings go with it, and the `casbin_rule` rows naming them, in one
+    /// transaction. The foreign key would cascade the bindings but not the rules.
+    async fn delete_target(&self, id: Uuid) -> Result<Option<Dependents>, Error>;
 
     /// All targets, ordered by name.
     async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, Error>;
@@ -247,8 +246,10 @@ pub trait DatabaseRepository: Send + Sync {
         active_only: bool,
     ) -> Result<Option<Secret>, Error>;
 
-    /// Delete a secret; `false` when no such row.
-    async fn delete_secret(&self, id: Uuid) -> Result<bool, Error>;
+    /// Delete a secret, returning what went with it; `None` when no such row.
+    ///
+    /// Takes its bindings and their rules along, as [`Self::delete_target`] does.
+    async fn delete_secret(&self, id: Uuid) -> Result<Option<Dependents>, Error>;
 
     /// Every secret, each flagged with whether it is bound to `target_id`.
     ///
@@ -283,12 +284,20 @@ pub trait DatabaseRepository: Send + Sync {
         target_secret: target_secret_entity::ActiveModel,
     ) -> Result<TargetSecret, Error>;
 
-    /// Delete a binding by id; `false` when no such row.
+    /// Delete a binding by id, and the `casbin_rule` rows naming it, returning
+    /// what went with it; `None` when no such row.
     ///
     /// No in-tree caller: the bind screen deactivates through
     /// [`Self::upsert_target_secret`] instead of deleting, which keeps
     /// `updated_by` as an audit trail.
-    async fn delete_target_secret(&self, id: Uuid) -> Result<bool, Error>;
+    async fn delete_target_secret(&self, id: Uuid) -> Result<Option<Dependents>, Error>;
+
+    /// What deleting `id` would take with it, counted without deleting: the
+    /// bindings of a target or secret, and the rules naming the row or those
+    /// bindings. The delete itself returns what it did take, which can differ
+    /// if another admin changes something in between. Shown in the confirm
+    /// dialog, so an admin is not surprised by permissions going too.
+    async fn dependents(&self, id: Uuid) -> Result<Dependents, Error>;
 
     /// Bind a target to a secret, or flip an existing binding's `is_active`.
     ///
@@ -403,17 +412,17 @@ pub trait DatabaseRepository: Send + Sync {
     async fn update_casbin_name(&self, name: casbin_name::ActiveModel)
     -> Result<CasbinName, Error>;
 
-    /// Delete a name; `false` when no such row.
+    /// Delete a name, returning what went with it; `None` when no such row.
     ///
     /// Refuses internal names with
     /// [`error::DatabaseError::InternalTypeModification`], since the startup path
     /// resolves those by name and would not find them again.
     ///
-    /// Deleting a non-internal name does **not** delete the `casbin_rule` rows
-    /// that reference it, and `casbin_rule` carries no foreign key to cascade
-    /// (`v0`/`v1` are polymorphic). Those rules are left pointing at a missing
-    /// name, which the label-resolving readers cannot render.
-    async fn delete_casbin_name(&self, id: Uuid) -> Result<bool, Error>;
+    /// Deleting a non-internal name deletes the `casbin_rule` rows naming it, in
+    /// one transaction. `casbin_rule` has no foreign key to cascade, because
+    /// `v0`–`v2` are polymorphic. Rules left dangling by older versions are
+    /// skipped by the label-resolving readers and by the role graphs.
+    async fn delete_casbin_name(&self, id: Uuid) -> Result<Option<Dependents>, Error>;
 
     /// Look up one name by its text, the reverse direction of this table.
     ///

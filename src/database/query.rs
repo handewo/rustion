@@ -15,6 +15,7 @@
 //! * **`GROUP_CONCAT`** — PostgreSQL spells it `STRING_AGG` with different
 //!   argument order. The rows are folded into a map instead.
 
+use log::warn;
 use std::collections::HashMap;
 
 use sea_orm::sea_query::{Condition, Expr, ExprTrait, IntoCondition, JoinType};
@@ -738,29 +739,35 @@ pub(super) async fn list_permission_polices(
 
     Ok(rules
         .into_iter()
-        .map(|r| {
+        .filter_map(|r| {
             // `casbin_names` first, then `users` — the union's order.
             let user_role = names
                 .get(&r.v0)
                 .map(|n| n.name.clone())
-                .or_else(|| usernames.get(&r.v0).cloned())
-                .unwrap();
+                .or_else(|| usernames.get(&r.v0).cloned());
 
             // target_secret labels first, then `casbin_names`.
             let target_group = parts
                 .get(&r.v1)
                 .map(|p| p.full_label())
-                .or_else(|| names.get(&r.v1).map(|n| n.name.clone()))
-                .unwrap();
+                .or_else(|| names.get(&r.v1).map(|n| n.name.clone()));
 
-            let action_group = names.get(&r.v2).map(|n| n.name.clone()).unwrap();
+            let action_group = names.get(&r.v2).map(|n| n.name.clone());
 
-            PermissionPolicy {
+            // A policy naming a deleted row grants nothing and has no label.
+            let (Some(user_role), Some(target_group), Some(action_group)) =
+                (user_role, target_group, action_group)
+            else {
+                warn!("Skipping policy {}: it names a deleted row", r.id);
+                return None;
+            };
+
+            Some(PermissionPolicy {
                 rule: CasbinRule::from(r),
                 user_role,
                 target_group,
                 action_group,
-            }
+            })
         })
         .collect())
 }
