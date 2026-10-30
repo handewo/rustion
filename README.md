@@ -26,6 +26,8 @@ Rustion implements this concept with modern Rust technologies, offering security
 - **Session Recording** - Record SSH sessions in Asciinema v3 format for auditing and replay
 - **Brute-force Protection** - Rate limiting and slow rejection responses to deter attacks
 - **Connection Pooling** - Reuse target connections for improved performance
+- **SQLite, PostgreSQL and MySQL** - Pick the database with a connection URL; the schema is created on first start
+- **Audit Trail** - Logins, admin changes, target requests and SFTP operations are recorded in `event_log`, and shown in the reader's language
 
 ### 👥 Role-Based Access Control (RBAC)
 
@@ -52,6 +54,8 @@ A full-featured terminal user interface for administration:
 - Role and permission assignment
 - Policy binding management
 - Session recording viewer
+- Eight interface languages and five colour themes, switchable in any panel
+- Deletes list what goes with the row (bindings, group memberships, permissions) before you confirm
 
 ![TUI](assets/vhs/manage.gif)
 
@@ -84,6 +88,24 @@ A full-featured terminal user interface for administration:
 ![Role Hierarchy](assets/vhs/role_hierarchy.gif)
 
 </details>
+
+### 🌐 Languages and Themes
+
+The admin panels, the session player, the target selector and the password prompt are translated into English (`en`), Simplified Chinese (`zh-CN`), Traditional Chinese (`zh-TW`), Japanese (`ja`), Russian (`ru`), French (`fr`), Spanish (`es`) and Brazilian Portuguese (`pt-BR`).
+
+A session picks its language from the client's locale, read from `LC_ALL`, then `LC_MESSAGES`, then `LANG`. OpenSSH sends these with `SendEnv`, which many distributions already enable for `LANG` and `LC_*`. To choose one explicitly:
+
+```bash
+ssh -o SetEnv=LANG=zh_CN.UTF-8 -p 2222 admin@admin@localhost
+```
+
+If the client sends no locale, or one without a translation, the `language` setting applies. Other environment variables are refused.
+
+Themes are `default` (keeps the terminal's own colours), `oled-black`, `oled-white`, `nord` and `gruvbox`.
+
+In any panel, `t` cycles the theme and `L` cycles the language; the admin shell keeps the choice from one panel to the next.
+
+Audit rows are stored in no language and worded when they are shown, so each admin reads the log in their own language.
 
 ### 📁 SFTP
 
@@ -138,10 +160,6 @@ By the same rule, a path rule says nothing about other kinds of request. On a po
 - SFTP extensions (`posix-rename`, `hardlink`, ...) are not supported.
 - Requests are processed one at a time.
 
-**Upgrading** - Missing internal actions are created at startup with a warning. Until policies grant them, SFTP operations are denied: a grant of `__internal_action_sftp` alone from an earlier build opens a session in which everything is denied.
-
-**Downgrading** - Older builds ignore `sftp_path`, so a path-restricted policy becomes unrestricted. Remove such policies first. Older builds also cannot display `sftp` audit rows.
-
 ---
 
 ## 🔨 Build from source
@@ -166,6 +184,22 @@ cargo run
 ```
 
 ![Initialize Rustion](assets/vhs/init.gif)
+
+### Configuration
+
+`cargo run -- --generate-config` writes a default `rustion.toml`. The database, theme and language settings:
+
+```toml
+# sea-orm connection URL; the scheme picks the driver
+database = "sqlite://rustion.db?mode=rwc"   # mode=rwc creates the file if missing
+# database = "postgres://rustion:password@localhost:5432/rustion"
+# database = "mysql://rustion:password@localhost:3306/rustion"
+
+theme = "default"   # default, oled-black, oled-white, nord, gruvbox
+language = "en"     # used when the client sends no locale
+```
+
+Percent-encode reserved characters in a database password (`@` becomes `%40`). The password is masked wherever the URL is logged.
 
 ### Connecting as Admin
 
@@ -203,7 +237,6 @@ ssh -p 2222 user@root@target@localhost
 
 ## 🗺️ Roadmap / Goals
 
-- Support for additional databases (MySQL, PostgreSQL)
 - Integration with external authentication systems (SSO, LDAP, OIDC)
 - Support for more target types:
   - Kubernetes pods

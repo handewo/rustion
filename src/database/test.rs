@@ -1080,10 +1080,10 @@ async fn rule_group_labels_hold_exactly_one_label_per_side() {
     // 85 bindings plus the two internal objects in `tg_selfservice`.
     assert_eq!(bindings.len(), TARGET_SECRETS + 2);
     // `user@target:port`, with the off-default port carried through.
-    assert_eq!(bindings["mon@mars1:22"], TG_MARS_WEB);
-    assert_eq!(bindings["mon@mars6:22"], TG_MARS_DB);
-    assert_eq!(bindings["root@sun:2222"], TG_SUN);
-    assert_eq!(bindings["mon@jupiter5:65535"], TG_JUPITER);
+    assert_eq!(bindings["mon@mars1"], TG_MARS_WEB);
+    assert_eq!(bindings["mon@mars6"], TG_MARS_DB);
+    assert_eq!(bindings["root@sun"], TG_SUN);
+    assert_eq!(bindings["mon@jupiter5"], TG_JUPITER);
     assert_eq!(bindings[OBJ_PLAYER], TG_SELFSERVICE);
 
     let nesting: HashSet<(String, String)> = g2
@@ -1895,10 +1895,10 @@ async fn pickers_list_objects_then_groups() {
         .iter()
         .map(|o| o.name.as_str())
         .collect();
-    assert!(labels.contains("root(s_root)@sun:2222"));
-    assert!(labels.contains("mon(s_mon)@jupiter5:65535"));
+    assert!(labels.contains("root(s_root)@sun"));
+    assert!(labels.contains("mon(s_mon)@jupiter5"));
     assert!(
-        labels.contains("dev(s_dev)@venus1:22"),
+        labels.contains("dev(s_dev)@venus1"),
         "inactive rows still list"
     );
 
@@ -1997,7 +1997,7 @@ async fn permission_policies_resolve_every_column_source() {
         (R_AUDIT, TG_JUPITER, ACT_EXEC),
         // v0 is a username and v1 is a composed binding label — neither resolves
         // through a `casbin_name`.
-        (DAISY, "mon(s_mon)@sun:2222", ACT_SHELL),
+        (DAISY, "mon(s_mon)@sun", ACT_SHELL),
         (R_VENDOR, TG_VENUS, AG_INTERACTIVE),
         (R_STAFF, TG_SELFSERVICE, AG_ALL),
     ];

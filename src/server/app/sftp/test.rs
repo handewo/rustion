@@ -247,7 +247,7 @@ impl Env {
             user_id: self.user,
             client_ip: None,
             object: self.object,
-            label: "sun(test) as mon".into(),
+            label: "mon@sun(test)".into(),
             actions: SftpActions::from_lookup(|n| self.act(n)),
             backend: self.server.clone(),
             log: EventLogger::new(
@@ -576,7 +576,7 @@ async fn audit_rows_cover_files_mutations_denials_and_session_end() {
 
     let rows = env.rows(6).await;
     assert!(
-        rows[0].starts_with("sftp session started on sun(test) as mon"),
+        rows[0].starts_with("sftp session started on mon@sun(test)"),
         "{rows:?}"
     );
     assert_eq!(rows[1], r#"sftp wrote "/home/u/up" (512 bytes)"#);

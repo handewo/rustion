@@ -48,22 +48,21 @@ struct TargetSecretParts {
     secret_user: String,
     secret_name: String,
     target_name: String,
-    port: i32,
 }
 
 impl TargetSecretParts {
     /// `user@target:port` — matches the former
-    /// `s.user || '@' || t.name || ':' || t.port`.
+    /// `s.user || '@' || t.name`.
     fn short_label(&self) -> String {
-        format!("{}@{}:{}", self.secret_user, self.target_name, self.port)
+        format!("{}@{}", self.secret_user, self.target_name,)
     }
 
     /// `user(name)@target:port` — matches the former
-    /// `s.user || '(' || s.name || ')' || '@' || t.name || ':' || t.port`.
+    /// `s.user || '(' || s.name || ')' || '@' || t.name`.
     fn full_label(&self) -> String {
         format!(
-            "{}({})@{}:{}",
-            self.secret_user, self.secret_name, self.target_name, self.port
+            "{}({})@{}",
+            self.secret_user, self.secret_name, self.target_name,
         )
     }
 }
@@ -81,7 +80,6 @@ async fn target_secret_parts(db: &DatabaseConnection) -> Result<Vec<TargetSecret
         .column_as(secret::Column::User, "secret_user")
         .column_as(secret::Column::Name, "secret_name")
         .column_as(target::Column::Name, "target_name")
-        .column_as(target::Column::Port, "port")
         .join(JoinType::LeftJoin, target_secret::Relation::Target.def())
         .join(JoinType::LeftJoin, target_secret::Relation::Secret.def())
         .order_by_asc(target::Column::Name)

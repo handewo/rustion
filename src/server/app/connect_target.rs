@@ -260,11 +260,16 @@ where
         Ok(true)
     }
 
-    /// For the SFTP proxy's log lines and audit rows: `web1(<uuid>) as deploy`.
-    pub(crate) fn target_label(&self) -> String {
-        format!(
-            "{}({}) as {}",
-            self.target.name, self.target.id, self.target_secret_name.secret_user
+    /// For the log lines and audit rows of target requests and the SFTP
+    /// proxy: `deploy@web1(<binding uuid>)`, the binding the session goes
+    /// through.
+    fn binding_label(&self) -> String {
+        labelled(
+            &session_recording::compose_label(
+                &self.target_secret_name.secret_user,
+                &self.target.name,
+            ),
+            self.target_secret_name.id,
         )
     }
 
@@ -274,7 +279,7 @@ where
             user_id: self.user_id,
             client_ip: self.client_ip,
             object: self.target_secret_name.id,
-            label: self.target_label(),
+            label: self.binding_label(),
             actions,
             backend: self.backend.clone(),
             log: self.log.scoped(EventKind::Sftp),
@@ -529,7 +534,7 @@ where
         ))?;
         let (mut read_half, write_half) = target_channel.split();
 
-        let move_target = self.target.clone();
+        let binding = self.binding_label();
 
         let request_str = request.to_string();
         match request {
@@ -603,7 +608,7 @@ where
             let _ = handle.close(channel).await;
             log.record(Audit::TargetRequest {
                 request: request_str,
-                target: labelled(&move_target.name, move_target.id),
+                target: binding,
                 closed: true,
             })
             .await;
@@ -612,7 +617,7 @@ where
         self.log
             .record(Audit::TargetRequest {
                 request: request.to_string(),
-                target: labelled(&self.target.name, self.target.id),
+                target: self.binding_label(),
                 closed: false,
             })
             .await;
