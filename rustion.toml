@@ -81,3 +81,12 @@ record_path = "./record"
 # database = "postgres://rustion:password@localhost:5432/rustion"
 # database = "mysql://rustion:password@localhost:3306/rustion"
 database = "sqlite://rustion.db?mode=rwc"
+
+# How often to re-read the permission rules (`casbin_rule`) from the database.
+# Permission checks answer from a copy of the rules held in memory. Changes made
+# in the admin TUI apply as they are saved, and `flush_privileges` in the admin
+# shell reloads the copy on demand. A change made any other way, such as by a
+# second rustion process on the same database or by SQL run by hand, applies at
+# the next reload; this bounds how long that takes.
+# Default: 0s (off)
+# policy_reload_interval = "1m"

@@ -114,7 +114,10 @@ pub(super) trait HandlerBackend: Send + Clone {
     fn language(&self) -> crate::i18n::Lang;
 
     fn set_password(&self, user: &mut user::ActiveModel, password: &str) -> Result<(), Error>;
-    fn load_role_manager(&self) -> impl Future<Output = Result<(), Error>> + Send;
+    /// Reload the role graphs and policies `enforce` answers from. Every
+    /// write to `casbin_rule`, deletes that take rules along included, must
+    /// be followed by this, or the change does not apply.
+    fn reload_policies(&self) -> impl Future<Output = Result<(), Error>> + Send;
 
     fn get_graph(
         &self,

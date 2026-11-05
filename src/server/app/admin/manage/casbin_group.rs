@@ -320,8 +320,8 @@ where
     }
 
     async fn refreash_data(&mut self) {
-        if let Err(e) = self.backend.load_role_manager().await {
-            error!("[{}] Load role manager error: {}", self.handler_id, e);
+        if let Err(e) = self.backend.reload_policies().await {
+            error!("[{}] Reload policies error: {}", self.handler_id, e);
             self.message = Some(Message::Error(vec![self.tr.internal_error.into()]));
         }
         let (state, items, selector_items) = match CasbinGroupEditor::build_tree(

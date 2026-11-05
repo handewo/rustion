@@ -239,6 +239,7 @@ impl Env {
             })
             .await
             .expect("grant");
+        self.server.reload_policies().await.expect("reload");
     }
 
     fn ctx(&self) -> SftpContext<BastionServer> {

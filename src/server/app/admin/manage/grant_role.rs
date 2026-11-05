@@ -172,7 +172,7 @@ where
                 t.casbin_rule_id = Some(cr.id);
             }
         }
-        self.backend.load_role_manager().await?;
+        self.backend.reload_policies().await?;
         Ok(())
     }
 

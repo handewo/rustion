@@ -32,14 +32,14 @@ main.rs → cli.rs (clap) → Config (TOML) → BastionServer::with_config()
 
 ### Key Modules
 
-- **`server/casbin.rs`** — Custom lightweight Casbin RBAC engine (~550 LOC) using `petgraph` for role hierarchy. Supports time-of-day, IP CIDR, and expiry constraints via `ExtendPolicy`. Rule types: `p` (policy), `g1` (user→role), `g2` (secret→group), `g3` (action→group).
+- **`server/casbin.rs`** — Custom lightweight Casbin RBAC engine (~550 LOC) using `petgraph` for role hierarchy. `Snapshot` holds the role graphs and the `p` rules, each with its `v3` compiled; `BastionServer` keeps one and swaps it whole on `reload_policies`, which every write to `casbin_rule` must call. Supports time-of-day, IP CIDR, and expiry constraints via `ExtendPolicy`. Rule types: `p` (policy), `g1` (user→role), `g2` (secret→group), `g3` (action→group).
 - **`database/`** — sea-orm 2.0 on SQLite, PostgreSQL, and MySQL. Repository pattern with `DatabaseRepository` trait (50+ async methods), backed by a single backend-agnostic `SeaOrmRepository` (`repository.rs`) — sea-orm picks the driver from the connection URL, so there is no per-backend impl. Factory: `create_repository()`.
   - `entity/` — sea-orm entities (one module per table, struct must be named `Model`). Storage shape only.
   - `models/` — domain types with validation and behaviour, plus `From<entity::Model>`/`into_active_model()` conversions. Deliberately separate from entities: `DeriveEntityModel` requires the name `Model`, and the boundary is where backend quirks are absorbed (e.g. `port` is `i32` in storage because sea-orm cannot read `u16` on PostgreSQL, but `u16` on `Target`).
   - `query.rs` — joins, aggregation, and composed display labels. Built through the query builder for dialect portability; string concatenation and `GROUP_CONCAT` are done in Rust because they have no portable SQL spelling.
   - Deletes take what cannot outlive the row in one transaction: a target's or secret's bindings, and every `casbin_rule` naming the row or those bindings (`v0`–`v2` are polymorphic, so no foreign key can). `dependents(id)` counts the same set without deleting, for the confirm dialog; the delete returns what it took, which goes into the audit row. The role graphs skip rules left dangling by older versions.
   - Schema is created by `SchemaBuilder::sync()` (feature `schema-sync`), skipped when all tables already exist.
-- **`server/bastion_server.rs`** — Implements `russh::server::Server`. Holds config, database service, connection/rate-limit caches (moka), and the Casbin role manager.
+- **`server/bastion_server.rs`** — Implements `russh::server::Server`. Holds config, database service, connection/rate-limit caches (moka), and the `casbin::Snapshot` of role graphs and policies that `enforce` reads.
 - **`server/bastion_handler.rs`** — Implements `russh::server::Handler`. Per-connection state machine routing I/O to the active `Application`.
 - **`server/app/sftp/`** — SFTP proxy: per-operation actions (`SftpActions`), regex `sftp_path` rules in `ExtendPolicy`, lexical path resolution against the target's home, handle table, audit rows under `EventKind::Sftp`.
 - **`server/app/admin/`** — TUI admin interface using ratatui + reedline. CRUD for users, targets, secrets, roles, permissions, and bindings.
@@ -79,6 +79,12 @@ terminal's own background and text colour; the others paint every cell.
 locale: `en` (the default), `zh-CN`, `zh-TW`, `ja`, `ru`, `fr`, `es` or `pt-BR`.
 A client that sends `LC_ALL`, `LC_MESSAGES` or `LANG` (OpenSSH's `SendEnv`)
 naming one of these gets it instead; other environment variables are refused.
+
+`policy_reload_interval` (e.g. `"1m"`; `"0s"`, the default, is off) re-reads `casbin_rule`
+on a timer. `enforce` answers from an in-memory `casbin::Snapshot` of the role
+graphs and the `p` rules, with each `v3` parsed once; the admin TUI reloads it
+after every write to `casbin_rule`, so only changes made outside this process
+need the timer.
 
 `database` is a sea-orm connection URL, passed to sea-orm verbatim. The scheme
 selects the driver, so it is the whole of the backend choice

@@ -1,13 +1,117 @@
 use crate::database::Uuid;
 use crate::error::Error;
 use crate::server::error::ServerError;
-use log::warn;
+use crate::server::extend_policy::{CompiledExtendPolicy, ExtendPolicyReq, verify_extend_policy};
+use log::{trace, warn};
 use {
     crate::database::models::{CasbinRule, CasbinRuleGroup, GroupType},
     petgraph::stable_graph::{NodeIndex, StableDiGraph},
     petgraph::visit::{Bfs, Walker},
     std::collections::HashMap,
 };
+
+/// Everything a permission check is decided from: the three role graphs and
+/// the `p` rules, read from `casbin_rule` together.
+///
+/// The server keeps one in memory, loaded at startup, and replaces it whole on
+/// every reload, so a check never pairs new policies with old graphs. Reloads
+/// come from the admin TUI after each write to `casbin_rule`, from
+/// `flush_privileges` in the admin shell, and, when `policy_reload_interval`
+/// is not zero, from a timer.
+pub struct Snapshot {
+    pub roles: RoleManage,
+    pub policies: Vec<Policy>,
+}
+
+/// A `p` rule, with its `v3` parsed once at load rather than on every check.
+pub struct Policy {
+    pub rule: CasbinRule,
+    /// `None` when `v3` does not parse or is invalid, and the policy then
+    /// grants nothing. The permission editor refuses such a `v3`, so it came
+    /// from SQL run by hand, or was saved before a check it now fails (the
+    /// per-pattern `sftp_path` regex check). Skipping the rule, rather than
+    /// failing the load, keeps one bad row from stopping the server from
+    /// starting and every reload from applying, a revoke's included.
+    ext: Option<CompiledExtendPolicy>,
+}
+
+impl Policy {
+    pub fn new(rule: CasbinRule) -> Self {
+        let ext = match CompiledExtendPolicy::parse(&rule.v3) {
+            Ok(ext) => Some(ext),
+            Err(e) => {
+                warn!(
+                    "Policy {} grants nothing: its extended policy {:?} is invalid: {}",
+                    rule.id, rule.v3, e
+                );
+                None
+            }
+        };
+        Self { rule, ext }
+    }
+}
+
+impl Snapshot {
+    pub fn new(roles: RoleManage, rules: Vec<CasbinRule>) -> Self {
+        Self {
+            roles,
+            policies: rules.into_iter().map(Policy::new).collect(),
+        }
+    }
+
+    /// The policies whose subject is `sub` or a role `sub` has.
+    pub fn match_sub(&self, sub: Uuid) -> impl Iterator<Item = &Policy> {
+        self.policies.iter().filter(move |p| {
+            p.rule.v0 == sub || self.roles.match_role(sub, p.rule.v0, GroupType::Subject)
+        })
+    }
+
+    /// Whether some policy grants `act` on `obj` to `sub` for this request.
+    ///
+    /// Only the rules are consulted. Whether `obj` is active is not in the
+    /// snapshot, so the caller checks that against the database.
+    pub fn grants(
+        &self,
+        sub: Uuid,
+        obj: Uuid,
+        act: Uuid,
+        ext: &ExtendPolicyReq,
+    ) -> Result<bool, Error> {
+        for pol in self.match_sub(sub) {
+            let rule = &pol.rule;
+            if !(rule.v1 == obj || self.roles.match_role(rule.v1, obj, GroupType::Object)) {
+                trace!(
+                    "Reject by object, sub: {}, obj: {}, policy: {:?}",
+                    sub, obj, rule
+                );
+                continue;
+            }
+            if !(rule.v2 == act || self.roles.match_role(rule.v2, act, GroupType::Action)) {
+                trace!(
+                    "Reject by action, sub: {}, act: {}, policy: {:?}",
+                    sub, act, rule
+                );
+                continue;
+            }
+            let Some(compiled) = &pol.ext else {
+                trace!(
+                    "Reject by invalid extend policy, sub: {}, policy: {:?}",
+                    sub, rule
+                );
+                continue;
+            };
+            if verify_extend_policy(ext, compiled)? {
+                trace!("Accept sub: {}, policy: {:?}", sub, rule);
+                return Ok(true);
+            }
+            trace!(
+                "Reject by extend policy, sub: {}, ext: {:?}, policy: {:?}",
+                sub, ext, rule
+            );
+        }
+        Ok(false)
+    }
+}
 
 pub struct RoleManage {
     h1: HashMap<Uuid, NodeIndex>,
@@ -131,13 +235,6 @@ impl RoleManage {
             GroupType::Object => self.g2.clone(),
             GroupType::Action => self.g3.clone(),
         }
-    }
-
-    pub fn match_sub(&self, policies: Vec<CasbinRule>, sub: Uuid) -> Vec<CasbinRule> {
-        policies
-            .into_iter()
-            .filter(|p| p.v0 == sub || self.match_role(sub, p.v0, GroupType::Subject))
-            .collect()
     }
 
     pub fn fetch_role_from_start(&self, start: Uuid, rt: GroupType) -> Vec<Uuid> {

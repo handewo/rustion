@@ -40,6 +40,37 @@ impl ExtendPolicy {
     }
 }
 
+/// An [`ExtendPolicy`] ready to check: parsed and validated once, with its
+/// `sftp_path` regexes compiled.
+///
+/// The server's policy snapshot (`casbin::Snapshot`) holds one per `p` rule,
+/// built when the rules are loaded, so a permission check neither parses JSON
+/// nor compiles a regex. What depends on the request is still decided per
+/// request: the address, the time window and the expiry are compared with
+/// each request's `ip` and `now`.
+#[derive(Debug)]
+pub struct CompiledExtendPolicy {
+    policy: ExtendPolicy,
+    sftp_path: Option<PathMatcher>,
+}
+
+impl CompiledExtendPolicy {
+    /// Parse a `casbin_rule.v3`. The permission editor checks `v3` with this
+    /// before saving it and the snapshot loads it with this, so a `v3` the
+    /// editor accepts is one the snapshot can use.
+    pub fn parse(ext_str: &str) -> Result<Self, Error> {
+        let policy: ExtendPolicy = serde_json::from_str(ext_str)?;
+        policy.validate().map_err(ServerError::ExtendPolicy)?;
+        let sftp_path = policy
+            .sftp_path
+            .as_ref()
+            .map(PathPolicy::compile)
+            .transpose()
+            .map_err(ServerError::ExtendPolicy)?;
+        Ok(Self { policy, sftp_path })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TimeWithOffset {
     pub time: NaiveTime,
@@ -159,9 +190,9 @@ impl PathPolicy {
         }
     }
 
-    /// Compiled per call: `enforce` already reads every policy from the
-    /// database per call, and these sets are a handful of short patterns.
-    fn compile(&self) -> Result<regex::RegexSet, ExtendPolicyError> {
+    /// Compiled once per load of the policies, into the
+    /// [`CompiledExtendPolicy`] that permission checks read.
+    fn compile(&self) -> Result<PathMatcher, ExtendPolicyError> {
         // Each pattern must be valid on its own. Checking only the wrapped form
         // is not enough: `x)|(.*` becomes `^(?:x)|(.*)$`, which compiles but is
         // an unanchored alternation that matches every path.
@@ -178,14 +209,25 @@ impl PathPolicy {
         // `.` must match `\n`: names may contain any byte but NUL, and with
         // default flags `/etc(/.*)?` would not match `/etc/x\ny`, so a Deny
         // rule would let it through.
-        regex::RegexSetBuilder::new(anchored)
+        let set = regex::RegexSetBuilder::new(anchored)
             .dot_matches_new_line(true)
             .build()
             .map_err(|e| ExtendPolicyError::InvalidPathRegex {
                 pattern: String::new(),
                 reason: e.to_string(),
-            })
+            })?;
+        Ok(PathMatcher {
+            allow: matches!(self, Self::Allow(_)),
+            set,
+        })
     }
+}
+
+/// A [`PathPolicy`] with its patterns compiled into one `RegexSet`.
+#[derive(Debug, Clone)]
+pub struct PathMatcher {
+    allow: bool,
+    set: regex::RegexSet,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
@@ -212,7 +254,8 @@ impl TryFrom<HostPolicy> for IpPolicy {
     }
 }
 
-/// Check one policy's `v3` against a request.
+/// Check one policy's `v3`, compiled when the policies were loaded, against a
+/// request.
 ///
 /// Two kinds of constraint live in an [`ExtendPolicy`], and they are checked
 /// differently:
@@ -238,22 +281,26 @@ impl TryFrom<HostPolicy> for IpPolicy {
 /// kind it names. So an action group holding both `shell` and the SFTP actions,
 /// on a policy carrying `sftp_path`, grants shell unconstrained and narrows
 /// only SFTP. Split the group if that is not what you want.
-pub fn verify_extend_policy(ext_req: &ExtendPolicyReq, ext_str: &str) -> Result<bool, Error> {
-    trace!("ext_req: {:?} ext_str: \"{}\"", ext_req, ext_str);
-    let ext: ExtendPolicy = serde_json::from_str(ext_str)?;
-    ext.validate().map_err(ServerError::ExtendPolicy)?;
+pub fn verify_extend_policy(
+    ext_req: &ExtendPolicyReq,
+    compiled: &CompiledExtendPolicy,
+) -> Result<bool, Error> {
+    trace!("ext_req: {:?} ext: {:?}", ext_req, compiled.policy);
+    let ext = &compiled.policy;
     if !is_ip_in_cidr(ext_req.ip, ext.ip_policy) {
         return Ok(false);
     }
     let now = ext_req.now;
     let start_time = ext
         .start_time
-        .map(|t| parse_time(&now, &t))
+        .as_ref()
+        .map(|t| parse_time(&now, t))
         .transpose()
         .map_err(ServerError::ExtendPolicy)?;
     let end_time = ext
         .end_time
-        .map(|t| parse_time(&now, &t))
+        .as_ref()
+        .map(|t| parse_time(&now, t))
         .transpose()
         .map_err(ServerError::ExtendPolicy)?;
     if !is_in_period(now, start_time, end_time) {
@@ -270,10 +317,10 @@ pub fn verify_extend_policy(ext_req: &ExtendPolicyReq, ext_str: &str) -> Result<
     match &ext_req.kind {
         RequestKind::Other => {}
         RequestKind::OpenDirectTcpip(host, port) => {
-            if !is_host_match(Some(host.clone()), ext.open_direct_tcpip_host) {
+            if !is_host_match(Some(host), ext.open_direct_tcpip_host.as_ref()) {
                 return Ok(false);
             }
-            if !is_port_in_range(Some(*port), ext.open_direct_tcpip_port) {
+            if !is_port_in_range(Some(*port), ext.open_direct_tcpip_port.as_ref()) {
                 return Ok(false);
             }
         }
@@ -281,9 +328,7 @@ pub fn verify_extend_policy(ext_req: &ExtendPolicyReq, ext_str: &str) -> Result<
         // subsystem gate and `realpath` pass it. Every SFTP request that does
         // name a path is checked.
         RequestKind::Sftp(Some(path)) => {
-            if !is_path_match(Some(path.as_str()), ext.sftp_path.as_ref())
-                .map_err(ServerError::ExtendPolicy)?
-            {
+            if !is_path_match(Some(path.as_str()), compiled.sftp_path.as_ref()) {
                 return Ok(false);
             }
         }
@@ -338,13 +383,13 @@ pub fn is_ip_in_cidr(ip: Option<IpAddr>, ip_policy: Option<IpPolicy>) -> bool {
     }
 }
 
-pub fn is_host_match(dest: Option<String>, host_policy: Option<HostPolicy>) -> bool {
+pub fn is_host_match(dest: Option<&str>, host_policy: Option<&HostPolicy>) -> bool {
     match (dest, host_policy) {
         (_, None) => true,
         (None, Some(_)) => false,
         (Some(host_dest), Some(policy)) => {
             match (
-                IpAddr::from_str(&host_dest),
+                IpAddr::from_str(host_dest),
                 IpPolicy::try_from(policy.clone()),
             ) {
                 (Ok(ip_dest), Ok(ip_policy)) => {
@@ -359,13 +404,13 @@ pub fn is_host_match(dest: Option<String>, host_policy: Option<HostPolicy>) -> b
                 (Err(_), Err(_)) => (),
             };
             match policy {
-                HostPolicy::Allow(h) => host_dest == h,
-                HostPolicy::Deny(h) => host_dest != h,
+                HostPolicy::Allow(h) => host_dest == h.as_str(),
+                HostPolicy::Deny(h) => host_dest != h.as_str(),
             }
         }
     }
 }
-pub fn is_port_in_range(port: Option<u16>, port_policy: Option<PortPolicy>) -> bool {
+pub fn is_port_in_range(port: Option<u16>, port_policy: Option<&PortPolicy>) -> bool {
     match (port, port_policy) {
         (_, None) => true,
         (None, Some(_)) => false,
@@ -379,20 +424,12 @@ pub fn is_port_in_range(port: Option<u16>, port_policy: Option<PortPolicy>) -> b
 /// `Allow` passes if any pattern matches, `Deny` if none does. Like
 /// [`is_host_match`], a request with no path never satisfies a path rule, so a
 /// path-restricted policy grants only path-bearing SFTP operations.
-pub fn is_path_match(
-    path: Option<&str>,
-    policy: Option<&PathPolicy>,
-) -> Result<bool, ExtendPolicyError> {
-    let (path, policy) = match (path, policy) {
-        (_, None) => return Ok(true),
-        (None, Some(_)) => return Ok(false),
-        (Some(path), Some(policy)) => (path, policy),
-    };
-    let hit = policy.compile()?.is_match(path);
-    Ok(match policy {
-        PathPolicy::Allow(_) => hit,
-        PathPolicy::Deny(_) => !hit,
-    })
+pub fn is_path_match(path: Option<&str>, policy: Option<&PathMatcher>) -> bool {
+    match (path, policy) {
+        (_, None) => true,
+        (None, Some(_)) => false,
+        (Some(path), Some(policy)) => policy.set.is_match(path) == policy.allow,
+    }
 }
 
 #[cfg(test)]
@@ -1015,52 +1052,55 @@ mod tests {
     fn deny(p: &[&str]) -> Option<PathPolicy> {
         Some(PathPolicy::Deny(p.iter().map(|s| s.to_string()).collect()))
     }
+    fn compiled(p: Option<PathPolicy>) -> Option<PathMatcher> {
+        p.map(|p| p.compile().expect("valid path policy"))
+    }
 
     #[test]
     fn path_patterns_are_full_match() {
-        let p = allow(&["/srv/upload/.*"]);
-        assert!(is_path_match(Some("/srv/upload/a"), p.as_ref()).unwrap());
+        let p = compiled(allow(&["/srv/upload/.*"]));
+        assert!(is_path_match(Some("/srv/upload/a"), p.as_ref()));
         // Unanchored, this would match: the pattern occurs inside the path.
-        assert!(!is_path_match(Some("/tmp/x/srv/upload/y"), p.as_ref()).unwrap());
+        assert!(!is_path_match(Some("/tmp/x/srv/upload/y"), p.as_ref()));
         // `/dir/.*` does not cover `/dir` itself; `/dir(/.*)?` does.
-        assert!(!is_path_match(Some("/srv/upload"), p.as_ref()).unwrap());
-        let p = allow(&["/srv/upload(/.*)?"]);
-        assert!(is_path_match(Some("/srv/upload"), p.as_ref()).unwrap());
-        assert!(!is_path_match(Some("/srv/uploads"), p.as_ref()).unwrap());
+        assert!(!is_path_match(Some("/srv/upload"), p.as_ref()));
+        let p = compiled(allow(&["/srv/upload(/.*)?"]));
+        assert!(is_path_match(Some("/srv/upload"), p.as_ref()));
+        assert!(!is_path_match(Some("/srv/uploads"), p.as_ref()));
         // An alternation is anchored as a whole, not just its first branch.
-        let p = allow(&["/a|/b"]);
-        assert!(!is_path_match(Some("/b/c"), p.as_ref()).unwrap());
+        let p = compiled(allow(&["/a|/b"]));
+        assert!(!is_path_match(Some("/b/c"), p.as_ref()));
     }
 
     /// OpenSSH accepts any non-NUL byte in a name, newline included. With
     /// default flags `.` stops at `\n`, so a Deny rule would fail open.
     #[test]
     fn path_patterns_match_across_newlines() {
-        let d = deny(&["/etc(/.*)?"]);
-        assert_eq!(is_path_match(Some("/etc/x\ny"), d.as_ref()), Ok(false));
-        let a = allow(&["/srv(/.*)?"]);
-        assert_eq!(is_path_match(Some("/srv/a\nb"), a.as_ref()), Ok(true));
+        let d = compiled(deny(&["/etc(/.*)?"]));
+        assert!(!is_path_match(Some("/etc/x\ny"), d.as_ref()));
+        let a = compiled(allow(&["/srv(/.*)?"]));
+        assert!(is_path_match(Some("/srv/a\nb"), a.as_ref()));
     }
 
     #[test]
     fn path_allow_is_any_deny_is_none() {
-        let a = allow(&["/a(/.*)?", "/b(/.*)?"]);
-        assert!(is_path_match(Some("/b/x"), a.as_ref()).unwrap());
-        assert!(!is_path_match(Some("/c"), a.as_ref()).unwrap());
-        let d = deny(&["/etc(/.*)?", ".*\\.key"]);
-        assert!(is_path_match(Some("/srv/x"), d.as_ref()).unwrap());
-        assert!(!is_path_match(Some("/etc/passwd"), d.as_ref()).unwrap());
-        assert!(!is_path_match(Some("/home/u/id.key"), d.as_ref()).unwrap());
+        let a = compiled(allow(&["/a(/.*)?", "/b(/.*)?"]));
+        assert!(is_path_match(Some("/b/x"), a.as_ref()));
+        assert!(!is_path_match(Some("/c"), a.as_ref()));
+        let d = compiled(deny(&["/etc(/.*)?", ".*\\.key"]));
+        assert!(is_path_match(Some("/srv/x"), d.as_ref()));
+        assert!(!is_path_match(Some("/etc/passwd"), d.as_ref()));
+        assert!(!is_path_match(Some("/home/u/id.key"), d.as_ref()));
     }
 
     #[test]
     fn path_rule_needs_a_path_and_no_rule_needs_nothing() {
-        assert!(is_path_match(None, None).unwrap());
-        assert!(is_path_match(Some("/x"), None).unwrap());
+        assert!(is_path_match(None, None));
+        assert!(is_path_match(Some("/x"), None));
         // Mirrors `is_host_match`: a request without a path never satisfies a
         // policy that restricts paths — either kind.
-        assert!(!is_path_match(None, allow(&[".*"]).as_ref()).unwrap());
-        assert!(!is_path_match(None, deny(&["/etc"]).as_ref()).unwrap());
+        assert!(!is_path_match(None, compiled(allow(&[".*"])).as_ref()));
+        assert!(!is_path_match(None, compiled(deny(&["/etc"])).as_ref()));
     }
 
     #[test]
@@ -1071,11 +1111,7 @@ mod tests {
             ext.validate(),
             Err(ExtendPolicyError::InvalidPathRegex { ref pattern, .. }) if pattern == "/srv/("
         ));
-        let req = ExtendPolicyReq {
-            kind: RequestKind::Sftp(Some("/srv/x".into())),
-            ..ExtendPolicyReq::default()
-        };
-        assert!(verify_extend_policy(&req, r#"{"sftp_path":{"Deny":["("]}}"#).is_err());
+        assert!(CompiledExtendPolicy::parse(r#"{"sftp_path":{"Deny":["("]}}"#).is_err());
     }
 
     /// `x)|(.*` compiles once wrapped as `^(?:x)|(.*)$`, but as an unanchored
@@ -1089,7 +1125,7 @@ mod tests {
             Err(ExtendPolicyError::InvalidPathRegex { ref pattern, .. }) if pattern == "x)|(.*"
         ));
         let policy = PathPolicy::Allow(vec!["x)|(.*".into()]);
-        assert!(is_path_match(Some("/anything"), Some(&policy)).is_err());
+        assert!(policy.compile().is_err());
     }
 
     #[test]

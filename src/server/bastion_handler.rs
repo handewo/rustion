@@ -1104,6 +1104,7 @@ mod tests {
         })
         .await
         .expect("insert login policy");
+        server.reload_policies().await.expect("reload");
     }
 
     /// russh queues every channel message for the `Channel` handed to

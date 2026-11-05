@@ -376,8 +376,9 @@ pub trait DatabaseRepository: Send + Sync {
     /// Delete one rule by id; `false` when no such row.
     ///
     /// Callers that change RBAC state must follow up with
-    /// [`crate::server::HandlerBackend::load_role_manager`] — the membership
-    /// graph is cached in memory and will not notice the write.
+    /// [`crate::server::HandlerBackend::reload_policies`] — the membership
+    /// graphs and the policies are cached in memory and will not notice the
+    /// write.
     async fn delete_casbin_rule(&self, id: Uuid) -> Result<bool, Error>;
     /// Deletes a single group membership.
     ///
@@ -564,8 +565,9 @@ pub trait DatabaseRepository: Send + Sync {
 
     /// Insert RBAC rules verbatim. Rows inserted.
     ///
-    /// Callers must reload the role manager afterwards; the membership graph is
-    /// cached and will not see these rows.
+    /// Callers must call [`crate::server::HandlerBackend::reload_policies`]
+    /// afterwards; the graphs and policies are cached and will not see these
+    /// rows.
     async fn create_casbin_rules_batch(&self, rules: Vec<CasbinRule>) -> Result<u64, Error>;
 
     // ------------------------------------------------- authorization readers

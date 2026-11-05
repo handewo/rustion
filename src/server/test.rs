@@ -13,11 +13,10 @@
 //!
 //! * A Subject, object or action matches by walking **down** from the policy's group, so
 //!   a policy naming a group covers everything under it.
-//! * Policies are read from the database on every call, but the graphs are a
-//!   cached snapshot. Editing a `p` row therefore takes effect immediately,
-//!   while editing a `g1`/`g2`/`g3` row needs `load_role_manager`. Several tests
-//!   assert exactly that split, because it is the easiest thing to get wrong
-//!   when adding a cache.
+//! * Policies and graphs are one cached snapshot (`casbin::Snapshot`). Editing
+//!   any rule, `p` or `g1`/`g2`/`g3`, takes effect at `reload_policies` and
+//!   not before; object activity is still read per call. Tests that write a rule
+//!   reload before asserting on it.
 #[cfg(test)]
 mod tests {
     use crate::config::Config;
@@ -58,8 +57,14 @@ mod tests {
         /// reads `InternalUuids::get()` — internal ids come from
         /// `f.name(ACT_SHELL)`, which is this database's.
         async fn on(db: fixture::TestDb) -> Self {
+            Self::configured(db, |_| {}).await
+        }
+
+        /// [`on`](Self::on), with the config adjusted by `edit` first.
+        async fn configured(db: fixture::TestDb, edit: impl FnOnce(&mut Config)) -> Self {
             let mut config = Config::default().gen_secret_token();
             config.database = db.url.clone();
+            edit(&mut config);
             let server = BastionServer::with_config(config)
                 .await
                 .expect("build server on the fixture database");
@@ -112,13 +117,11 @@ mod tests {
                 .expect("list targets")
         }
 
-        /// Insert a `p` rule and hand back its id.
-        ///
-        /// No `load_role_manager` afterwards on purpose: policies are read per
-        /// call, so a new one is live immediately as long as the ids it names are
-        /// already in the graphs.
+        /// Insert a `p` rule, reload the snapshot so it applies, and hand back
+        /// its id.
         async fn add_policy(&self, v0: Uuid, v1: Uuid, v2: Uuid, ext: &str) -> Uuid {
-            self.repo()
+            let id = self
+                .repo()
                 .create_casbin_rule(casbin_rule::ActiveModel {
                     id: Set(Uuid::now_v7()),
                     ptype: Set(Ptype::Policy),
@@ -133,7 +136,9 @@ mod tests {
                 })
                 .await
                 .expect("insert policy")
-                .id
+                .id;
+            self.reload().await;
+            id
         }
 
         /// Insert a group membership row.
@@ -162,9 +167,9 @@ mod tests {
 
         async fn reload(&self) {
             self.server
-                .load_role_manager()
+                .reload_policies()
                 .await
-                .expect("reload role manager");
+                .expect("reload policies");
         }
 
         async fn set_target_active(&self, name: &str, active: bool) {
@@ -542,11 +547,11 @@ mod tests {
 
     /// Editing a `p` row takes effect at once; editing a `g1` row does not.
     ///
-    /// `enforce` reads the policies from the database on every call but answers
-    /// the graph questions from a cached snapshot. Both halves are asserted here
-    /// because the split is invisible from the outside until it bites.
+    /// `enforce` answers from a snapshot of the rules, `p` and `g1` alike, so a
+    /// write applies at the next reload and not before. The admin TUI reloads
+    /// after each write; this is what it relies on.
     #[tokio::test]
-    async fn policies_are_read_per_call_and_graphs_are_cached() {
+    async fn rule_writes_apply_at_the_next_reload() {
         let env = Env::new().await;
         let luka = env.f().user(LUKA);
         let mars1 = env.f().binding("mars1", S_MON);
@@ -565,11 +570,23 @@ mod tests {
             .await
             .expect("retarget p3");
 
-        // No reload, and it is already live.
+        assert!(
+            env.allows(luka, mars1, shell).await,
+            "the policies are a snapshot and have not been reloaded"
+        );
+        env.reload().await;
         assert!(env.allows(luka, mars1, exec).await);
         assert!(!env.allows(luka, mars1, shell).await);
 
-        // A `g1` write is the other half. `r_audit` has no members and carries
+        // A revoke is the case that matters: it must not outlive the reload.
+        env.repo()
+            .delete_casbin_rule(env.f().policy(3))
+            .await
+            .expect("delete p3");
+        env.reload().await;
+        assert!(!env.allows(luka, mars1, exec).await);
+
+        // A `g1` write applies the same way. `r_audit` has no members and carries
         // `p5` on `tg_jupiter`, so it grants nothing until daisy is put in it —
         // and not even then, until the graphs are rebuilt.
         let jupiter1 = env.f().binding("jupiter1", S_MON);
@@ -776,6 +793,52 @@ mod tests {
             )
             .await
         );
+    }
+
+    /// A `v3` that does not parse, as SQL run by hand can leave, grants
+    /// nothing, and does not stop the snapshot from loading: the other policies
+    /// on the same subject still grant.
+    #[tokio::test]
+    async fn an_invalid_extended_policy_grants_nothing() {
+        let env = Env::new().await;
+        let sub = Uuid::now_v7();
+        let sun = env.f().binding("sun", S_MON);
+        let (shell, exec) = (env.f().name(ACT_SHELL), env.f().name(ACT_EXEC));
+        for bad in ["", "not json", r#"{"sftp_path":{"Deny":["x)|(.*"]}}"#] {
+            env.add_policy(sub, sun, shell, bad).await;
+        }
+        env.add_policy(sub, sun, exec, "{}").await;
+
+        assert!(!env.allows(sub, sun, shell).await);
+        assert!(env.allows(sub, sun, exec).await);
+    }
+
+    /// With a non-zero `policy_reload_interval`, a change written straight to the
+    /// database, as another rustion process on it would, applies without a
+    /// flush.
+    #[tokio::test]
+    async fn a_periodic_reload_applies_changes_made_elsewhere() {
+        let env = Env::configured(fixture::seed().await, |c| {
+            c.policy_reload_interval = std::time::Duration::from_millis(50)
+        })
+        .await;
+        let luka = env.f().user(LUKA);
+        let mars1 = env.f().binding("mars1", S_MON);
+        let shell = env.f().name(ACT_SHELL);
+        assert!(env.allows(luka, mars1, shell).await);
+
+        env.repo()
+            .delete_casbin_rule(env.f().policy(3))
+            .await
+            .expect("delete p3");
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while env.allows(luka, mars1, shell).await {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the revoke was not picked up"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
     }
 
     /// A database from before the SFTP actions existed still starts, and gains

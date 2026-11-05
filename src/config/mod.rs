@@ -128,6 +128,11 @@ fn default_client_id() -> String {
     format!("SSH-2.0-rustion_{}", env!("CARGO_PKG_VERSION"))
 }
 
+/// Off: rules are reloaded only by the admin TUI and `flush_privileges`.
+fn default_policy_reload_interval() -> Duration {
+    Duration::ZERO
+}
+
 fn default_database() -> String {
     DEFAULT_DATABASE_URL.to_string()
 }
@@ -162,6 +167,20 @@ pub struct Config {
     pub inactivity_timeout: Option<Duration>,
     #[serde(default)]
     pub log_level: LogLevel,
+    /// How often to re-read the permission rules (`casbin_rule`) from the
+    /// database, e.g. `"1m"`. `"0s"`, the default, turns the timer off.
+    ///
+    /// Permission checks answer from a copy of the rules kept in memory and
+    /// loaded at startup. Changes made in the admin TUI refresh the copy as
+    /// they are saved, and `flush_privileges` in the admin shell refreshes it
+    /// on demand. A change made any other way is not seen until one of those
+    /// happens: by another rustion process on the same database, by SQL run
+    /// by hand, or by `--init` against a running server. This setting bounds
+    /// how long such a change, a revoke included, takes to apply. Each reload
+    /// reads every rule, so a few seconds is the shortest sensible value.
+    #[serde(default = "default_policy_reload_interval")]
+    #[serde(with = "humantime_serde")]
+    pub policy_reload_interval: Duration,
     /// sea-orm connection URL. The scheme picks the backend, so this is the
     /// whole of the database choice — see [`SUPPORTED_SCHEMES`].
     #[serde(default = "default_database")]
@@ -226,6 +245,7 @@ impl Config {
             target_cache_duration: default_cache_idle_time(),
             inactivity_timeout: None,
             log_level: LogLevel::default(),
+            policy_reload_interval: default_policy_reload_interval(),
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -388,6 +408,7 @@ impl std::fmt::Display for Config {
             target_cache_duration: {}\r
             inactivity_timeout: {}\r
             log_level: {}\r
+            policy_reload_interval: {}\r
             database: {}\r
             enable_record: {}\r
             record_input: {}\r
@@ -412,6 +433,7 @@ impl std::fmt::Display for Config {
                 .map_or("None".to_string(), |v| humantime::format_duration(v)
                     .to_string()),
             self.log_level,
+            humantime::format_duration(self.policy_reload_interval),
             redact_url(&self.database),
             self.enable_record,
             self.record_input,
@@ -443,6 +465,7 @@ mod tests {
             target_cache_duration: Duration::from_secs(600),
             inactivity_timeout: None,
             log_level: LogLevel::Info,
+            policy_reload_interval: Duration::ZERO,
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -467,6 +490,7 @@ mod tests {
             target_cache_duration: Duration::from_secs(600),
             inactivity_timeout: None,
             log_level: LogLevel::Info,
+            policy_reload_interval: Duration::ZERO,
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -492,6 +516,7 @@ mod tests {
             target_cache_duration: Duration::from_secs(600),
             inactivity_timeout: None,
             log_level: LogLevel::Info,
+            policy_reload_interval: Duration::ZERO,
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -523,6 +548,7 @@ mod tests {
             target_cache_duration: Duration::from_secs(600),
             inactivity_timeout: None,
             log_level: LogLevel::Info,
+            policy_reload_interval: Duration::ZERO,
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -532,6 +558,28 @@ mod tests {
             language: Lang::default(),
         };
         assert!(invalid_config.validate().is_err());
+    }
+
+    #[test]
+    fn test_policy_reload_interval() {
+        #[derive(Deserialize)]
+        struct Only {
+            #[serde(default = "default_policy_reload_interval")]
+            #[serde(with = "humantime_serde")]
+            policy_reload_interval: Duration,
+        }
+        let parse = |s: &str| toml::from_str::<Only>(s).map(|o| o.policy_reload_interval);
+        assert_eq!(parse("").unwrap(), Duration::ZERO);
+        assert_eq!(
+            parse(r#"policy_reload_interval = "0s""#).unwrap(),
+            Duration::ZERO
+        );
+        assert_eq!(
+            parse(r#"policy_reload_interval = "1m""#).unwrap(),
+            Duration::from_secs(60)
+        );
+        assert!(parse(r#"policy_reload_interval = "often""#).is_err());
+        assert_eq!(Config::default().policy_reload_interval, Duration::ZERO);
     }
 
     #[test]

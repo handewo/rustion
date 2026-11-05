@@ -1,5 +1,5 @@
 use super::casbin;
-use super::extend_policy::{ExtendPolicyReq, verify_extend_policy};
+use super::extend_policy::ExtendPolicyReq;
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
 use crate::database::common::{INTERNAL_ACTIONS, INTERNAL_OBJECTS, InternalUuids};
@@ -59,7 +59,9 @@ pub struct BastionServer {
     client_ip_pool: Cache<std::net::IpAddr, u32>,
     client_user_pool: Cache<String, u32>,
     connection_pool: Option<super::connection_pool::ConnectionPool>,
-    role_manager: Arc<RwLock<casbin::RoleManage>>,
+    /// The role graphs and policies `enforce` reads, held in memory. See
+    /// [`casbin::Snapshot`] for when it is reloaded.
+    snapshot: Arc<RwLock<casbin::Snapshot>>,
 }
 
 impl Server for BastionServer {
@@ -137,23 +139,28 @@ impl BastionServer {
             }
         });
 
-        // initial casbin role
-        let role_manager = {
-            let g1 = database
-                .repository()
-                .list_casbin_rule_group_by_ptype(Ptype::G1)
-                .await?;
-            let g2 = database
-                .repository()
-                .list_casbin_rule_group_by_ptype(Ptype::G2)
-                .await?;
-            let g3 = database
-                .repository()
-                .list_casbin_rule_group_by_ptype(Ptype::G3)
-                .await?;
-
-            casbin::RoleManage::new(g1, g2, g3)?
-        };
+        let snapshot = Arc::new(RwLock::new(load_snapshot(database.repository()).await?));
+        // Changes the admin TUI makes reload the snapshot as they are made.
+        // The timer is for changes this process does not make: another rustion
+        // on the same database, or SQL run by hand. See
+        // `Config::policy_reload_interval`; zero is off.
+        let every = config.policy_reload_interval;
+        if !every.is_zero() {
+            let (database, snapshot) = (database.clone(), snapshot.clone());
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(every);
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                // The first tick completes at once, and the snapshot was just loaded.
+                tick.tick().await;
+                loop {
+                    tick.tick().await;
+                    match load_snapshot(database.repository()).await {
+                        Ok(s) => *snapshot.write().await = s,
+                        Err(e) => warn!("Periodic policy reload failed, keeping the last: {}", e),
+                    }
+                }
+            });
+        }
 
         // Every server resolves the internal names against its own database, so
         // each database gains any action this version added. The global keeps the
@@ -167,30 +174,8 @@ impl BastionServer {
             client_ip_pool,
             client_user_pool,
             connection_pool,
-            role_manager: Arc::new(RwLock::new(role_manager)),
+            snapshot,
         })
-    }
-
-    pub async fn do_load_role_manager(&self) -> Result<(), Error> {
-        let g1 = self
-            .database
-            .repository()
-            .list_casbin_rule_group_by_ptype(Ptype::G1)
-            .await?;
-        let g2 = self
-            .database
-            .repository()
-            .list_casbin_rule_group_by_ptype(Ptype::G2)
-            .await?;
-        let g3 = self
-            .database
-            .repository()
-            .list_casbin_rule_group_by_ptype(Ptype::G3)
-            .await?;
-
-        let mut m = self.role_manager.write().await;
-        *m = casbin::RoleManage::new(g1, g2, g3)?;
-        Ok(())
     }
 
     pub async fn run(&mut self) -> Result<(), Error> {
@@ -398,31 +383,34 @@ impl super::HandlerBackend for BastionServer {
         active_only: bool,
     ) -> Result<Vec<models::TargetSecretName>, Error> {
         let mut res = Vec::new();
-        let policies = self
-            .database
-            .repository()
-            .list_casbin_rules_by_ptype(Ptype::Policy)
-            .await?;
-        let allowed_policies = self.role_manager.read().await.match_sub(policies, *user_id);
+        // Taken from the snapshot first, so the lock is not held across the
+        // queries below: (policy id, its object, every id under that object).
+        let allowed_policies: Vec<(Uuid, Uuid, Vec<Uuid>)> = {
+            let snapshot = self.snapshot.read().await;
+            snapshot
+                .match_sub(*user_id)
+                .map(|p| {
+                    let group_ids = snapshot
+                        .roles
+                        .fetch_role_from_start(p.rule.v1, GroupType::Object);
+                    (p.rule.id, p.rule.v1, group_ids)
+                })
+                .collect()
+        };
 
         // NOTE: Duplicate ids of target_secrets due to different policies.
-        for pol in allowed_policies {
-            // Get all role IDs from object group
-            let role_manager = self.role_manager.read().await;
-            let group_ids = role_manager.fetch_role_from_start(pol.v1, GroupType::Object);
-            drop(role_manager); // Release the lock before awaiting database
-
+        for (pol_id, pol_v1, group_ids) in allowed_policies {
             let ts = self
                 .database
                 .repository()
-                .list_targets_by_ids(group_ids, pol.id, active_only)
+                .list_targets_by_ids(group_ids, pol_id, active_only)
                 .await?;
             if ts.is_empty() {
                 // Try pol.v1 directly as a target_secret ID
                 let t = self
                     .database
                     .repository()
-                    .list_targets_by_ids(vec![pol.v1], pol.id, active_only)
+                    .list_targets_by_ids(vec![pol_v1], pol_id, active_only)
                     .await?;
                 if !t.is_empty() {
                     res.extend_from_slice(&t);
@@ -627,64 +615,22 @@ impl super::HandlerBackend for BastionServer {
         act: Uuid,
         ext: ExtendPolicyReq,
     ) -> Result<bool, Error> {
-        // match sub
-        let policies = self
-            .database
-            .repository()
-            .list_casbin_rules_by_ptype(Ptype::Policy)
-            .await?;
-        let allowed_policies = self.role_manager.read().await.match_sub(policies, sub);
-        trace!("sub: {} polices: {:?}", sub, allowed_policies);
-
-        for pol in allowed_policies {
-            // match obj
-            if pol.v1 == obj
-                || self
-                    .role_manager
-                    .read()
-                    .await
-                    .match_role(pol.v1, obj, GroupType::Object)
-            {
-                if !self.database.repository().check_object_active(obj).await? {
-                    trace!(
-                        "Reject due to object not active, sub: {}, act: {}, policy: {:?}",
-                        sub, obj, pol
-                    );
-                    continue;
-                }
-                // match act
-                if pol.v2 == act
-                    || self
-                        .role_manager
-                        .read()
-                        .await
-                        .match_role(pol.v2, act, GroupType::Action)
-                {
-                    // match ext
-                    if verify_extend_policy(&ext, &pol.v3)? {
-                        trace!("Accept sub: {}, policy: {:?}", sub, pol);
-                        return Ok(true);
-                    } else {
-                        trace!(
-                            "Reject by extend policy, sub: {}, ext: {:?}, policy: {:?}",
-                            sub, ext, pol
-                        );
-                    }
-                } else {
-                    trace!(
-                        "Reject by action, sub: {}, act: {}, policy: {:?}",
-                        sub, act, pol
-                    );
-                }
-            } else {
-                trace!(
-                    "Reject by object, sub: {}, obj: {}, policy: {:?}",
-                    sub, obj, pol
-                );
-            }
+        // Decided from the snapshot alone, under one read lock and with no
+        // query, so a reload is never left waiting on a database round trip.
+        let granted = self.snapshot.read().await.grants(sub, obj, act, &ext)?;
+        if !granted {
+            return Ok(false);
         }
-
-        Ok(false)
+        // Activity is not in the snapshot: `is_active` is edited on targets,
+        // secrets, bindings and names, none of which reload it.
+        if !self.database.repository().check_object_active(obj).await? {
+            trace!(
+                "Reject due to object not active, sub: {}, obj: {}",
+                sub, obj
+            );
+            return Ok(false);
+        }
+        Ok(true)
     }
 
     fn enable_record(&self) -> bool {
@@ -707,8 +653,12 @@ impl super::HandlerBackend for BastionServer {
         self.config.language
     }
 
-    async fn load_role_manager(&self) -> Result<(), Error> {
-        self.do_load_role_manager().await
+    /// Read before the lock is taken, so checks keep answering from the old
+    /// snapshot until the swap.
+    async fn reload_policies(&self) -> Result<(), Error> {
+        let snapshot = load_snapshot(self.database.repository()).await?;
+        *self.snapshot.write().await = snapshot;
+        Ok(())
     }
 
     fn encrypt_plain_text(&self, text: &str) -> Result<String, Error> {
@@ -733,8 +683,21 @@ impl super::HandlerBackend for BastionServer {
     }
 
     async fn get_graph(&self, rt: GroupType) -> StableDiGraph<casbin::RuleNode, ()> {
-        self.role_manager.read().await.get_group(rt)
+        self.snapshot.read().await.roles.get_group(rt)
     }
+}
+
+/// Read `casbin_rule` into a [`casbin::Snapshot`]: the three role graphs and
+/// the `p` rules, with each rule's `v3` parsed.
+async fn load_snapshot(repo: &dyn DatabaseRepository) -> Result<casbin::Snapshot, Error> {
+    let g1 = repo.list_casbin_rule_group_by_ptype(Ptype::G1).await?;
+    let g2 = repo.list_casbin_rule_group_by_ptype(Ptype::G2).await?;
+    let g3 = repo.list_casbin_rule_group_by_ptype(Ptype::G3).await?;
+    let policies = repo.list_casbin_rules_by_ptype(Ptype::Policy).await?;
+    Ok(casbin::Snapshot::new(
+        casbin::RoleManage::new(g1, g2, g3)?,
+        policies,
+    ))
 }
 
 async fn remove_counter<T>(cache: &Cache<T, u32>, key: &T)

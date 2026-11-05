@@ -108,7 +108,7 @@ pub(super) async fn shell<B>(
                     }
                     CMD_FLUSH_PRIVILEGES => {
                         let tr = lang.strings();
-                        if let Err(e) = backend.load_role_manager().await {
+                        if let Err(e) = backend.reload_policies().await {
                             let _ = send_to_session
                                 .send(fill!(tr.flush_failed, error = e).into())
                                 .await;

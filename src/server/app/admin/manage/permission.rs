@@ -5,8 +5,7 @@ use crate::database::entity::casbin_rule;
 use crate::database::models::{ObjectGroup, PermissionPolicy};
 use crate::error::Error;
 use crate::server::app::error::AppError;
-use crate::server::error::ServerError;
-use crate::server::extend_policy::ExtendPolicy;
+use crate::server::extend_policy::CompiledExtendPolicy;
 use crate::server::widgets::{
     AdminTable, COMMON_HELP, DisplayMode, Help, Message, SingleLineText, Strings, Theme,
     centered_area, render_cancel_dialog, render_message_popup, render_textarea,
@@ -371,12 +370,12 @@ impl PermissionEditor {
     }
 
     fn verify_permission(&mut self) -> Result<(), Error> {
-        // Parsed on every save, not only when it changed: `verify_extend_policy`
-        // parses `v3` again at enforcement time, so an unparseable one must never
-        // reach the column — including the empty string a new rule starts with.
+        // Checked on every save, not only when it changed, and the same way the
+        // policy snapshot loads it: a `v3` the snapshot cannot parse grants
+        // nothing, so one must never reach the column — including the empty
+        // string a new rule starts with.
         let extend_policy = self.extend_policy_text.get_input().trim().to_string();
-        let ext: ExtendPolicy = serde_json::from_str(&extend_policy)?;
-        ext.validate().map_err(ServerError::ExtendPolicy)?;
+        CompiledExtendPolicy::parse(&extend_policy)?;
         if self.perm.rule.v3 != extend_policy {
             self.active_model.v3 = Set(extend_policy.clone());
         }

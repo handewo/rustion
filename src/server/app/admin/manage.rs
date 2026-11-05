@@ -380,6 +380,24 @@ where
         true
     }
 
+    /// Rebuild the server's policy snapshot after a write to `casbin_rule`.
+    /// Permission checks answer from it, so until this runs the change does
+    /// not apply: a revoked permission still grants.
+    async fn reload_policies(&mut self) {
+        if let Err(e) = self.backend.reload_policies().await {
+            error!(
+                "[{}] Reload policies failed after a change by admin_id={}: {}",
+                self.handler_id, self.admin_id, e
+            );
+            self.message = Some(Message::Error(vec![fill!(
+                self.lang.strings().flush_failed,
+                error = e
+            )]));
+        }
+    }
+
+    /// Each delete reloads the policies: a permission is a `casbin_rule`, and
+    /// users, targets, secrets and names take the rules naming them along.
     async fn do_delete(&mut self, idx: usize) {
         self.popup = Popup::None;
         match self.selected_tab {
@@ -408,6 +426,7 @@ where
                     let event = Audit::deleted(Object::User, &u.username, u.id, removed);
                     self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
                     self.log.record(event).await;
+                    self.reload_policies().await;
                     self.refresh_data().await;
                 }
             }
@@ -436,6 +455,7 @@ where
                     let event = Audit::deleted(Object::Target, &t.name, t.id, removed);
                     self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
                     self.log.record(event).await;
+                    self.reload_policies().await;
                     self.refresh_data().await;
                 }
             }
@@ -464,6 +484,7 @@ where
                     let event = Audit::deleted(Object::Secret, &s.name, s.id, removed);
                     self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
                     self.log.record(event).await;
+                    self.reload_policies().await;
                     self.refresh_data().await;
                 }
             }
@@ -493,6 +514,7 @@ where
                     let event = Audit::saved(Object::Permission, Change::Deleted, "", p.rule.id);
                     self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
                     self.log.record(event).await;
+                    self.reload_policies().await;
                     self.refresh_data().await;
                 }
             }
@@ -521,6 +543,7 @@ where
                     let event = Audit::deleted(Object::Group, &c.name, c.id, removed);
                     self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
                     self.log.record(event).await;
+                    self.reload_policies().await;
                     self.refresh_data().await;
                 }
             }
@@ -951,6 +974,7 @@ where
                         let msg = vec![event.notice(self.lang.strings())];
                         self.log.record(event).await;
                         self.message = Some(Message::Success(msg));
+                        self.reload_policies().await;
                     }
                     self.clear_form();
                     self.refresh_data().await;
