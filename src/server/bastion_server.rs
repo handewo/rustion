@@ -633,6 +633,28 @@ impl super::HandlerBackend for BastionServer {
         Ok(true)
     }
 
+    async fn command_sets_for(
+        &self,
+        sub: Uuid,
+        obj: Uuid,
+        ext: ExtendPolicyReq,
+    ) -> Result<Vec<Arc<casbin::CompiledCommandSet>>, Error> {
+        let sets = self
+            .snapshot
+            .read()
+            .await
+            .granted_command_sets(sub, obj, &ext)?;
+        // TODO: Check if command set is active
+        if sets.is_empty() || !self.database.repository().check_object_active(obj).await? {
+            return Ok(Vec::new());
+        }
+        Ok(sets)
+    }
+
+    fn command_timeout(&self) -> std::time::Duration {
+        self.config.command_timeout
+    }
+
     fn enable_record(&self) -> bool {
         self.config.enable_record
     }
@@ -694,9 +716,11 @@ async fn load_snapshot(repo: &dyn DatabaseRepository) -> Result<casbin::Snapshot
     let g2 = repo.list_casbin_rule_group_by_ptype(Ptype::G2).await?;
     let g3 = repo.list_casbin_rule_group_by_ptype(Ptype::G3).await?;
     let policies = repo.list_casbin_rules_by_ptype(Ptype::Policy).await?;
+    let command_sets = repo.list_command_sets(true).await?;
     Ok(casbin::Snapshot::new(
         casbin::RoleManage::new(g1, g2, g3)?,
         policies,
+        command_sets,
     ))
 }
 

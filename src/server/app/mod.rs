@@ -1,6 +1,7 @@
 pub(super) mod admin;
 pub(super) mod change_password;
 pub(super) mod connect_target;
+pub(crate) mod limited_shell;
 pub(super) mod sftp;
 use bytes::Bytes;
 pub mod error;
@@ -95,6 +96,8 @@ pub enum Application<B: 'static + crate::server::HandlerBackend + Send + Sync> {
     Password,
     Player,
     Sftp,
+    /// `None` until the shell request starts it.
+    LimitedShell(Option<Arc<limited_shell::ShellInput>>),
     #[default]
     None,
 }

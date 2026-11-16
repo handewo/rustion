@@ -406,6 +406,39 @@ impl FieldsToArray for Secret {
     }
 }
 
+impl FieldsToArray for CommandSet {
+    fn to_array(&self, mode: DisplayMode, tr: &Strings) -> Vec<String> {
+        match mode {
+            DisplayMode::Full => vec![
+                self.id.to_string(),
+                self.name.clone(),
+                self.config.clone(),
+                self.is_active.to_string(),
+                self.updated_by.to_string(),
+                self.updated_at.to_string(),
+            ],
+            DisplayMode::Manage => vec![
+                self.name.clone(),
+                command_aliases(&self.config).unwrap_or_else(|| tr.unknown.to_string()),
+                yes_no(self.is_active, tr),
+            ],
+        }
+    }
+}
+
+/// The aliases a config defines, `df, htop`, for the table. `None` when the
+/// config is not the JSON the editor saves.
+fn command_aliases(config: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(config).ok()?;
+    let aliases: Vec<&str> = value
+        .get("commands")?
+        .as_array()?
+        .iter()
+        .filter_map(|c| c.get("alias")?.as_str())
+        .collect();
+    Some(aliases.join(", "))
+}
+
 impl FieldsToArray for CasbinName {
     fn to_array(&self, mode: DisplayMode, tr: &Strings) -> Vec<String> {
         match mode {

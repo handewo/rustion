@@ -25,6 +25,7 @@ use unicode_width::UnicodeWidthStr;
 mod bind;
 mod casbin_group;
 mod casbin_name;
+mod command_set;
 mod grant_role;
 mod permission;
 mod secret;
@@ -84,11 +85,12 @@ enum SelectedTab {
     RoleHierarchy = 6,
     TargetGroup = 7,
     ActionGroup = 8,
+    CommandSets = 9,
 }
 
 impl SelectedTab {
     /// The tab's label, in the order of the tabs.
-    fn labels(tr: &Strings) -> [&'static str; 9] {
+    fn labels(tr: &Strings) -> [&'static str; 10] {
         [
             tr.tab_users,
             tr.tab_targets,
@@ -99,6 +101,7 @@ impl SelectedTab {
             tr.tab_role_hierarchy,
             tr.tab_target_group,
             tr.tab_action_group,
+            tr.tab_command_sets,
         ]
     }
 
@@ -112,13 +115,15 @@ impl SelectedTab {
             SelectedTab::CasbinNames => SelectedTab::RoleHierarchy,
             SelectedTab::RoleHierarchy => SelectedTab::TargetGroup,
             SelectedTab::TargetGroup => SelectedTab::ActionGroup,
-            SelectedTab::ActionGroup => SelectedTab::Users,
+            SelectedTab::ActionGroup => SelectedTab::CommandSets,
+            SelectedTab::CommandSets => SelectedTab::Users,
         }
     }
 
     fn previous(&self) -> Self {
         match self {
-            SelectedTab::Users => SelectedTab::ActionGroup,
+            SelectedTab::Users => SelectedTab::CommandSets,
+            SelectedTab::CommandSets => SelectedTab::ActionGroup,
             SelectedTab::Targets => SelectedTab::Users,
             SelectedTab::Secrets => SelectedTab::Targets,
             SelectedTab::Bind => SelectedTab::Secrets,
@@ -257,6 +262,13 @@ where
                     self.lang.strings(),
                 )))
             }
+            SelectedTab::CommandSets => {
+                self.editor = Editor::CommandSet(Box::new(command_set::CommandSetEditor::new(
+                    CommandSet::new(self.admin_id),
+                    true,
+                    self.lang.strings(),
+                )))
+            }
             SelectedTab::Bind => unreachable!(),
             SelectedTab::RoleHierarchy => unreachable!(),
             SelectedTab::TargetGroup => unreachable!(),
@@ -371,6 +383,18 @@ where
                     self.lang.strings(),
                 )));
             }
+            SelectedTab::CommandSets => {
+                let idx = self.table.state.selected().unwrap();
+                let Some(mut set) = self.items.get_command_set(idx) else {
+                    return false;
+                };
+                set.updated_by = self.admin_id;
+                self.editor = Editor::CommandSet(Box::new(command_set::CommandSetEditor::new(
+                    set,
+                    false,
+                    self.lang.strings(),
+                )));
+            }
             SelectedTab::Bind => unreachable!(),
             SelectedTab::RoleHierarchy => unreachable!(),
             SelectedTab::TargetGroup => unreachable!(),
@@ -397,7 +421,8 @@ where
     }
 
     /// Each delete reloads the policies: a permission is a `casbin_rule`, and
-    /// users, targets, secrets and names take the rules naming them along.
+    /// users, targets, secrets, names and command sets take the rules naming
+    /// them along.
     async fn do_delete(&mut self, idx: usize) {
         self.popup = Popup::None;
         match self.selected_tab {
@@ -547,6 +572,35 @@ where
                     self.refresh_data().await;
                 }
             }
+            SelectedTab::CommandSets => {
+                if let Some(c) = self.items.get_command_set(idx) {
+                    let result = self.backend.db_repository().delete_command_set(c.id).await;
+
+                    let removed = match result {
+                        Ok(removed) => removed.unwrap_or_default(),
+                        Err(e) => {
+                            self.message = Some(Message::Error(vec![
+                                self.lang.strings().internal_error.into(),
+                            ]));
+                            warn!(
+                                "[{}] Delete command set '{}({})' failed by admin_id={}: {}",
+                                self.handler_id, c.name, c.id, self.admin_id, e
+                            );
+                            return;
+                        }
+                    };
+
+                    info!(
+                        "[{}] Command set '{}({})' deleted by admin_id={}, with {:?}",
+                        self.handler_id, c.name, c.id, self.admin_id, removed
+                    );
+                    let event = Audit::deleted(Object::CommandSet, &c.name, c.id, removed);
+                    self.message = Some(Message::Success(vec![event.notice(self.lang.strings())]));
+                    self.log.record(event).await;
+                    self.reload_policies().await;
+                    self.refresh_data().await;
+                }
+            }
             SelectedTab::Bind => unreachable!(),
             SelectedTab::RoleHierarchy => unreachable!(),
             SelectedTab::TargetGroup => unreachable!(),
@@ -562,6 +616,7 @@ where
             SelectedTab::Targets => self.items.get_target(idx).map(|t| t.id),
             SelectedTab::Secrets => self.items.get_secret(idx).map(|s| s.id),
             SelectedTab::CasbinNames => self.items.get_casbin_name(idx).map(|c| c.id),
+            SelectedTab::CommandSets => self.items.get_command_set(idx).map(|c| c.id),
             _ => None,
         };
         match id {
@@ -594,6 +649,11 @@ where
             }
             SelectedTab::CasbinNames => {
                 if self.items.get_casbin_name(idx).is_some() {
+                    return true;
+                }
+            }
+            SelectedTab::CommandSets => {
+                if self.items.get_command_set(idx).is_some() {
                     return true;
                 }
             }
@@ -751,6 +811,9 @@ where
                         let _ = e.as_mut().handle_paste_event(paste);
                     }
                     Editor::CasbinName(ref mut e) => {
+                        let _ = e.as_mut().handle_paste_event(paste);
+                    }
+                    Editor::CommandSet(ref mut e) => {
                         let _ = e.as_mut().handle_paste_event(paste);
                     }
                     Editor::Permission(ref mut e) => {
@@ -1048,6 +1111,64 @@ where
                     self.restore_color();
                 }
             }
+            Editor::CommandSet(ref mut e) => {
+                if e.as_mut().handle_key_event(key.code, key.modifiers) {
+                    if !e.form.show_cancel_confirmation {
+                        let active_model = e.active_model.to_owned();
+
+                        let (action, result) = match self.popup {
+                            Popup::Add => (
+                                Change::Added,
+                                self.backend
+                                    .db_repository()
+                                    .create_command_set(active_model)
+                                    .await,
+                            ),
+                            Popup::Edit => (
+                                Change::Updated,
+                                self.backend
+                                    .db_repository()
+                                    .update_command_set(active_model)
+                                    .await,
+                            ),
+                            _ => unreachable!(),
+                        };
+
+                        let set = match result {
+                            Ok(s) => s,
+                            Err(ref err) => {
+                                let msg = match err {
+                                    e if e.is_unique_violation() => {
+                                        self.lang.strings().command_set_exists
+                                    }
+                                    _ => self.lang.strings().internal_error,
+                                };
+                                warn!(
+                                    "[{}] Failed to {} command set: {}",
+                                    self.handler_id, action, err
+                                );
+                                self.message = Some(Message::Error(vec![msg.into()]));
+                                return Ok(());
+                            }
+                        };
+
+                        info!(
+                            "[{}] Command set '{}({})' {} by admin_id={}",
+                            self.handler_id, set.name, set.id, action, self.admin_id
+                        );
+                        let event = Audit::saved(Object::CommandSet, action, &set.name, set.id);
+                        let msg = vec![event.notice(self.lang.strings())];
+                        self.log.record(event).await;
+                        self.message = Some(Message::Success(msg));
+                        // The snapshot holds the compiled sets: a new config,
+                        // or a set turned off, applies at the reload.
+                        self.reload_policies().await;
+                    }
+                    self.clear_form();
+                    self.refresh_data().await;
+                    self.restore_color();
+                }
+            }
             Editor::Bind(_) => unreachable!(),
             Editor::CasbinGroup(_) => unreachable!(),
             Editor::None => unreachable!(),
@@ -1109,7 +1230,8 @@ where
             | SelectedTab::Targets
             | SelectedTab::Secrets
             | SelectedTab::Permissions
-            | SelectedTab::CasbinNames => {
+            | SelectedTab::CasbinNames
+            | SelectedTab::CommandSets => {
                 self.table.render(
                     frame.buffer_mut(),
                     table_area,
@@ -1204,6 +1326,15 @@ where
                         .unwrap_or_default(),
                 );
             }
+            SelectedTab::CommandSets => {
+                self.items = TableData::CommandSets(
+                    self.backend
+                        .db_repository()
+                        .list_command_sets(false)
+                        .await
+                        .unwrap_or_default(),
+                );
+            }
             SelectedTab::RoleHierarchy => {
                 self.editor = Editor::CasbinGroup(Box::new(
                     casbin_group::CasbinGroupEditor::new(
@@ -1289,6 +1420,7 @@ where
                 Editor::Secret(_) => tr.title_add_secret,
                 Editor::Permission(_) => tr.title_add_permission,
                 Editor::CasbinName(_) => tr.title_add_group,
+                Editor::CommandSet(_) => tr.title_add_command_set,
                 Editor::GrantRole(_) => unreachable!(),
                 Editor::Bind(_) => unreachable!(),
                 Editor::CasbinGroup(_) => unreachable!(),
@@ -1301,6 +1433,7 @@ where
                 Editor::Permission(_) => tr.title_edit_permission,
                 Editor::GrantRole(_) => tr.title_grant_role,
                 Editor::CasbinName(_) => tr.title_edit_group,
+                Editor::CommandSet(_) => tr.title_edit_command_set,
                 Editor::Bind(_) => unreachable!(),
                 Editor::CasbinGroup(_) => unreachable!(),
                 Editor::None => unreachable!(),
@@ -1362,6 +1495,15 @@ where
                             tr,
                         );
                     }
+                    SelectedTab::CommandSets => {
+                        render_confirm_dialog(
+                            popup_area,
+                            frame.buffer_mut(),
+                            &lines(tr.delete_command_set_q),
+                            self.theme,
+                            tr,
+                        );
+                    }
                     SelectedTab::Bind => unreachable!(),
                     SelectedTab::RoleHierarchy => unreachable!(),
                     SelectedTab::TargetGroup => unreachable!(),
@@ -1393,6 +1535,7 @@ where
             Editor::Permission(ref e) => e.as_ref().help_text,
             Editor::GrantRole(ref e) => e.as_ref().help_text,
             Editor::CasbinName(ref e) => e.as_ref().form.help_text,
+            Editor::CommandSet(ref e) => e.as_ref().form.help_text,
             Editor::None => {
                 if self.selected_tab == SelectedTab::Users {
                     USER_HELP_TEXT
@@ -1411,6 +1554,7 @@ enum TableData {
     Secrets(Vec<Secret>),
     CasbinNames(Vec<CasbinName>),
     Permissions(Vec<PermissionPolicy>),
+    CommandSets(Vec<CommandSet>),
 }
 
 impl TableData {
@@ -1440,6 +1584,14 @@ impl TableData {
 
     fn get_permission(&self, i: usize) -> Option<PermissionPolicy> {
         if let TableData::Permissions(data) = self {
+            data.get(i).cloned()
+        } else {
+            None
+        }
+    }
+
+    fn get_command_set(&self, i: usize) -> Option<CommandSet> {
+        if let TableData::CommandSets(data) = self {
             data.get(i).cloned()
         } else {
             None
@@ -1633,6 +1785,20 @@ impl TableData {
                     Constraint::Length(ext_len as u16),
                 ]
             }
+            Self::CommandSets(data) => {
+                let name_len = data
+                    .iter()
+                    .map(|v| v.name.as_str())
+                    .map(UnicodeWidthStr::width)
+                    .max()
+                    .unwrap_or(0)
+                    .max(4);
+                vec![
+                    Constraint::Length(name_len as u16),
+                    Constraint::Min(8),    // commands
+                    Constraint::Length(9), // is_active
+                ]
+            }
         }
     }
 }
@@ -1660,6 +1826,10 @@ impl crate::server::widgets::TableData for TableData {
                 .iter()
                 .map(|v| v as &dyn FieldsToArray)
                 .collect::<Vec<_>>(),
+            Self::CommandSets(data) => data
+                .iter()
+                .map(|v| v as &dyn FieldsToArray)
+                .collect::<Vec<_>>(),
         }
     }
 
@@ -1670,6 +1840,7 @@ impl crate::server::widgets::TableData for TableData {
             Self::Secrets(data) => data.len(),
             Self::CasbinNames(data) => data.len(),
             Self::Permissions(data) => data.len(),
+            Self::CommandSets(data) => data.len(),
         }
     }
 
@@ -1708,6 +1879,7 @@ impl crate::server::widgets::TableData for TableData {
                 tr.col_action_group,
                 tr.col_extend_policy,
             ],
+            Self::CommandSets(_) => vec![tr.col_name, tr.col_commands, tr.col_is_active],
         }
     }
 }
@@ -1724,6 +1896,7 @@ where
     CasbinGroup(Box<casbin_group::CasbinGroupEditor<B>>),
     GrantRole(Box<grant_role::GrantRoleEditor<B>>),
     CasbinName(Box<casbin_name::CasbinNameEditor>),
+    CommandSet(Box<command_set::CommandSetEditor>),
     None,
 }
 
@@ -1740,6 +1913,7 @@ where
             Editor::Bind(e) => e.render(area, buf, theme),
             Editor::Permission(e) => e.render(area, buf, theme),
             Editor::CasbinName(e) => e.render(area, buf, theme),
+            Editor::CommandSet(e) => e.render(area, buf, theme),
             Editor::CasbinGroup(_) => {
                 unreachable!();
             }

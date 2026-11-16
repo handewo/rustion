@@ -133,6 +133,11 @@ fn default_policy_reload_interval() -> Duration {
     Duration::ZERO
 }
 
+/// Off: a limited-shell command runs until it exits or the user stops it.
+fn default_command_timeout() -> Duration {
+    Duration::ZERO
+}
+
 fn default_database() -> String {
     DEFAULT_DATABASE_URL.to_string()
 }
@@ -181,6 +186,12 @@ pub struct Config {
     #[serde(default = "default_policy_reload_interval")]
     #[serde(with = "humantime_serde")]
     pub policy_reload_interval: Duration,
+    /// How long one command in the limited shell may run, e.g. `"10m"`.
+    /// `"0s"`, the default, is no limit. When it runs out the command is sent
+    /// `TERM` and its channel closed.
+    #[serde(default = "default_command_timeout")]
+    #[serde(with = "humantime_serde")]
+    pub command_timeout: Duration,
     /// sea-orm connection URL. The scheme picks the backend, so this is the
     /// whole of the database choice — see [`SUPPORTED_SCHEMES`].
     #[serde(default = "default_database")]
@@ -246,6 +257,7 @@ impl Config {
             inactivity_timeout: None,
             log_level: LogLevel::default(),
             policy_reload_interval: default_policy_reload_interval(),
+            command_timeout: default_command_timeout(),
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -409,6 +421,7 @@ impl std::fmt::Display for Config {
             inactivity_timeout: {}\r
             log_level: {}\r
             policy_reload_interval: {}\r
+            command_timeout: {}\r
             database: {}\r
             enable_record: {}\r
             record_input: {}\r
@@ -434,6 +447,7 @@ impl std::fmt::Display for Config {
                     .to_string()),
             self.log_level,
             humantime::format_duration(self.policy_reload_interval),
+            humantime::format_duration(self.command_timeout),
             redact_url(&self.database),
             self.enable_record,
             self.record_input,
@@ -466,6 +480,7 @@ mod tests {
             inactivity_timeout: None,
             log_level: LogLevel::Info,
             policy_reload_interval: Duration::ZERO,
+            command_timeout: Duration::ZERO,
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -491,6 +506,7 @@ mod tests {
             inactivity_timeout: None,
             log_level: LogLevel::Info,
             policy_reload_interval: Duration::ZERO,
+            command_timeout: Duration::ZERO,
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -517,6 +533,7 @@ mod tests {
             inactivity_timeout: None,
             log_level: LogLevel::Info,
             policy_reload_interval: Duration::ZERO,
+            command_timeout: Duration::ZERO,
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -549,6 +566,7 @@ mod tests {
             inactivity_timeout: None,
             log_level: LogLevel::Info,
             policy_reload_interval: Duration::ZERO,
+            command_timeout: Duration::ZERO,
             database: default_database(),
             enable_record: false,
             record_input: false,

@@ -17,12 +17,13 @@ use sea_orm::{
 use uuid::Uuid;
 
 use crate::database::entity::{
-    casbin_name, casbin_rule, event_log, secret, session_recording, target, target_secret, user,
+    casbin_name, casbin_rule, command_set, event_log, secret, session_recording, target,
+    target_secret, user,
 };
 use crate::database::error::DatabaseError;
 use crate::database::models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, Dependents, EventLog, GroupType, NamePtype,
-    ObjectGroup, PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo,
+    CasbinName, CasbinRule, CasbinRuleGroup, CommandSet, Dependents, EventLog, GroupType,
+    NamePtype, ObjectGroup, PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo,
     SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName, User, UserWithRole,
 };
 use crate::database::{DatabaseRepository, redact_url};
@@ -76,6 +77,7 @@ impl SeaOrmRepository {
             && exists!(casbin_name::Entity)
             && exists!(event_log::Entity)
             && exists!(session_recording::Entity)
+            && exists!(command_set::Entity)
     }
 }
 
@@ -113,6 +115,7 @@ impl DatabaseRepository for SeaOrmRepository {
             .register(casbin_name::Entity)
             .register(event_log::Entity)
             .register(session_recording::Entity)
+            .register(command_set::Entity)
             .sync(&self.db)
             .await?;
 
@@ -672,6 +675,62 @@ impl DatabaseRepository for SeaOrmRepository {
         .exec_without_returning(&self.db)
         .await?;
         Ok(rows)
+    }
+
+    // ----------------------------------------------------------- command_set
+
+    async fn create_command_set(
+        &self,
+        mut set: command_set::ActiveModel,
+    ) -> Result<CommandSet, Error> {
+        set.updated_at = Set(Utc::now().timestamp_millis());
+        Ok(set.insert(&self.db).await?.into())
+    }
+
+    async fn update_command_set(
+        &self,
+        mut set: command_set::ActiveModel,
+    ) -> Result<CommandSet, Error> {
+        set.updated_at = Set(Utc::now().timestamp_millis());
+        Ok(command_set::Entity::update(set)
+            .exec(&self.db)
+            .await?
+            .into())
+    }
+
+    async fn delete_command_set(&self, id: Uuid) -> Result<Option<Dependents>, Error> {
+        debug!("Deleting command_set: id={}", id);
+        let txn = self.db.begin().await?;
+        let removed = delete_dependents(&txn, id).await?;
+        let res = command_set::Entity::delete_by_id(id).exec(&txn).await?;
+        txn.commit().await?;
+        Ok((res.rows_affected > 0).then_some(removed))
+    }
+
+    async fn list_command_sets(&self, active_only: bool) -> Result<Vec<CommandSet>, Error> {
+        let mut q = command_set::Entity::find();
+        if active_only {
+            q = q.filter(command_set::Column::IsActive.eq(true));
+        }
+        Ok(q.order_by_asc(command_set::Column::Name)
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(CommandSet::from)
+            .collect())
+    }
+
+    async fn create_command_sets_batch(&self, sets: Vec<CommandSet>) -> Result<u64, Error> {
+        if sets.is_empty() {
+            return Ok(0);
+        }
+        Ok(command_set::Entity::insert_many(
+            sets.into_iter()
+                .map(CommandSet::into_active_model)
+                .collect::<Vec<_>>(),
+        )
+        .exec_without_returning(&self.db)
+        .await?)
     }
 
     // ------------------------------------------------------------------ logs

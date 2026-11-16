@@ -24,7 +24,9 @@ mod tests {
         ACT_DIRECT_TCPIP, ACT_EXEC, ACT_LOGIN, ACT_PTY, ACT_SFTP_READ, ACT_SHELL, OBJ_ADMIN,
         OBJ_LOGIN, OBJ_PLAYER, SFTP_ACTIONS,
     };
-    use crate::database::entity::{casbin_name, casbin_rule, secret, target, target_secret};
+    use crate::database::entity::{
+        casbin_name, casbin_rule, command_set, secret, target, target_secret,
+    };
     use crate::database::fixture::{self, *};
     use crate::database::models::{GroupType, NamePtype, Ptype};
     use crate::database::{DatabaseRepository, Uuid};
@@ -839,6 +841,192 @@ mod tests {
             );
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
+    }
+
+    impl Env {
+        /// Insert a command set and reload, handing back its id.
+        async fn add_command_set(&self, name: &str, config: &str, is_active: bool) -> Uuid {
+            let id = self
+                .repo()
+                .create_command_set(command_set::ActiveModel {
+                    id: Set(Uuid::now_v7()),
+                    name: Set(name.to_string()),
+                    config: Set(config.to_string()),
+                    is_active: Set(is_active),
+                    updated_by: Set(self.f().admin_id),
+                    ..Default::default()
+                })
+                .await
+                .expect("insert command set")
+                .id;
+            self.reload().await;
+            id
+        }
+
+        /// The names of the sets `sub` holds on `obj`, in the order given.
+        async fn sets(&self, sub: Uuid, obj: Uuid, ext: ExtendPolicyReq) -> Vec<String> {
+            self.server
+                .command_sets_for(sub, obj, ext)
+                .await
+                .expect("command sets")
+                .iter()
+                .map(|s| s.name.clone())
+                .collect()
+        }
+    }
+
+    const DF: &str = r#"{"commands":[{"alias":"df","exec":"/usr/bin/df -h"}]}"#;
+
+    /// A command set is granted like an action: directly, through an action
+    /// group, and under the policy's extended policy. Sets come back by name,
+    /// and only on the object the policy covers.
+    #[tokio::test]
+    async fn command_sets_are_granted_like_actions() {
+        let env = Env::new().await;
+        let sub = Uuid::now_v7();
+        let sun = env.f().binding("sun", S_MON);
+        let mars1 = env.f().binding("mars1", S_MON);
+        let ops = env.add_command_set("ops", DF, true).await;
+        let base = env.add_command_set("base", DF, true).await;
+        env.add_command_set("unused", DF, true).await;
+
+        assert!(
+            env.sets(sub, sun, ExtendPolicyReq::default())
+                .await
+                .is_empty()
+        );
+
+        env.add_policy(sub, sun, ops, "{}").await;
+        // Through an action group: `base` joins `ag_batch`.
+        env.add_group_rule(Ptype::G3, base, env.f().name(AG_BATCH))
+            .await;
+        env.add_policy(sub, sun, env.f().name(AG_BATCH), "{}").await;
+
+        assert_eq!(
+            env.sets(sub, sun, ExtendPolicyReq::default()).await,
+            ["base", "ops"]
+        );
+        assert!(
+            env.sets(sub, mars1, ExtendPolicyReq::default())
+                .await
+                .is_empty()
+        );
+        // `enforce` sees the set as an action too.
+        assert!(env.allows(sub, sun, ops).await);
+        assert!(!env.allows(sub, mars1, ops).await);
+
+        // The extended policy applies to a set as to any action.
+        let other = Uuid::now_v7();
+        env.add_policy(other, sun, ops, r#"{"ip_policy":{"Allow":"10.0.0.0/8"}}"#)
+            .await;
+        let from = |ip: &str| ExtendPolicyReq {
+            ip: Some(ip.parse::<IpAddr>().unwrap()),
+            ..Default::default()
+        };
+        assert_eq!(env.sets(other, sun, from("10.1.2.3")).await, ["ops"]);
+        assert!(env.sets(other, sun, from("192.168.0.1")).await.is_empty());
+    }
+
+    /// An inactive set, a set whose stored config does not compile, and a set
+    /// on an inactive binding grant nothing. The others still load.
+    #[tokio::test]
+    async fn inactive_or_invalid_command_sets_grant_nothing() {
+        let env = Env::new().await;
+        let sub = Uuid::now_v7();
+        let sun = env.f().binding("sun", S_MON);
+        for (name, config, active) in [
+            ("off", DF, false),
+            (
+                "broken",
+                r#"{"commands":[{"alias":"help","exec":"x"}]}"#,
+                true,
+            ),
+            ("not-json", "nope", true),
+            ("good", DF, true),
+        ] {
+            let id = env.add_command_set(name, config, active).await;
+            env.add_policy(sub, sun, id, "{}").await;
+        }
+        assert_eq!(
+            env.sets(sub, sun, ExtendPolicyReq::default()).await,
+            ["good"]
+        );
+
+        env.repo()
+            .update_target_secret(target_secret::ActiveModel {
+                id: Unchanged(sun),
+                is_active: Set(false),
+                ..Default::default()
+            })
+            .await
+            .expect("deactivate binding");
+        assert!(
+            env.sets(sub, sun, ExtendPolicyReq::default())
+                .await
+                .is_empty()
+        );
+    }
+
+    /// Deleting a set takes the rules naming it, so the permission is gone
+    /// after the reload the TUI does next.
+    #[tokio::test]
+    async fn deleting_a_command_set_takes_its_rules() {
+        let env = Env::new().await;
+        let sub = Uuid::now_v7();
+        let sun = env.f().binding("sun", S_MON);
+        let ops = env.add_command_set("ops", DF, true).await;
+        env.add_policy(sub, sun, ops, "{}").await;
+        env.add_group_rule(Ptype::G3, ops, env.f().name(AG_BATCH))
+            .await;
+        let counted = env.repo().dependents(ops).await.unwrap();
+        assert_eq!((counted.permissions, counted.memberships), (1, 1));
+
+        let removed = env
+            .repo()
+            .delete_command_set(ops)
+            .await
+            .expect("delete")
+            .expect("existed");
+        assert_eq!((removed.permissions, removed.memberships), (1, 1));
+        env.reload().await;
+        assert!(
+            env.sets(sub, sun, ExtendPolicyReq::default())
+                .await
+                .is_empty()
+        );
+        assert!(env.repo().delete_command_set(ops).await.unwrap().is_none());
+    }
+
+    /// The permission editor and the action groups list command sets beside
+    /// the actions, and permissions label them by name.
+    #[tokio::test]
+    async fn command_sets_are_listed_and_labelled_as_actions() {
+        let env = Env::new().await;
+        let sun = env.f().binding("sun", S_MON);
+        let ops = env.add_command_set("ops", DF, true).await;
+        env.add_policy(env.f().user(LUKA), sun, ops, "{}").await;
+        env.add_group_rule(Ptype::G3, ops, env.f().name(AG_BATCH))
+            .await;
+
+        let actions = env.repo().list_action_group().await.unwrap();
+        let listed = actions.iter().find(|a| a.id == ops).expect("listed");
+        assert_eq!(listed.name, "ops");
+        assert!(!listed.is_group);
+
+        let perms = env.repo().list_permission_polices().await.unwrap();
+        assert!(
+            perms
+                .iter()
+                .any(|p| p.rule.v2 == ops && p.action_group == "ops")
+        );
+
+        let members = env
+            .repo()
+            .list_casbin_rule_group_by_ptype(Ptype::G3)
+            .await
+            .unwrap();
+        let member = members.iter().find(|m| m.v0 == ops).expect("member");
+        assert_eq!(member.v0_object_label.as_deref(), Some("ops"));
     }
 
     /// A database from before the SFTP actions existed still starts, and gains

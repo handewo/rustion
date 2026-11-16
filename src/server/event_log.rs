@@ -23,6 +23,7 @@
 use crate::database::Uuid;
 use crate::database::models::Dependents;
 use crate::i18n::Strings;
+use crate::server::app::limited_shell::DenyReason;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -101,6 +102,8 @@ pub(crate) enum Object {
     Permission,
     /// A casbin name: a role, a target group or an action group.
     Group,
+    /// A command set of the limited shell.
+    CommandSet,
 }
 
 /// What was put in a group, or taken out.
@@ -227,6 +230,29 @@ pub(crate) enum Audit {
     SftpSymlink {
         link: String,
         target: String,
+    },
+    /// Entering a target in the limited shell.
+    CommandShell {
+        target: String,
+    },
+    /// A command the limited shell ran: `line` as the user typed it,
+    /// `command` as the set made it (its `exec` and hidden text included).
+    CommandRan {
+        target: String,
+        line: String,
+        command: String,
+        set: String,
+        /// `None` when the command ended without one: stopped, or killed.
+        #[serde(default)]
+        status: Option<u32>,
+        #[serde(default)]
+        timed_out: bool,
+    },
+    /// A line the limited shell refused to run.
+    CommandDenied {
+        target: String,
+        line: String,
+        reason: DenyReason,
     },
 }
 
@@ -355,6 +381,9 @@ impl Audit {
                     (Group, Added) => tr.a_group_added,
                     (Group, Updated) => tr.a_group_updated,
                     (Group, Deleted) => tr.a_group_deleted,
+                    (CommandSet, Added) => tr.a_command_set_added,
+                    (CommandSet, Updated) => tr.a_command_set_updated,
+                    (CommandSet, Deleted) => tr.a_command_set_deleted,
                 };
                 let event = fill!(t, name = plain(&labelled(name, id)), id = plain(id));
                 with_dependents(event, removed, tr)
@@ -477,6 +506,52 @@ impl Audit {
                 link = quoted(link),
                 target = quoted(target)
             ),
+            Audit::CommandShell { target } => fill!(tr.a_command_shell, target = plain(target)),
+            Audit::CommandRan {
+                target,
+                line,
+                command,
+                set,
+                status,
+                timed_out,
+            } => {
+                let (target, line, command, set) =
+                    (plain(target), quoted(line), quoted(command), plain(set));
+                match (status, timed_out) {
+                    (_, true) => fill!(
+                        tr.a_command_timed_out,
+                        target = target,
+                        line = line,
+                        command = command,
+                        set = set
+                    ),
+                    (Some(status), false) => fill!(
+                        tr.a_command_ran,
+                        target = target,
+                        line = line,
+                        command = command,
+                        set = set,
+                        status = status
+                    ),
+                    (None, false) => fill!(
+                        tr.a_command_ended,
+                        target = target,
+                        line = line,
+                        command = command,
+                        set = set
+                    ),
+                }
+            }
+            Audit::CommandDenied {
+                target,
+                line,
+                reason,
+            } => fill!(
+                tr.a_command_denied,
+                target = plain(target),
+                line = quoted(line),
+                reason = reason.text(tr)
+            ),
         }
     }
 }
@@ -524,6 +599,9 @@ impl Audit {
                     (Group, Added) => tr.a_group_added,
                     (Group, Updated) => tr.a_group_updated,
                     (Group, Deleted) => tr.a_group_deleted,
+                    (CommandSet, Added) => tr.a_command_set_added,
+                    (CommandSet, Updated) => tr.a_command_set_updated,
+                    (CommandSet, Deleted) => tr.a_command_set_deleted,
                     (Permission, _) => unreachable!("matched above"),
                 };
                 with_dependents(fill!(t, name = plain(name)), removed, tr)
@@ -607,7 +685,12 @@ fn text_fields(value: &mut serde_json::Value) -> Vec<&mut String> {
             Value::Array(a) => a.iter_mut().for_each(|v| walk(v, out)),
             Value::Object(o) => o
                 .iter_mut()
-                .filter(|(k, _)| !matches!(k.as_str(), "event" | "object" | "change" | "kind"))
+                .filter(|(k, _)| {
+                    !matches!(
+                        k.as_str(),
+                        "event" | "object" | "change" | "kind" | "reason"
+                    )
+                })
                 .for_each(|(_, v)| walk(v, out)),
             _ => {}
         }
@@ -923,6 +1006,88 @@ mod tests {
             request: "exec: ls\n\u{1b}[2J".into(),
             target: "web1".into(),
             closed: false,
+        });
+        assert!(
+            !shown.contains('\n') && !shown.contains('\u{1b}'),
+            "{shown}"
+        );
+    }
+
+    fn ran(status: Option<u32>, timed_out: bool) -> Audit {
+        Audit::CommandRan {
+            target: "root@web1(b1)".into(),
+            line: "df -h".into(),
+            command: "/usr/bin/df -h".into(),
+            set: "ops".into(),
+            status,
+            timed_out,
+        }
+    }
+
+    #[test]
+    fn command_rows_are_stored_and_read_back() {
+        assert_eq!(
+            ran(Some(0), false).encode(),
+            r#"{"event":"command_ran","target":"root@web1(b1)","line":"df -h","command":"/usr/bin/df -h","set":"ops","status":0,"timed_out":false}"#
+        );
+        let denied = Audit::CommandDenied {
+            target: "root@web1(b1)".into(),
+            line: "rm -rf /".into(),
+            reason: DenyReason::UnknownCommand,
+        };
+        assert_eq!(
+            denied.encode(),
+            r#"{"event":"command_denied","target":"root@web1(b1)","line":"rm -rf /","reason":"unknown_command"}"#
+        );
+        assert_eq!(
+            en(&ran(Some(2), false)),
+            r#"Ran "df -h" on root@web1(b1) as "/usr/bin/df -h" (set 'ops'), exit status 2"#
+        );
+        assert_eq!(
+            en(&denied),
+            r#"Refused "rm -rf /" on root@web1(b1): unknown command"#
+        );
+        for lang in Lang::ALL {
+            for event in [
+                ran(Some(0), false),
+                ran(None, false),
+                ran(None, true),
+                denied.clone(),
+                Audit::CommandShell {
+                    target: "root@web1(b1)".into(),
+                },
+                Audit::saved(Object::CommandSet, Change::Added, "ops", "c1"),
+            ] {
+                let text = render(&event.encode(), lang.strings());
+                assert!(
+                    text.contains("web1(b1)") || text.contains("ops(c1)"),
+                    "{lang}: {text}"
+                );
+                assert!(!text.contains('{'), "{lang}: {text}");
+            }
+        }
+    }
+
+    /// A long command line is cut like a long path, and the reason, an enum
+    /// value, survives whole.
+    #[test]
+    fn a_long_command_row_still_reads() {
+        let row = Audit::CommandDenied {
+            target: "root@web1(b1)".into(),
+            line: "x".repeat(2000),
+            reason: DenyReason::TooLong,
+        }
+        .encode();
+        assert!(row.chars().count() <= DETAIL_MAX);
+        assert!(render(&row, Lang::En.strings()).ends_with(": line too long"));
+    }
+
+    #[test]
+    fn a_typed_line_cannot_forge_a_row() {
+        let shown = en(&Audit::CommandDenied {
+            target: "web1".into(),
+            line: "x\nRan \"ls\"\u{1b}[2J".into(),
+            reason: DenyReason::NotAllowed,
         });
         assert!(
             !shown.contains('\n') && !shown.contains('\u{1b}'),

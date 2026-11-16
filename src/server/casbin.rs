@@ -3,15 +3,17 @@ use crate::error::Error;
 use crate::server::error::ServerError;
 use crate::server::extend_policy::{CompiledExtendPolicy, ExtendPolicyReq, verify_extend_policy};
 use log::{trace, warn};
+use std::sync::Arc;
 use {
-    crate::database::models::{CasbinRule, CasbinRuleGroup, GroupType},
+    crate::database::models::{CasbinRule, CasbinRuleGroup, CommandSet, GroupType},
     petgraph::stable_graph::{NodeIndex, StableDiGraph},
     petgraph::visit::{Bfs, Walker},
     std::collections::HashMap,
 };
 
 /// Everything a permission check is decided from: the three role graphs and
-/// the `p` rules, read from `casbin_rule` together.
+/// the `p` rules, read from `casbin_rule` together, and the active command
+/// sets, which `p` rules grant like actions.
 ///
 /// The server keeps one in memory, loaded at startup, and replaces it whole on
 /// every reload, so a check never pairs new policies with old graphs. Reloads
@@ -21,6 +23,38 @@ use {
 pub struct Snapshot {
     pub roles: RoleManage,
     pub policies: Vec<Policy>,
+    /// Active sets whose config compiles, ordered by name.
+    pub command_sets: Vec<Arc<CompiledCommandSet>>,
+}
+
+/// A command set with its config compiled once at load.
+#[derive(Debug)]
+pub struct CompiledCommandSet {
+    pub id: Uuid,
+    pub name: String,
+    pub policy: crate::command::Policy,
+}
+
+impl CompiledCommandSet {
+    /// `None`, with a warning, when the stored config does not compile. The
+    /// editor refuses such a config, so like a bad `v3` it was written by
+    /// hand, and the set then grants nothing rather than failing the load.
+    fn new(set: CommandSet) -> Option<Self> {
+        match crate::command::Policy::from_json(&set.config) {
+            Ok(policy) => Some(Self {
+                id: set.id,
+                name: set.name,
+                policy,
+            }),
+            Err(e) => {
+                warn!(
+                    "Command set '{}({})' grants nothing: its config is invalid: {}",
+                    set.name, set.id, e
+                );
+                None
+            }
+        }
+    }
 }
 
 /// A `p` rule, with its `v3` parsed once at load rather than on every check.
@@ -52,11 +86,38 @@ impl Policy {
 }
 
 impl Snapshot {
-    pub fn new(roles: RoleManage, rules: Vec<CasbinRule>) -> Self {
+    /// `sets` are the active command sets.
+    pub fn new(roles: RoleManage, rules: Vec<CasbinRule>, sets: Vec<CommandSet>) -> Self {
+        let mut command_sets: Vec<_> = sets
+            .into_iter()
+            .filter_map(CompiledCommandSet::new)
+            .map(Arc::new)
+            .collect();
+        // TODO: sort by database
+        command_sets.sort_by(|a, b| a.name.cmp(&b.name));
         Self {
             roles,
             policies: rules.into_iter().map(Policy::new).collect(),
+            command_sets,
         }
+    }
+
+    /// The command sets some policy grants `sub` on `obj` for this request,
+    /// by name. Like [`Self::grants`], whether `obj` is active is left to the
+    /// caller.
+    pub fn granted_command_sets(
+        &self,
+        sub: Uuid,
+        obj: Uuid,
+        ext: &ExtendPolicyReq,
+    ) -> Result<Vec<Arc<CompiledCommandSet>>, Error> {
+        let mut out = Vec::new();
+        for set in &self.command_sets {
+            if self.grants(sub, obj, set.id, ext)? {
+                out.push(set.clone());
+            }
+        }
+        Ok(out)
     }
 
     /// The policies whose subject is `sub` or a role `sub` has.
@@ -70,6 +131,7 @@ impl Snapshot {
     ///
     /// Only the rules are consulted. Whether `obj` is active is not in the
     /// snapshot, so the caller checks that against the database.
+    /// TODO: Check if group is active
     pub fn grants(
         &self,
         sub: Uuid,

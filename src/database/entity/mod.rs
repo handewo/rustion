@@ -11,6 +11,7 @@
 
 pub(crate) mod casbin_name;
 pub(crate) mod casbin_rule;
+pub(crate) mod command_set;
 pub(crate) mod event_log;
 pub(crate) mod secret;
 pub(crate) mod session_recording;

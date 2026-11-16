@@ -28,7 +28,7 @@ use uuid::Uuid;
 use crate::database::entity::casbin_name::NamePtype;
 use crate::database::entity::casbin_rule::Ptype;
 use crate::database::entity::{
-    casbin_name, casbin_rule, secret, session_recording, target, target_secret, user,
+    casbin_name, casbin_rule, command_set, secret, session_recording, target, target_secret, user,
 };
 use crate::database::models::{
     CasbinName, CasbinRule, CasbinRuleGroup, ObjectGroup, PermissionPolicy, RecordingStatus,
@@ -111,6 +111,17 @@ async fn casbin_name_map(
         .await?
         .into_iter()
         .map(|m| (m.id, CasbinName::from(m)))
+        .collect())
+}
+
+/// Command set names by id. A set is granted like an action, so wherever an
+/// action is labelled, a set may be what the id names.
+async fn command_set_names(db: &DatabaseConnection) -> Result<HashMap<Uuid, String>, Error> {
+    Ok(command_set::Entity::find()
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|m| (m.id, m.name))
         .collect())
 }
 
@@ -473,7 +484,15 @@ pub(super) async fn list_casbin_rule_group_by_ptype(
                     )
                     .filter(casbin_rule::Column::Ptype.eq(Ptype::G3));
 
-            Ok(q.into_model().all(db).await?)
+            // A command set in an action group is no `casbin_name`: label it here.
+            let command_sets = command_set_names(db).await?;
+            let mut rows: Vec<CasbinRuleGroup> = q.into_model().all(db).await?;
+            for row in &mut rows {
+                if row.v0_object_label.is_none() && row.v0_group_label.is_none() {
+                    row.v0_object_label = command_sets.get(&row.v0).cloned();
+                }
+            }
+            Ok(rows)
         }
         // Now exhaustive: `p` is the only other variant, and a permission policy
         // is not a group membership.
@@ -625,9 +644,9 @@ pub(super) async fn list_target_group(db: &DatabaseConnection) -> Result<Vec<Obj
     Ok(out)
 }
 
-/// `g3` groups and internal actions.
+/// `g3` groups and internal actions, then command sets.
 pub(super) async fn list_action_group(db: &DatabaseConnection) -> Result<Vec<ObjectGroup>, Error> {
-    Ok(casbin_name::Entity::find()
+    let mut out: Vec<ObjectGroup> = casbin_name::Entity::find()
         .filter(
             casbin_name::Column::Ptype
                 .eq(NamePtype::G3)
@@ -642,7 +661,23 @@ pub(super) async fn list_action_group(db: &DatabaseConnection) -> Result<Vec<Obj
             id: n.id,
             name: n.name,
         })
-        .collect())
+        .collect();
+
+    out.extend(
+        command_set::Entity::find()
+            .order_by_asc(command_set::Column::Name)
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|c| ObjectGroup {
+                id: c.id,
+                name: c.name,
+                is_group: false,
+            }),
+    );
+    //TODO: sort for whole list
+
+    Ok(out)
 }
 
 // ---------------------------------------------------------------- recordings
@@ -727,6 +762,7 @@ pub(super) async fn list_permission_polices(
         .await?;
 
     let names = casbin_name_map(db, None).await?;
+    let command_sets = command_set_names(db).await?;
     let parts = parts_by_id(db).await?;
     let usernames: HashMap<Uuid, String> = user::Entity::find()
         .all(db)
@@ -750,7 +786,10 @@ pub(super) async fn list_permission_polices(
                 .map(|p| p.full_label())
                 .or_else(|| names.get(&r.v1).map(|n| n.name.clone()));
 
-            let action_group = names.get(&r.v2).map(|n| n.name.clone());
+            let action_group = names
+                .get(&r.v2)
+                .map(|n| n.name.clone())
+                .or_else(|| command_sets.get(&r.v2).cloned());
 
             // A policy naming a deleted row grants nothing and has no label.
             let (Some(user_role), Some(target_group), Some(action_group)) =

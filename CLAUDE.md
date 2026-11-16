@@ -28,6 +28,7 @@ main.rs → cli.rs (clap) → Config (TOML) → BastionServer::with_config()
        - Target selector (interactive)
        - Direct target connection
        - Password change (forced reset)
+       - Limited shell (`user@cmd@bastion`)
 ```
 
 ### Key Modules
@@ -42,6 +43,8 @@ main.rs → cli.rs (clap) → Config (TOML) → BastionServer::with_config()
 - **`server/bastion_server.rs`** — Implements `russh::server::Server`. Holds config, database service, connection/rate-limit caches (moka), and the `casbin::Snapshot` of role graphs and policies that `enforce` reads.
 - **`server/bastion_handler.rs`** — Implements `russh::server::Handler`. Per-connection state machine routing I/O to the active `Application`.
 - **`server/app/sftp/`** — SFTP proxy: per-operation actions (`SftpActions`), regex `sftp_path` rules in `ExtendPolicy`, lexical path resolution against the target's home, handle table, audit rows under `EventKind::Sftp`.
+- **`command/`** — The command parser vendored from `command_demo`: a command set's JSON config (`Policy::from_json`, unknown fields refused), argument templates (`{{type:DESCRIPTION:mode}}`, hidden `{{{...}}}` text), the `cd` allowlist, and help lines built from the templates (`Template::usage`). Words reach a command only through typed placeholders, which reject shell syntax.
+- **`server/app/limited_shell/`** — The limited shell: a reedline prompt on the bastion (`>` to pick a binding, `user@target>` inside one). `commands.rs` merges the granted sets (an alias from two sets runs nowhere), reads a line into a built-in (`help`, `cd`, `pwd`, `exit`) or an approved command, and words help; no I/O. `run.rs` runs one approved line as one `exec` on a fresh target channel, `cd -- '<pwd>' && <line>`, with the set's `pty`/`stdin`, Ctrl-C, `command_timeout`, and a line discipline for `stdin` without a pty. `ShellInput` routes the client's bytes to the running command or to reedline. Sets are re-read from the snapshot for every line. Audited under `EventKind::Command`.
 - **`server/app/admin/`** — TUI admin interface using ratatui + reedline. CRUD for users, targets, secrets, roles, permissions, and bindings.
 - **`server/widgets/`** — Widgets shared by the admin panels and the replay player. `theme.rs` holds the colour themes; widgets take a `&Theme` at render time instead of keeping colours, and `TabBar`, `render_footer`, `popup_block` and the dialogs keep the panels looking the same. `t` cycles the theme in any panel; the admin shell carries the choice from one panel to the next. Help text is written `(key) what it does | (key) …` and drawn as key caps in aligned columns (size the footer with `footer_height`, which grows it on narrow terminals); message and confirm dialogs size themselves to their text and word-wrap it.
 - **`i18n/`** — Interface languages: `en`, `zh-CN`, `zh-TW`, `ja`, `ru`, `fr`, `es`, `pt-BR`. One `Strings` constant per language, so a missing translation is a compile error; templates use `{name}` placeholders filled by `fill!`. Widgets take the session's `&Strings` at render time like the `Theme`; text a widget keeps (form labels, help) is a `Label`/`Help` fn of `&Strings`, so `L` (cycle the language in any panel) rewords it. Help keys stay as on the keyboard; only what they do is translated. The tests hold every language to the English placeholders and keys.
@@ -85,6 +88,16 @@ on a timer. `enforce` answers from an in-memory `casbin::Snapshot` of the role
 graphs and the `p` rules, with each `v3` parsed once; the admin TUI reloads it
 after every write to `casbin_rule`, so only changes made outside this process
 need the timer.
+
+`command_timeout` (e.g. `"10m"`; `"0s"`, the default, is off) bounds how long one
+limited-shell command may run; it is then sent `TERM` and its channel closed.
+
+Command sets live in the `command_set` table (name, JSON `config`, `is_active`) and
+are granted like actions: a set's id is the `v2` of a `p` rule or a member of a `g3`
+group, so `list_action_group` and the permission labels include them. The snapshot
+compiles the active sets at load (`Snapshot::command_sets`), skipping a config that
+does not compile, and `HandlerBackend::command_sets_for` returns those granted on a
+binding. Writes to `command_set` must call `reload_policies`.
 
 `database` is a sea-orm connection URL, passed to sea-orm verbatim. The scheme
 selects the driver, so it is the whole of the backend choice
@@ -133,4 +146,11 @@ Tests are inline (`#[cfg(test)]` modules) in:
   language, and the 512-character bound.
 - `server/extend_policy.rs` — Extended-policy parsing and matching, including
   the regex `sftp_path` rules.
+- `command/{policy,template,kind,lex}.rs`, `command/test.rs` — The command
+  parser: JSON configs, templates, types, help lines, and the port of the Go suite.
+- `server/app/limited_shell/commands.rs` — Merging sets, reading lines, `cd`,
+  help text, and `sh_quote` checked against a real `sh`.
+- `server/app/limited_shell/test.rs` — The runner against a fake target over
+  `tokio::io::duplex` (exact exec strings, pty, stdin, EOF, Ctrl-C, timeout), and
+  one session through a real `BastionServer` to a fake target on a local port.
 - `server/app/change_password.rs` — Password change logic

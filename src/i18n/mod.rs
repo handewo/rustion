@@ -276,22 +276,26 @@ strings! {
     tab_role_hierarchy,
     tab_target_group,
     tab_action_group,
+    tab_command_sets,
     title_add_user,
     title_add_target,
     title_add_secret,
     title_add_permission,
     title_add_group,
+    title_add_command_set,
     title_edit_user,
     title_edit_target,
     title_edit_secret,
     title_edit_permission,
     title_edit_group,
+    title_edit_command_set,
     title_grant_role,
     delete_user_q,
     delete_target_q,
     delete_secret_q,
     delete_permission_q,
     delete_group_q,
+    delete_command_set_q,
     /// Heads the list of what a delete takes along, in the confirm dialog.
     also_removes,
     // What a delete takes along. Labels, not counted nouns: `dep_item` puts the
@@ -310,6 +314,7 @@ strings! {
     secret_exists,
     permission_exists,
     group_exists,
+    command_set_exists,
     /// `{password}`
     new_password,
     invalid_authorized_keys,
@@ -339,6 +344,7 @@ strings! {
     col_target_group,
     col_action_group,
     col_extend_policy,
+    col_commands,
     col_object,
     col_is_group,
     col_target_label,
@@ -376,6 +382,7 @@ strings! {
     field_target_group,
     field_action_group,
     field_extend_policy,
+    field_command_config,
 
     // Field validation.
     v_username_empty,
@@ -407,6 +414,8 @@ strings! {
     v_missing_rule_id,
     /// `{error}`
     v_extend_policy,
+    /// `{error}`: the parser's own words, in English.
+    v_command_config,
     /// `{target}`, `{user}`
     duplicate_target_user,
 
@@ -466,6 +475,64 @@ strings! {
     /// `{command}`
     unknown_command,
     command_not_found,
+
+    // Limited shell. Aliases, `help`, `cd`, `pwd` and `exit` are typed, so
+    // they stay as they are.
+    ls_welcome,
+    ls_targets,
+    ls_no_targets,
+    /// `{name}`
+    ls_no_such_target,
+    /// `{name}`, `{choices}`
+    ls_ambiguous_target,
+    /// `{target}`
+    ls_no_commands,
+    /// `{target}`
+    ls_connect_failed,
+    ls_entered,
+    ls_revoked,
+    /// `{name}`
+    ls_unknown_command,
+    /// `{name}`
+    ls_not_allowed,
+    /// `{reason}`: an `r_*`.
+    ls_refused,
+    /// `{name}`
+    ls_duplicate_alias,
+    /// `{usage}`
+    ls_usage_is,
+    /// `{dir}`
+    ls_cd_not_allowed,
+    /// `{dir}`
+    ls_cd_failed,
+    /// `{status}`
+    ls_exit_status,
+    /// `{signal}`
+    ls_signalled,
+    /// `{limit}`
+    ls_timed_out,
+    ls_stopped,
+    ls_not_started,
+    ls_commands,
+    ls_builtins,
+    ls_none,
+    ls_cd_allowed,
+    ls_cd_home,
+    ls_usage,
+    ls_options,
+    ls_help_help,
+    ls_help_cd,
+    ls_help_pwd,
+    ls_help_exit,
+    // Why a line was refused, in the shell and in the audit trail.
+    r_unknown_command,
+    r_not_allowed,
+    r_breaks_quoting,
+    r_unbalanced_quote,
+    r_too_long,
+    r_duplicate_alias,
+    r_cd_not_allowed,
+    r_bad_usage,
 
     // Target selector.
     select_target,
@@ -535,6 +602,12 @@ strings! {
     a_group_updated,
     /// `{name}`: `name(id)` in the log, the name alone in a dialog.
     a_group_deleted,
+    /// `{name}`: `name(id)` in the log, the name alone in a dialog.
+    a_command_set_added,
+    /// `{name}`: `name(id)` in the log, the name alone in a dialog.
+    a_command_set_updated,
+    /// `{name}`: `name(id)` in the log, the name alone in a dialog.
+    a_command_set_deleted,
     /// `{role}`, `{user}`
     a_role_granted,
     /// `{role}`, `{user}`
@@ -582,6 +655,16 @@ strings! {
     a_sftp_rename,
     /// `{link}`, `{target}`
     a_sftp_symlink,
+    /// `{target}`
+    a_command_shell,
+    /// `{target}`, `{line}`, `{command}`, `{set}`, `{status}`
+    a_command_ran,
+    /// `{target}`, `{line}`, `{command}`, `{set}`
+    a_command_ended,
+    /// `{target}`, `{line}`, `{command}`, `{set}`
+    a_command_timed_out,
+    /// `{target}`, `{line}`, `{reason}`: an `r_*`.
+    a_command_denied,
 }
 
 #[cfg(test)]

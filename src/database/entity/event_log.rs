@@ -109,6 +109,10 @@ pub enum EventKind {
     #[sea_orm(num_value = 6)]
     #[serde(rename = "sftp")]
     Sftp,
+    /// The limited shell: targets entered, commands run and refused.
+    #[sea_orm(num_value = 7)]
+    #[serde(rename = "command")]
+    Command,
 }
 
 impl EventKind {
@@ -125,6 +129,7 @@ impl EventKind {
             Self::Password => "password",
             Self::Player => "player",
             Self::Sftp => "sftp",
+            Self::Command => "command",
         }
     }
 }
@@ -158,11 +163,12 @@ mod tests {
             (4, EventKind::Password),
             (5, EventKind::Player),
             (6, EventKind::Sftp),
+            (7, EventKind::Command),
         ] {
             assert_eq!(k.to_value(), want, "{k} changed its stored value");
             assert_eq!(EventKind::try_from_value(&want).unwrap(), k);
         }
-        assert_eq!(EventKind::iter().count(), 7, "a variant was added");
+        assert_eq!(EventKind::iter().count(), 8, "a variant was added");
     }
 
     /// `as_str`, `Display` and the serde rename are three hand-written spellings of
@@ -185,10 +191,10 @@ mod tests {
         }
     }
 
-    /// A `log_type` outside the seven known values is a corrupt row, not a default.
+    /// A `log_type` outside the eight known values is a corrupt row, not a default.
     #[test]
     fn event_kind_rejects_unknown_discriminant() {
-        assert!(EventKind::try_from_value(&7).is_err());
+        assert!(EventKind::try_from_value(&8).is_err());
         assert!(EventKind::try_from_value(&-1).is_err());
     }
 

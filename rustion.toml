@@ -90,3 +90,9 @@ database = "sqlite://rustion.db?mode=rwc"
 # the next reload; this bounds how long that takes.
 # Default: 0s (off)
 # policy_reload_interval = "1m"
+
+# How long one command in the limited shell (`ssh user@cmd@bastion`) may run.
+# When it runs out the command is sent TERM and its channel closed. This covers
+# commands on a pty too, such as `htop`, so leave it off if those must stay open.
+# Default: 0s (off)
+# command_timeout = "10m"

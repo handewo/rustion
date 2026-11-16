@@ -17,8 +17,9 @@ mod test;
 use crate::{
     database::{
         entity::{
-            casbin_name, casbin_rule as casbin_rule_entity, event_log, secret, session_recording,
-            target as target_entity, target_secret as target_secret_entity, user,
+            casbin_name, casbin_rule as casbin_rule_entity, command_set, event_log, secret,
+            session_recording, target as target_entity, target_secret as target_secret_entity,
+            user,
         },
         models::UserWithRole,
     },
@@ -26,8 +27,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, Dependents, EventLog, GroupType, NamePtype,
-    ObjectGroup, PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo,
+    CasbinName, CasbinRule, CasbinRuleGroup, CommandSet, Dependents, EventLog, GroupType,
+    NamePtype, ObjectGroup, PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo,
     SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName, User,
 };
 pub use uuid::Uuid;
@@ -456,6 +457,27 @@ pub trait DatabaseRepository: Send + Sync {
     /// Batch path: writes `updated_at` as given. See the note on the other
     /// `*_batch` methods below.
     async fn create_casbin_names_batch(&self, names: Vec<CasbinName>) -> Result<u64, Error>;
+
+    // ------------------------------------------------------------ command_set
+    // The limited shell's command sets. A set is granted like an action, so
+    // its id appears in `casbin_rule.v2` (`p`) and `v0` (`g3`), and every write
+    // here must be followed by `HandlerBackend::reload_policies`.
+
+    /// Insert a set and return the stored row. The caller checks `config`.
+    async fn create_command_set(&self, set: command_set::ActiveModel) -> Result<CommandSet, Error>;
+
+    /// Apply a partial update and return the whole stored row.
+    async fn update_command_set(&self, set: command_set::ActiveModel) -> Result<CommandSet, Error>;
+
+    /// Delete a set and the `casbin_rule` rows naming it, in one transaction,
+    /// returning what went with it; `None` when no such row.
+    async fn delete_command_set(&self, id: Uuid) -> Result<Option<Dependents>, Error>;
+
+    /// Every set, ordered by name.
+    async fn list_command_sets(&self, active_only: bool) -> Result<Vec<CommandSet>, Error>;
+
+    /// Returns the number of rows inserted. Writes `updated_at` as given.
+    async fn create_command_sets_batch(&self, sets: Vec<CommandSet>) -> Result<u64, Error>;
 
     // ------------------------------------------------------------- event_log
 

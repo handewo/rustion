@@ -395,6 +395,8 @@ where
             let file_path = session_recording::generate_path(recording_id);
 
             // Create the asciinema recorder
+            // TODO: if record session failed to record like no space in disk,
+            // Since the session is still continue, session recording will be loss.
             if self.record_session.is_none() {
                 let session = asciinema::new_recorder(
                     Some(term.to_string()),

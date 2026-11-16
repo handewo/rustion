@@ -90,6 +90,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 LoginMode::Admin => Application::Admin,
                 LoginMode::Password => Application::Password,
                 LoginMode::Player => Application::Player,
+                LoginMode::Command => Application::LimitedShell(None),
             }
         } else {
             debug!(
@@ -206,7 +207,8 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             Application::TargetSelector
             | Application::Admin
             | Application::Password
-            | Application::Player => {
+            | Application::Player
+            | Application::LimitedShell(_) => {
                 debug!("[{}] Client sent eof; ending input on {}", self.id, channel);
                 channel_session.tty = None;
                 channel_session.sender = None;
@@ -277,7 +279,23 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 }
                 Ok(())
             }
-            Application::None => Ok(()),
+            // To the running command if there is one, else to the prompt.
+            Application::LimitedShell(Some(ref input)) => {
+                if input.data(data).await {
+                    return Ok(());
+                }
+                match channel_session.tty.as_ref() {
+                    Some(tty) => tty
+                        .send_to_tty
+                        .send(Bytes::copy_from_slice(data))
+                        .await
+                        .map_err(std::io::Error::other)
+                        .map_err(Error::IO),
+                    // Input ended: the shell is on its way out.
+                    None => Ok(()),
+                }
+            }
+            Application::LimitedShell(None) | Application::None => Ok(()),
         }
     }
 
@@ -312,7 +330,12 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             Application::TargetSelector
             | Application::Admin
             | Application::Password
-            | Application::Player => {
+            | Application::Player
+            | Application::LimitedShell(_) => {
+                // A command on a pty follows the client's size too.
+                if let Application::LimitedShell(Some(ref input)) = channel_session.app {
+                    input.resize((col_width, row_height, pix_width, pix_height));
+                }
                 if let Some(tty) = channel_session.tty.as_mut() {
                     let win_raw = crate::terminal::window_change(
                         &mut tty.tty,
@@ -690,7 +713,34 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     Ok(())
                 }
             }
-            Application::Sftp | Application::None => {
+            Application::LimitedShell(None) => {
+                let (Some(term), Some(modes), Some(size)) = (
+                    channel_session.pty_term.clone(),
+                    channel_session.pty_modes.clone(),
+                    channel_session.window_size,
+                ) else {
+                    // A prompt needs a terminal.
+                    session.channel_failure(channel)?;
+                    return Ok(());
+                };
+                let lang = channel_session.lang(self.backend.language());
+                let (tty, recv_from_tty) = channel_session.new_tty()?;
+                let (input, from_user) = app::limited_shell::ShellInput::new(size);
+                channel_session.app = Application::LimitedShell(Some(input.clone()));
+                let app_params = self.wrap_pty_parameters(tty, recv_from_tty, lang)?;
+                app::limited_shell::shell_request(
+                    app_params,
+                    app::limited_shell::Terminal { term, modes },
+                    input,
+                    from_user,
+                    channel,
+                    session,
+                )
+                .await?;
+                session.channel_success(channel)?;
+                Ok(())
+            }
+            Application::Sftp | Application::LimitedShell(Some(_)) | Application::None => {
                 session.channel_failure(channel)?;
                 Ok(())
             }
@@ -932,6 +982,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Drop for BastionHandler<B> {
 ///  - ssh user@target@rustion user to connect to target but doesn't
 ///    specify system user.
 ///  - ssh user@password@rustion used to change user's password.
+///  - ssh user@cmd@rustion opens the limited shell.
 ///  - ssh user@rustion used to enter default mode.
 #[derive(Clone)]
 pub(super) struct LoginParse(String, String, String);
@@ -941,6 +992,8 @@ pub enum LoginMode {
     Password,
     Player,
     Admin,
+    /// The limited shell: only the commands of the user's command sets.
+    Command,
     Target(String),
     TargetWithUser(String, String),
 }
@@ -978,6 +1031,7 @@ impl LoginParse {
                 "password" => return LoginMode::Password,
                 "player" => return LoginMode::Player,
                 "admin" => return LoginMode::Admin,
+                "cmd" => return LoginMode::Command,
                 _ => return LoginMode::Target(self.1.clone()),
             }
         }

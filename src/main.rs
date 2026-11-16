@@ -1,5 +1,6 @@
 mod asciinema;
 mod cli;
+mod command;
 mod common;
 mod config;
 pub mod database;

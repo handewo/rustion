@@ -12,7 +12,7 @@ mod tty;
 mod widgets;
 
 pub use bastion_server::BastionServer;
-pub use casbin::{RuleNode, RuleType};
+pub use casbin::{CompiledCommandSet, RuleNode, RuleType};
 
 use crate::database::DatabaseRepository;
 use crate::database::Uuid;
@@ -103,6 +103,19 @@ pub(super) trait HandlerBackend: Send + Clone {
         act: Uuid,
         ext: extend_policy::ExtendPolicyReq,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
+
+    /// The command sets `sub` holds on the binding `obj` for this request, by
+    /// name: what the limited shell may run there. Empty when `obj` is not
+    /// active. Like [`Self::enforce`], decided from the policy snapshot.
+    fn command_sets_for(
+        &self,
+        sub: Uuid,
+        obj: Uuid,
+        ext: extend_policy::ExtendPolicyReq,
+    ) -> impl Future<Output = Result<Vec<Arc<CompiledCommandSet>>, Error>> + Send;
+
+    /// How long a limited-shell command may run; zero is no limit.
+    fn command_timeout(&self) -> std::time::Duration;
 
     fn encrypt_plain_text(&self, text: &str) -> Result<String, Error>;
     fn enable_record(&self) -> bool;
