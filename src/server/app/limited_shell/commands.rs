@@ -62,6 +62,15 @@ pub(crate) enum Refusal {
     Usage(&'static str),
 }
 
+/// The exit codes a refusal leaves in the prompt, on the scale a shell
+/// already uses: 127 a name that is no command, 126 a command that may
+/// not run, 2 a line that cannot be read as a command, 1 anything else
+/// that failed.
+pub(crate) const EXIT_NOT_FOUND: u32 = 127;
+pub(crate) const EXIT_NOT_ALLOWED: u32 = 126;
+pub(crate) const EXIT_BAD_LINE: u32 = 2;
+pub(crate) const EXIT_FAILURE: u32 = 1;
+
 /// A refusal as the audit trail stores it: in no language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -103,6 +112,19 @@ impl Refusal {
             },
             Refusal::Duplicate(_) => DenyReason::DuplicateAlias,
             Refusal::Usage(_) => DenyReason::BadUsage,
+        }
+    }
+
+    /// The code this refusal leaves in the prompt.
+    pub(crate) fn code(&self) -> u32 {
+        match self {
+            Refusal::Rejected { rejection, .. } => match rejection {
+                Rejection::Empty | Rejection::UnknownCommand(_) => EXIT_NOT_FOUND,
+                Rejection::Lex(_) => EXIT_BAD_LINE,
+                _ => EXIT_NOT_ALLOWED,
+            },
+            Refusal::Duplicate(_) => EXIT_NOT_ALLOWED,
+            Refusal::Usage(_) => EXIT_BAD_LINE,
         }
     }
 
@@ -403,6 +425,16 @@ mod tests {
             Ok(Line::Run { approved, .. }) => approved,
             other => panic!("{line}: {other:?}"),
         }
+    }
+
+    #[test]
+    fn refusals_carry_shell_style_exit_codes() {
+        let c = Commands::new(vec![ops()]);
+        // 127 a name that is no command; 2 a built-in misused or a line
+        // that cannot be read as one.
+        assert_eq!(c.parse("nope", "/").unwrap_err().code(), EXIT_NOT_FOUND);
+        assert_eq!(c.parse("pwd x", "/").unwrap_err().code(), EXIT_BAD_LINE);
+        assert_eq!(c.parse("cd a'b'", "/").unwrap_err().code(), EXIT_BAD_LINE);
     }
 
     #[test]

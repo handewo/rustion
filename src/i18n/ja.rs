@@ -300,7 +300,7 @@ pub const JA: Strings = Strings {
     ls_usage_is: "使い方: {usage}",
     ls_cd_not_allowed: "cd: {dir}: 許可されていません",
     ls_cd_failed: "cd: {dir}: そのディレクトリはありません",
-    ls_exit_status: "終了ステータス {status}",
+    ls_pwd_gone: "いたディレクトリ（{dir}）はもう存在しません。cd と入力すると {home} に戻れます",
     ls_signalled: "シグナル {signal} で終了しました",
     ls_timed_out: "停止しました: コマンドが {limit} を超えて実行されました",
     ls_stopped: "停止しました",

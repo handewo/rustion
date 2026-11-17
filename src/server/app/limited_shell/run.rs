@@ -249,22 +249,26 @@ async fn pump(
     Ok((outcome.unwrap_or(Outcome::Closed), at_line_start))
 }
 
-/// Run `command` with no pty and no input, and collect what it prints. For
-/// the bastion's own queries: `pwd`, `cd`.
+/// Run `command` with no pty and no input, and collect what it prints on
+/// stdout and stderr. For the bastion's own queries: `pwd`, `cd`.
 pub(crate) async fn query(
     channel: Channel<ru_client::Msg>,
     command: &str,
-) -> Result<(Outcome, Vec<u8>), Error> {
+) -> Result<(Outcome, Vec<u8>, Vec<u8>), Error> {
     let (mut read, write) = channel.split();
     write.exec(true, command).await?;
     write.eof().await?;
     let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
     let mut outcome = Outcome::Closed;
     let deadline = Instant::now() + QUERY_TIMEOUT;
     loop {
         tokio::select! {
             msg = read.wait() => match msg {
                 Some(ChannelMsg::Data { data }) => stdout.extend_from_slice(&data),
+                Some(ChannelMsg::ExtendedData { data, ext: 1 }) => {
+                    stderr.extend_from_slice(&data)
+                }
                 Some(ChannelMsg::ExitStatus { exit_status }) => outcome = Outcome::Exited(exit_status),
                 Some(ChannelMsg::Failure) => outcome = Outcome::Refused,
                 Some(ChannelMsg::Close) | None => break,
@@ -272,11 +276,11 @@ pub(crate) async fn query(
             },
             _ = tokio::time::sleep_until(deadline) => {
                 write.close().await?;
-                return Ok((Outcome::TimedOut, stdout));
+                return Ok((Outcome::TimedOut, stdout, stderr));
             }
         }
     }
-    Ok((outcome, stdout))
+    Ok((outcome, stdout, stderr))
 }
 
 fn signal_name_text(sig: &Sig) -> String {

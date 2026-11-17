@@ -300,7 +300,7 @@ pub const EN: Strings = Strings {
     ls_usage_is: "Usage: {usage}",
     ls_cd_not_allowed: "cd: {dir}: not allowed",
     ls_cd_failed: "cd: {dir}: no such directory",
-    ls_exit_status: "exit status {status}",
+    ls_pwd_gone: "The directory you were in ({dir}) no longer exists; type cd to go back to {home}",
     ls_signalled: "killed by signal {signal}",
     ls_timed_out: "Stopped: the command ran longer than {limit}",
     ls_stopped: "Stopped",

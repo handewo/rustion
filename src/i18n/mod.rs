@@ -505,8 +505,8 @@ strings! {
     ls_cd_not_allowed,
     /// `{dir}`
     ls_cd_failed,
-    /// `{status}`
-    ls_exit_status,
+    /// `{dir}`, `{home}`
+    ls_pwd_gone,
     /// `{signal}`
     ls_signalled,
     /// `{limit}`

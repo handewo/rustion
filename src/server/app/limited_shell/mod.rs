@@ -32,7 +32,7 @@ use crate::server::event_log::{Audit, EventKind, EventLogger, labelled};
 use crate::server::extend_policy::{ExtendPolicyReq, RequestKind};
 use crate::server::{CompiledCommandSet, HandlerBackend};
 use bytes::Bytes;
-use commands::{Cd, Commands, Line, expand_tilde, sh_quote};
+use commands::{Cd, Commands, EXIT_FAILURE, EXIT_NOT_FOUND, Line, expand_tilde, sh_quote};
 use crossterm::event::SenderWriter;
 use log::{debug, warn};
 use reedline::{
@@ -50,6 +50,15 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 
 pub(crate) use commands::DenyReason;
+
+/// The exit code a run reports when it could not enter its working
+/// directory: its exec is `cd -- '<pwd>' || exit 125; <line>`. A directory
+/// deleted or unmounted under the visit would otherwise fail every line
+/// after it with the target's bare `cd:` error, so on this code the shell
+/// asks the target whether the directory is still there and, when it is
+/// gone, says so. A command that itself exits 125 keeps its own code,
+/// which the check tells apart.
+const PWD_GONE: u32 = 125;
 
 /// The recording of one target visit, which the output forwarder writes to.
 /// NOTE: Redundent code in @../connect_target.rs
@@ -230,6 +239,8 @@ struct Visit {
     home: String,
     pwd: String,
     oldpwd: String,
+    /// The exit code of the last command, kept for the prompt.
+    last_status: u32,
 }
 
 enum Next {
@@ -357,9 +368,10 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
             home: String::new(),
             pwd: String::new(),
             oldpwd: String::new(),
+            last_status: 0,
         };
         let home = match self.query(&mut visit, "pwd -P").await {
-            Ok(Some(home)) => home,
+            Ok(Ok(home)) => home,
             other => {
                 if let Err(e) = other {
                     warn!(
@@ -398,15 +410,23 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
         visit: &mut Visit,
         mut commands: Commands,
     ) -> Result<(), Error> {
-        let prompt = format!(
-            "{}@{}> ",
-            visit.binding.secret_user, visit.binding.target_name
-        );
         loop {
-            let Some(line) = editor
-                .read_line(prompt.clone(), commands.completions())
-                .await
-            else {
+            // The prompt carries the last command's exit code when it
+            // failed, until the next command runs.
+            let prompt = if visit.last_status == 0 {
+                format!(
+                    "{}@{}> ",
+                    visit.binding.secret_user, visit.binding.target_name
+                )
+            } else {
+                // The code in light red, then back to the light green the
+                // line editor paints the rest of the prompt in.
+                format!(
+                    "{}@{} \x1b[91m[{}]\x1b[92m> ",
+                    visit.binding.secret_user, visit.binding.target_name, visit.last_status
+                )
+            };
+            let Some(line) = editor.read_line(prompt, commands.completions()).await else {
                 return Ok(());
             };
             commands = Commands::new(self.sets(visit.binding.id).await?);
@@ -416,11 +436,18 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
             let line = line.trim();
             match commands.parse(line, &visit.pwd) {
                 Ok(parsed) => {
+                    // An empty line keeps the last code, as a shell keeps
+                    // `$?`; every other line starts clean, and what fails
+                    // on it sets its own.
+                    if !matches!(parsed, Line::Empty) {
+                        visit.last_status = 0;
+                    }
                     if let Next::Leave = self.act(visit, &commands, line, parsed).await? {
                         return Ok(());
                     }
                 }
                 Err(refusal) => {
+                    visit.last_status = refusal.code();
                     self.say(&refusal.message(self.tr)).await?;
                     self.log
                         .record(Audit::CommandDenied {
@@ -450,6 +477,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
             Line::Help(Some(alias)) => match commands.help_for(&alias, tr) {
                 Some(lines) => self.say_lines(&lines).await?,
                 None => {
+                    visit.last_status = EXIT_NOT_FOUND;
                     self.say(&fill!(tr.ls_unknown_command, name = alias))
                         .await?
                 }
@@ -460,8 +488,11 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
                 set,
                 approved,
             } => {
+                // The `|| exit 125` makes a working directory that no
+                // longer exists tell its own story, instead of failing the
+                // command with a bare 1.
                 let command = format!(
-                    "cd -- {} && {}",
+                    "cd -- {} || exit {PWD_GONE}; {}",
                     sh_quote(&visit.pwd),
                     approved.command_line
                 );
@@ -472,6 +503,8 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
                             "[{}] Cannot open a channel on {}: {}",
                             self.handler_id, visit.label, e
                         );
+                        // The command never ran, but this attempt failed.
+                        visit.last_status = EXIT_FAILURE;
                         self.say(&fill!(
                             tr.ls_connect_failed,
                             target = visit.binding.target_name
@@ -495,10 +528,26 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
                 if !at_line_start {
                     self.out.send(Bytes::from_static(b"\r\n")).await.ok();
                 }
+                // A failed command's exit code rides in the prompt until
+                // the next line runs; anything but an exit leaves the
+                // prompt clean, its own message having said what happened.
                 match &outcome {
-                    Outcome::Exited(0) => {}
-                    // TODO: consider print error code in PS1
-                    Outcome::Exited(n) => self.say(&fill!(tr.ls_exit_status, status = n)).await?,
+                    // The working directory could not be entered: it may
+                    // have been deleted or unmounted under the visit. When
+                    // the target confirms it is gone, say so — the visit
+                    // stays there, and every line fails the same way until
+                    // the user `cd`s out of it; a command's own 125 keeps
+                    // its own code, which the check tells apart. Either
+                    // way the audit row keeps the code the target reported.
+                    Outcome::Exited(n) if *n == PWD_GONE => {
+                        if self.query(visit, &cd_check(&visit.pwd)).await?.is_err() {
+                            self.pwd_gone(visit).await?;
+                            visit.last_status = EXIT_FAILURE;
+                        } else {
+                            visit.last_status = PWD_GONE;
+                        }
+                    }
+                    Outcome::Exited(n) => visit.last_status = *n,
                     Outcome::Signalled(sig) => {
                         self.say(&fill!(tr.ls_signalled, signal = sig)).await?
                     }
@@ -541,7 +590,6 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
         line: &str,
         cd: Cd,
     ) -> Result<(), Error> {
-        let tr = self.tr;
         // The path as typed, with `~` read, and what it names lexically.
         // The allowlist reads the lexical one; the target is handed the one
         // as typed and resolves it itself, so `cd a/..` with no `a` fails
@@ -557,6 +605,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
             }
         };
         if !commands.cd_allows(&dir, &visit.home) {
+            visit.last_status = EXIT_FAILURE;
             return self.cd_denied(visit, line, &dir).await;
         }
         let query = format!(
@@ -565,15 +614,33 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
             sh_quote(&named)
         );
         match self.query(visit, &query).await? {
-            Some(physical) if commands.cd_allows(&physical, &visit.home) => {
-                visit.oldpwd = std::mem::replace(&mut visit.pwd, physical);
-                Ok(())
+            answer @ Ok(_) => self.cd_answer(visit, commands, line, &dir, answer).await,
+            Err(stderr) => {
+                visit.last_status = EXIT_FAILURE;
+                // A `cd` fails the same way whatever the user named when
+                // the working directory itself is gone, and the visit is
+                // not moved without the user. Their own `cd` is their way
+                // out, and it says so only when it is news: an absolute
+                // path — bare `cd` and `cd -` included, both absolute by
+                // nature — resolves from any start, so it is asked of the
+                // target once more on its own, with no anchor: the visit's
+                // only anchor is the dead directory, and a live one could
+                // only fail the chain. When it goes through it says
+                // nothing — the hint would tell the user to do what they
+                // just did. A relative path cannot be resolved without
+                // the directory that held it; the hint is all there is
+                // to say for it.
+                if self.query(visit, &cd_check(&visit.pwd)).await?.is_err() {
+                    if !named.starts_with('/') {
+                        return self.pwd_gone(visit).await;
+                    }
+                    let retry = format!("cd -- {} && pwd -P", sh_quote(&named));
+                    let answer = self.query(visit, &retry).await?;
+                    return self.cd_answer(visit, commands, line, &dir, answer).await;
+                }
+                self.cd_answer(visit, commands, line, &dir, Err(stderr))
+                    .await
             }
-            Some(_) => self.cd_denied(visit, line, &dir).await,
-            // NOTE: Why doesn't print error message from target
-            // The hard code message 'no such directory' is not accurate
-            // e.g cd will return error if sys user have no permission
-            None => self.say(&fill!(tr.ls_cd_failed, dir = dir)).await,
         }
     }
 
@@ -588,6 +655,55 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
             })
             .await;
         Ok(())
+    }
+
+    /// The working directory stopped existing on the target. Say so and
+    /// change nothing: the visit stays in the deleted directory, as a shell
+    /// does, and the user chooses where to go next.
+    async fn pwd_gone(&self, visit: &Visit) -> Result<(), Error> {
+        self.say(&fill!(
+            self.tr.ls_pwd_gone,
+            dir = visit.pwd,
+            home = visit.home
+        ))
+        .await
+    }
+
+    /// What a `cd` query's answer does: move when the target resolved it to
+    /// an allowed directory, deny it when it did not, and show the target's
+    /// own words when it failed.
+    async fn cd_answer(
+        &mut self,
+        visit: &mut Visit,
+        commands: &Commands,
+        line: &str,
+        dir: &str,
+        answer: Result<String, Vec<u8>>,
+    ) -> Result<(), Error> {
+        match answer {
+            Ok(physical) if commands.cd_allows(&physical, &visit.home) => {
+                visit.oldpwd = std::mem::replace(&mut visit.pwd, physical);
+                visit.last_status = 0;
+                Ok(())
+            }
+            Ok(_) => {
+                visit.last_status = EXIT_FAILURE;
+                self.cd_denied(visit, line, dir).await
+            }
+            Err(stderr) => {
+                visit.last_status = EXIT_FAILURE;
+                // The target's own words when it said any: a missing
+                // directory, no permission. The generic message only when
+                // it said nothing.
+                let text = String::from_utf8_lossy(&stderr);
+                let text = text.trim();
+                if text.is_empty() {
+                    self.say(&fill!(self.tr.ls_cd_failed, dir = dir)).await
+                } else {
+                    self.say(text).await
+                }
+            }
+        }
     }
 
     /// A session channel on the target, over the pooled connection.
@@ -618,17 +734,22 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
     }
 
     /// Run one of the bastion's own commands and return its first line of
-    /// output, or `None` when it fails.
-    async fn query(&self, visit: &mut Visit, command: &str) -> Result<Option<String>, Error> {
+    /// output, or its stderr when it fails.
+    async fn query(
+        &self,
+        visit: &mut Visit,
+        command: &str,
+    ) -> Result<Result<String, Vec<u8>>, Error> {
         let channel = self.open(visit).await?;
-        let (outcome, stdout) = run::query(channel, command).await?;
-        if outcome != Outcome::Exited(0) {
-            return Ok(None);
-        }
+        let (outcome, stdout, stderr) = run::query(channel, command).await?;
         let text = String::from_utf8_lossy(&stdout);
         let line = text.strip_suffix('\n').unwrap_or(&text);
         // A path with a newline in it cannot be told from two lines.
-        Ok((line.starts_with('/') && !line.contains('\n')).then(|| line.to_owned()))
+        if outcome == Outcome::Exited(0) && line.starts_with('/') && !line.contains('\n') {
+            Ok(Ok(line.to_owned()))
+        } else {
+            Ok(Err(stderr))
+        }
     }
 
     // TODO: It should return error and stop session init failed
@@ -706,6 +827,12 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
             );
         }
     }
+}
+
+/// `cd -- '<dir>' && pwd -P`: how the shell asks the target whether a
+/// directory still exists.
+fn cd_check(dir: &str) -> String {
+    format!("cd -- {} && pwd -P", sh_quote(dir))
 }
 
 fn warn_duplicates(handler_id: Uuid, label: &str, commands: &Commands) {

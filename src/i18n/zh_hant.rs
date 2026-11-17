@@ -300,7 +300,7 @@ pub const ZH_HANT: Strings = Strings {
     ls_usage_is: "用法: {usage}",
     ls_cd_not_allowed: "cd: {dir}: 不允許",
     ls_cd_failed: "cd: {dir}: 沒有這個目錄",
-    ls_exit_status: "結束狀態 {status}",
+    ls_pwd_gone: "你所在的目錄（{dir}）已不存在；輸入 cd 回到 {home}",
     ls_signalled: "被訊號 {signal} 終止",
     ls_timed_out: "已停止: 命令執行超過了 {limit}",
     ls_stopped: "已停止",

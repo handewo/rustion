@@ -300,7 +300,7 @@ pub const RU: Strings = Strings {
     ls_usage_is: "Использование: {usage}",
     ls_cd_not_allowed: "cd: {dir}: не разрешено",
     ls_cd_failed: "cd: {dir}: нет такого каталога",
-    ls_exit_status: "код завершения {status}",
+    ls_pwd_gone: "Каталог, в котором вы находились ({dir}), больше не существует; введите cd, чтобы вернуться в {home}",
     ls_signalled: "завершено сигналом {signal}",
     ls_timed_out: "Остановлено: команда работала дольше {limit}",
     ls_stopped: "Остановлено",
