@@ -31,8 +31,8 @@ pub fn generate_path(id: Uuid) -> String {
 
 /// How a recording is labelled: `secret_user@target_name:port`.
 ///
-/// The one spelling of this format. The write site in `connect_target` calls it,
-/// and `migrations/002-recording-target-label.sql` reproduces it in SQL to
+/// The one spelling of this format. The recording start (`server/app/recording.rs`)
+/// calls it, and `migrations/002-recording-target-label.sql` reproduces it in SQL to
 /// backfill rows written before the column existed — if this changes, that file
 /// is already-written history and does not follow.
 pub fn compose_label(secret_user: &str, target_name: &str) -> String {

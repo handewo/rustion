@@ -6,6 +6,7 @@ pub(super) mod sftp;
 use bytes::Bytes;
 pub mod error;
 pub(super) mod player;
+pub(super) mod recording;
 pub(super) mod target_selector;
 
 use crate::database::models;

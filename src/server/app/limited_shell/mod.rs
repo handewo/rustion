@@ -21,9 +21,8 @@ mod test;
 pub(crate) use run::{CommandInput, ShellInput, Terminal};
 
 use super::PtyParams;
-use crate::asciinema;
+use super::recording::{Recording, SharedRecording, no_recording};
 use crate::database::Uuid;
-use crate::database::entity::session_recording as session_recording_entity;
 use crate::database::models::{Target, TargetSecretName, session_recording};
 use crate::error::Error;
 use crate::fill;
@@ -44,10 +43,9 @@ use run::{Job, Outcome};
 use russh::client as ru_client;
 use russh::server as ru_server;
 use russh::{Channel, ChannelId};
-use sea_orm::ActiveValue::{Set, Unchanged};
 use std::borrow::Cow;
 use std::sync::Arc;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 
 pub(crate) use commands::DenyReason;
 
@@ -59,15 +57,6 @@ pub(crate) use commands::DenyReason;
 /// gone, says so. A command that itself exits 125 keeps its own code,
 /// which the check tells apart.
 const PWD_GONE: u32 = 125;
-
-/// The recording of one target visit, which the output forwarder writes to.
-/// NOTE: Redundent code in @../connect_target.rs
-struct Recording {
-    session: asciinema::Session,
-    id: Uuid,
-}
-
-type SharedRecording = Arc<Mutex<Option<Recording>>>;
 
 /// Start the shell on `channel`. Returns once it runs; it closes the channel
 /// when the user leaves.
@@ -96,7 +85,7 @@ where
 
     let (send_to_session, mut recv_from_prompt) = mpsc::channel::<Bytes>(16);
     let (done, mut is_done) = mpsc::channel::<()>(1);
-    let recording: SharedRecording = Arc::new(Mutex::new(None));
+    let recording = no_recording();
 
     // Everything the user sees goes through here, so a visit's recording
     // holds the prompt, the commands and their output.
@@ -396,7 +385,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
                 target: visit.label.clone(),
             })
             .await;
-        self.start_recording(&visit).await;
+        self.start_recording(&visit).await?;
         self.say(tr.ls_entered).await?;
 
         let result = self.visit_loop(editor, &mut visit, commands).await;
@@ -752,79 +741,29 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
         }
     }
 
-    // TODO: It should return error and stop session init failed
-    async fn start_recording(&self, visit: &Visit) {
+    /// Start the visit's recording. A failure ends the visit: a session
+    /// that cannot be recorded must not run unrecorded.
+    async fn start_recording(&self, visit: &Visit) -> Result<(), Error> {
         if !self.backend.enable_record() {
-            return;
+            return Ok(());
         }
-        let id = Uuid::now_v7();
-        let file_path = session_recording::generate_path(id);
         let (cols, rows, _, _) = self.input.size();
-        let session = match asciinema::new_recorder(
+        let recording = Recording::start(
+            self.backend.as_ref(),
+            self.handler_id,
+            self.user_id,
+            &visit.binding,
             Some(self.terminal.term.clone()),
-            std::path::PathBuf::from(self.backend.record_path()).join(&file_path),
             (cols as u16, rows as u16),
-            None,
-            self.backend.record_input(),
         )
-        .await
-        {
-            Ok(s) => s,
-            Err(e) => {
-                log::error!("[{}] Failed to start a recording: {}", self.handler_id, e);
-                return;
-            }
-        };
-        if let Err(e) = self
-            .backend
-            .db_repository()
-            .create_session_recording(session_recording_entity::ActiveModel {
-                id: Set(id),
-                user_id: Set(self.user_id),
-                target_id: Set(visit.binding.target_id),
-                secret_id: Set(visit.binding.secret_id),
-                target_label: Set(session_recording::compose_label(
-                    &visit.binding.secret_user,
-                    &visit.binding.target_name,
-                )),
-                file_path: Set(file_path),
-                connection_id: Set(self.handler_id),
-                status: Set(session_recording::RecordingStatus::Active),
-                ..Default::default()
-            })
-            .await
-        {
-            log::error!(
-                "[{}] Failed to create session recording: {}",
-                self.handler_id,
-                e
-            );
-            return;
-        }
-        *self.recording.lock().await = Some(Recording { session, id });
+        .await?;
+        *self.recording.lock().await = Some(recording);
+        Ok(())
     }
 
     async fn finish_recording(&self) {
-        let Some(r) = self.recording.lock().await.take() else {
-            return;
-        };
-        drop(r.session);
-        if let Err(e) = self
-            .backend
-            .db_repository()
-            .update_session_recording(session_recording_entity::ActiveModel {
-                id: Unchanged(r.id),
-                ended_at: Set(Some(chrono::Utc::now().timestamp_millis())),
-                status: Set(session_recording::RecordingStatus::Completed),
-                ..Default::default()
-            })
-            .await
-        {
-            log::error!(
-                "[{}] Failed to update session recording: {}",
-                self.handler_id,
-                e
-            );
+        if let Some(r) = self.recording.lock().await.take() {
+            r.finish(self.backend.as_ref(), self.handler_id).await;
         }
     }
 }

@@ -645,6 +645,29 @@ mod through_the_bastion {
             );
         }
 
+        /// Wait for the server to close the channel, still collecting what
+        /// it says on the way out.
+        async fn until_closed(&mut self) {
+            let wait = async {
+                loop {
+                    match self.channel.wait().await {
+                        Some(ChannelMsg::Data { data }) => {
+                            let chunk = String::from_utf8_lossy(&data);
+                            if chunk.contains("\x1b[6n") {
+                                self.channel.data(&b"\x1b[1;1R"[..]).await.unwrap();
+                            }
+                            self.text.push_str(&chunk);
+                        }
+                        Some(ChannelMsg::Close) | None => break,
+                        Some(_) => {}
+                    }
+                }
+            };
+            tokio::time::timeout(Duration::from_secs(10), wait)
+                .await
+                .unwrap_or_else(|_| panic!("channel never closed; screen:\n{}", self.text));
+        }
+
         async fn type_line(&mut self, line: &str) {
             self.text.clear();
             self.channel
@@ -1157,6 +1180,36 @@ mod through_the_bastion {
                 "cd -- '/var/log' && pwd -P",
                 "cd -- '/var/log' || exit 125; /usr/bin/df -h",
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_visit_that_cannot_be_recorded_ends() {
+        let db = fixture::seed().await;
+        let mut config = Config::default().gen_secret_token();
+        config.database = db.url.clone();
+        config.reuse_target_connection = false;
+        // Recording is on, but the cast file cannot be made: no directory
+        // can be created under a file.
+        config.enable_record = true;
+        config.record_path = "/dev/null/record".into();
+        let mut server = BastionServer::with_config(config).await.expect("server");
+        let f = &db.fixture;
+        let luka = f.user(LUKA);
+        grant_login(&server, f, luka).await;
+        let (target, _fake) = target_with_commands(&server, f, luka).await;
+        server.reload_policies().await.unwrap();
+
+        let mut screen = connect_shell(&mut server).await;
+        screen.until("> ").await;
+        screen.type_line(&target).await;
+        // The visit ends rather than run unrecorded, and the shell with
+        // it: the channel closes without the entered-target greeting.
+        screen.until_closed().await;
+        assert!(
+            !screen.text.contains("Type help to list commands"),
+            "the visit never started; screen:\n{}",
+            screen.text
         );
     }
 }

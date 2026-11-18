@@ -1,7 +1,7 @@
+use super::recording::{Recording, SharedRecording, no_recording};
 use crate::asciinema;
 use crate::database::Uuid;
 use crate::database::common::SftpActions;
-use crate::database::entity::session_recording as session_recording_entity;
 use crate::database::models::session_recording;
 use crate::database::models::{Target, TargetSecretName, User};
 use crate::error::Error;
@@ -13,17 +13,8 @@ use log::{debug, trace};
 use russh::client as ru_client;
 use russh::server as ru_server;
 use russh::{Channel, ChannelId, ChannelMsg, ChannelReadHalf, ChannelWriteHalf, Pty};
-use sea_orm::ActiveValue::{Set, Unchanged};
 use std::fmt;
 use std::sync::Arc;
-use tokio::sync::Mutex;
-
-/// Wrapper for session recording that includes the database metadata ID
-#[derive(Clone)]
-struct RecordingSession {
-    session: asciinema::Session,
-    recording_id: Uuid,
-}
 
 #[derive(Clone)]
 pub enum Request<'a> {
@@ -48,7 +39,7 @@ where
     target_handle: Option<Arc<ru_client::Handle<Target>>>,
     pub target_secret_name: TargetSecretName,
 
-    record_session: Option<Arc<Mutex<RecordingSession>>>,
+    record_session: SharedRecording,
     backend: Arc<B>,
     log: EventLogger<B>,
 }
@@ -112,7 +103,7 @@ where
             target_channel: None,
             target_handle: None,
             target_secret_name,
-            record_session: None,
+            record_session: no_recording(),
             log: log.scoped(EventKind::Target),
         })
     }
@@ -140,7 +131,7 @@ where
             target_channel: None,
             target_handle: None,
             target_secret_name,
-            record_session: None,
+            record_session: no_recording(),
             log: log.scoped(EventKind::Target),
         })
     }
@@ -154,8 +145,8 @@ where
             .data(data)
             .await?;
 
-        if let Some(r) = self.record_session.as_ref() {
-            r.lock().await.session.handle_input(data).await;
+        if let Some(r) = self.record_session.lock().await.as_mut() {
+            r.session.handle_input(data).await;
         }
 
         Ok(())
@@ -389,65 +380,19 @@ where
             .await?;
 
         if self.backend.enable_record() {
-            // The id is minted here rather than by the database: it names the
-            // `.cast` file the recorder opens before the row is written.
-            let recording_id = Uuid::now_v7();
-            let file_path = session_recording::generate_path(recording_id);
-
-            // Create the asciinema recorder
-            // TODO: if record session failed to record like no space in disk,
-            // Since the session is still continue, session recording will be loss.
-            if self.record_session.is_none() {
-                let session = asciinema::new_recorder(
-                    Some(term.to_string()),
-                    std::path::PathBuf::from(self.backend.record_path()).join(&file_path),
-                    (window_size.0 as u16, window_size.1 as u16),
-                    None,
-                    self.backend.record_input(),
-                )
-                .await?;
-
-                // Wrap session with recording metadata
-                let recording_session = RecordingSession {
-                    session,
-                    recording_id,
-                };
-
-                // Save to database
-                if let Err(e) = self
-                    .backend
-                    .db_repository()
-                    .create_session_recording(session_recording_entity::ActiveModel {
-                        id: Set(recording_id),
-                        user_id: Set(self.user_id),
-                        target_id: Set(self.target_secret_name.target_id),
-                        secret_id: Set(self.target_secret_name.secret_id),
-                        // Frozen here, not composed at read time: this is what
-                        // the operator connected to, whatever the target is
-                        // renamed to or whether it still exists later.
-                        target_label: Set(session_recording::compose_label(
-                            &self.target_secret_name.secret_user,
-                            &self.target_secret_name.target_name,
-                        )),
-                        file_path: Set(file_path),
-                        connection_id: Set(self.handler_id),
-                        status: Set(session_recording::RecordingStatus::Active),
-                        ..Default::default()
-                    })
-                    .await
-                {
-                    log::error!(
-                        "[{}] Failed to create session recording: {}",
-                        self.handler_id,
-                        e
-                    );
-                    return Err(AppError::ConnectTarget(ConnectTargetError::InitRecordError).into());
-                }
-
-                self.record_session = Some(Arc::new(Mutex::new(recording_session)));
-            } else {
+            if self.record_session.lock().await.is_some() {
                 return Err(AppError::ConnectTarget(ConnectTargetError::ReInitRecord).into());
             }
+            let recording = Recording::start(
+                self.backend.as_ref(),
+                self.handler_id,
+                self.user_id,
+                &self.target_secret_name,
+                Some(term.to_string()),
+                (window_size.0 as u16, window_size.1 as u16),
+            )
+            .await?;
+            *self.record_session.lock().await = Some(recording);
         }
 
         Ok(true)
@@ -515,10 +460,9 @@ where
             .window_change(col_width, row_height, pix_width, pix_height)
             .await?;
 
-        if let Some(r) = self.record_session.as_ref() {
-            let mut rec = r.lock().await;
-            rec.session.handle_marker("window change".to_string()).await;
-            rec.session
+        if let Some(r) = self.record_session.lock().await.as_mut() {
+            r.session.handle_marker("window change".to_string()).await;
+            r.session
                 .handle_resize(asciinema::TtySize(col_width as u16, row_height as u16))
                 .await;
         }
@@ -561,8 +505,8 @@ where
                         if let Some(msg) = msg {
                             match msg {
                                 ChannelMsg::Data { data } => {
-                                    if let Some(r) = &record {
-                                        r.lock().await.session.handle_output(data.as_ref()).await;
+                                    if let Some(r) = record.lock().await.as_mut() {
+                                        r.session.handle_output(data.as_ref()).await;
                                     }
                                     let _ = handle.data(channel, data).await;
                                 }
@@ -570,15 +514,15 @@ where
                                     let _ = handle.eof(channel).await;
                                 }
                                 ChannelMsg::ExtendedData { data, ext: 1 }  => {
-                                    if let Some(r) = &record {
-                                        r.lock().await.session.handle_output(data.as_ref()).await;
+                                    if let Some(r) = record.lock().await.as_mut() {
+                                        r.session.handle_output(data.as_ref()).await;
                                     }
                                     let _ = handle.extended_data(channel, 1, data).await;
 
                                 }
                                 ChannelMsg::ExitStatus { exit_status } => {
-                                    if let Some(r) = &record {
-                                        r.lock().await.session.handle_exit(exit_status as i32).await;
+                                    if let Some(r) = record.lock().await.as_mut() {
+                                        r.session.handle_exit(exit_status as i32).await;
                                     }
                                     let _ = handle.exit_status_request(channel, exit_status).await;
                                 }
@@ -590,22 +534,10 @@ where
                     }
                 }
             }
-            // Update session recording as completed. Only the two columns that
-            // move are `Set`, so this needs no read of the existing row.
-            if let Some(r) = record {
-                let id = r.lock().await.recording_id;
-                if let Err(e) = backend_for_task
-                    .db_repository()
-                    .update_session_recording(session_recording_entity::ActiveModel {
-                        id: Unchanged(id),
-                        ended_at: Set(Some(chrono::Utc::now().timestamp_millis())),
-                        status: Set(session_recording::RecordingStatus::Completed),
-                        ..Default::default()
-                    })
-                    .await
-                {
-                    log::error!("[{}] Failed to update session recording: {}", handler_id, e);
-                }
+            // Take the recording out of the shared slot and end it: close
+            // the cast file, then mark the row Completed.
+            if let Some(rec) = record.lock().await.take() {
+                rec.finish(backend_for_task.as_ref(), handler_id).await;
             }
             let _ = handle.close(channel).await;
             log.record(Audit::TargetRequest {
@@ -902,9 +834,6 @@ where
 use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum ConnectTargetError {
-    #[error("Init record error")]
-    InitRecordError,
-
     #[error("Re-initialize target_channel")]
     ReInitTargetChannel,
 
