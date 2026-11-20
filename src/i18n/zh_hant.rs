@@ -157,7 +157,6 @@ pub const ZH_HANT: Strings = Strings {
     v_user_role_empty: "使用者/角色不可為空",
     v_target_group_empty: "目標/群組不可為空",
     v_action_group_empty: "動作/群組不可為空",
-    v_missing_rule_id: "已綁定的角色缺少規則 ID",
     v_extend_policy: "擴充原則無效：{error}",
     duplicate_target_user: "目標主機「{target}」已綁定使用者名稱為「{user}」的憑證",
 

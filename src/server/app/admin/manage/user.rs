@@ -2,9 +2,7 @@ use super::super::error::AdminError;
 use super::super::validate;
 use crate::database::entity::user;
 use crate::database::models::User;
-use crate::error::Error;
 use crate::fill;
-use crate::server::app::error::AppError;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{buffer::Buffer, layout::Rect};
@@ -71,9 +69,9 @@ impl UserEditor {
         match self.form.handle_key_event(key, modifiers) {
             FormEvent::Save => {
                 if let Err(e) = self.save_user() {
-                    let lines = if let Error::App(AppError::Admin(AdminError::Validate(
+                    let lines = if let AdminError::Validate(
                         validate::ValidateError::AuthorizedKeyInvalid(ref idx),
-                    ))) = e
+                    ) = e
                     {
                         let lines = idx
                             .iter()
@@ -100,11 +98,10 @@ impl UserEditor {
         }
     }
 
-    fn save_user(&mut self) -> Result<(), Error> {
+    fn save_user(&mut self) -> Result<(), AdminError> {
         let username = self.form.get_text(F_USERNAME).trim().to_string();
         if self.user.username != username || self.user.username.is_empty() {
-            validate::varify_username(&username)
-                .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            validate::varify_username(&username)?;
             self.active_model.username = Set(username);
         }
 
@@ -112,7 +109,7 @@ impl UserEditor {
         let email = (!email.is_empty()).then_some(email);
         if self.user.email != email {
             if let Some(e) = email.as_ref() {
-                validate::varify_email(e).map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+                validate::varify_email(e)?;
             }
             self.active_model.email = Set(email);
         }
@@ -141,8 +138,7 @@ impl UserEditor {
         let authorized_keys = (!authorized_keys.is_empty()).then_some(authorized_keys);
         if self.user.get_authorized_keys() != authorized_keys.as_deref() {
             if let Some(ref keys) = authorized_keys {
-                validate::varify_authorized_keys(keys)
-                    .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+                validate::varify_authorized_keys(keys)?;
             }
             self.active_model.authorized_keys = Set(authorized_keys.map(|v| v.into()))
         }

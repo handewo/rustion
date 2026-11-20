@@ -1,6 +1,7 @@
+use super::error::AdminError;
+use super::loaded;
 use crate::database::Uuid;
 use crate::database::models::*;
-use crate::error::Error;
 use crate::fill;
 use crate::i18n::{Lang, Strings};
 use crate::server::event_log::{Audit, Change, EventKind, EventLogger, Object, dependents_items};
@@ -46,7 +47,7 @@ pub(super) async fn manage<B>(
     log: EventLogger<B>,
     theme: &mut &'static Theme,
     lang: &mut Lang,
-) -> Result<(), Error>
+) -> Result<(), AdminError>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
@@ -610,7 +611,7 @@ where
 
     /// What deleting the row at `idx` would take along. A permission is a
     /// rule itself, and nothing names it.
-    async fn dependents(&self, idx: usize) -> Result<Dependents, Error> {
+    async fn dependents(&self, idx: usize) -> Result<Dependents, AdminError> {
         let id = match self.selected_tab {
             SelectedTab::Users => self.items.get_user(idx).map(|u| u.id),
             SelectedTab::Targets => self.items.get_target(idx).map(|t| t.id),
@@ -619,10 +620,10 @@ where
             SelectedTab::CommandSets => self.items.get_command_set(idx).map(|c| c.id),
             _ => None,
         };
-        match id {
-            Some(id) => self.backend.db_repository().dependents(id).await,
-            None => Ok(Dependents::default()),
-        }
+        Ok(match id {
+            Some(id) => self.backend.db_repository().dependents(id).await?,
+            None => Dependents::default(),
+        })
     }
 
     fn could_delete(&mut self, idx: usize) -> bool {
@@ -679,7 +680,7 @@ where
         &mut self,
         tty: NoTtyEvent,
         terminal: &mut AsyncTerminal<NottyBackend>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AdminError> {
         loop {
             terminal.draw(|frame| self.render(frame)).await?;
             let event = event::read(&tty).await?;
@@ -828,7 +829,7 @@ where
         }
     }
 
-    async fn do_edit(&mut self, key: KeyEvent) -> Result<(), Error> {
+    async fn do_edit(&mut self, key: KeyEvent) -> Result<(), AdminError> {
         match self.editor {
             Editor::User(ref mut e) => {
                 if e.as_mut().handle_key_event(key.code, key.modifiers) {
@@ -1254,47 +1255,58 @@ where
         match self.selected_tab {
             SelectedTab::Users => {
                 self.items = TableData::Users(
-                    self.backend
-                        .db_repository()
-                        .list_users_with_role(false)
-                        .await
-                        .unwrap_or_default(),
+                    loaded(
+                        self.handler_id,
+                        "Manage",
+                        "users",
+                        self.backend.db_repository().list_users_with_role(false),
+                    )
+                    .await,
                 );
             }
             SelectedTab::Targets => {
                 self.items = TableData::Targets(
-                    self.backend
-                        .db_repository()
-                        .list_targets(false)
-                        .await
-                        .unwrap_or_default(),
+                    loaded(
+                        self.handler_id,
+                        "Manage",
+                        "targets",
+                        self.backend.db_repository().list_targets(false),
+                    )
+                    .await,
                 );
             }
             SelectedTab::Secrets => {
                 self.items = TableData::Secrets(
-                    self.backend
-                        .db_repository()
-                        .list_secrets(false)
-                        .await
-                        .unwrap_or_default(),
+                    loaded(
+                        self.handler_id,
+                        "Manage",
+                        "secrets",
+                        self.backend.db_repository().list_secrets(false),
+                    )
+                    .await,
                 );
             }
             SelectedTab::Bind => {
                 // For Bind tab, we need to load targets and secrets
-                let targets = self
-                    .backend
-                    .db_repository()
-                    .list_targets_info()
-                    .await
-                    .unwrap_or_default();
+                let targets = loaded(
+                    self.handler_id,
+                    "Manage",
+                    "targets info",
+                    self.backend.db_repository().list_targets_info(),
+                )
+                .await;
                 let secrets = if !targets.is_empty() {
                     // Get secrets for the first target as default
 
-                    self.backend
-                        .db_repository()
-                        .list_secrets_by_target_id(targets[0].id)
-                        .await
-                        .unwrap_or_default()
+                    loaded(
+                        self.handler_id,
+                        "Manage",
+                        "secrets for target",
+                        self.backend
+                            .db_repository()
+                            .list_secrets_by_target_id(targets[0].id),
+                    )
+                    .await
                 } else {
                     Vec::new()
                 };
@@ -1310,29 +1322,37 @@ where
             }
             SelectedTab::Permissions => {
                 self.items = TableData::Permissions(
-                    self.backend
-                        .db_repository()
-                        .list_permission_polices()
-                        .await
-                        .unwrap_or_default(),
+                    loaded(
+                        self.handler_id,
+                        "Manage",
+                        "permissions",
+                        self.backend.db_repository().list_permission_polices(),
+                    )
+                    .await,
                 );
             }
             SelectedTab::CasbinNames => {
                 self.items = TableData::CasbinNames(
-                    self.backend
-                        .db_repository()
-                        .list_casbin_names_user_visible(false)
-                        .await
-                        .unwrap_or_default(),
+                    loaded(
+                        self.handler_id,
+                        "Manage",
+                        "casbin names",
+                        self.backend
+                            .db_repository()
+                            .list_casbin_names_user_visible(false),
+                    )
+                    .await,
                 );
             }
             SelectedTab::CommandSets => {
                 self.items = TableData::CommandSets(
-                    self.backend
-                        .db_repository()
-                        .list_command_sets(false)
-                        .await
-                        .unwrap_or_default(),
+                    loaded(
+                        self.handler_id,
+                        "Manage",
+                        "command sets",
+                        self.backend.db_repository().list_command_sets(false),
+                    )
+                    .await,
                 );
             }
             SelectedTab::RoleHierarchy => {

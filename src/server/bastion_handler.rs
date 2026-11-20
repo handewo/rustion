@@ -185,7 +185,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             .get_mut(&channel)
             .ok_or(ServerError::ChannelNotExist)?;
         match channel_session.app {
-            Application::ConnectTarget(ref mut app) => app.channel_eof().await,
+            Application::ConnectTarget(ref mut app) => app.channel_eof().await.map_err(Into::into),
             // End the proxy's input. It reads EOF, writes its last reply, and
             // closes the channel when it drops its stream. Closing here would
             // cut those replies off.
@@ -233,7 +233,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             .get_mut(&channel)
             .ok_or(ServerError::ChannelNotExist)?;
         match channel_session.app {
-            Application::ConnectTarget(ref mut app) => app.data(data).await,
+            Application::ConnectTarget(ref mut app) => app.data(data).await.map_err(Into::into),
             Application::Admin => match (
                 channel_session.window_size.as_ref(),
                 channel_session.pty_modes.as_ref(),
@@ -321,7 +321,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     .await
                 {
                     session.channel_failure(channel)?;
-                    Err(e)
+                    Err(e.into())
                 } else {
                     session.channel_success(channel)?;
                     Ok(())
@@ -384,7 +384,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     .await
                 {
                     session.channel_failure(channel)?;
-                    Err(e)
+                    Err(e.into())
                 } else {
                     session.channel_success(channel)?;
                     Ok(())
@@ -399,7 +399,9 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     let lang = channel_session.lang(self.backend.language());
                     let (tty, recv_from_tty) = channel_session.new_tty()?;
                     let app_params = self.wrap_pty_parameters(tty, recv_from_tty, lang)?;
-                    app::admin::exec_request_with_pty(app_params, channel, data, session).await?;
+                    app::admin::exec_request_with_pty(app_params, channel, data, session)
+                    .await
+                    .map_err(|e| Self::Error::App(e.into()))?;
                     session.channel_failure(channel)?;
                     Ok(())
                 }
@@ -408,7 +410,9 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     let (tx, rx) = mpsc::channel(16);
                     channel_session.sender = Some(tx);
                     let params = self.wrap_exec_parameters(rx, lang)?;
-                    app::admin::exec_request_without_pty(params, channel, data, session).await?;
+                    app::admin::exec_request_without_pty(params, channel, data, session)
+                    .await
+                    .map_err(|e| Self::Error::App(e.into()))?;
                     session.channel_success(channel)?;
                     Ok(())
                 }
@@ -661,7 +665,9 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 let lang = channel_session.lang(self.backend.language());
                 let (tty, recv_from_tty) = channel_session.new_tty()?;
                 let app_params = self.wrap_pty_parameters(tty, recv_from_tty, lang)?;
-                app::admin::shell_request(app_params, channel, session).await?;
+                app::admin::shell_request(app_params, channel, session)
+                    .await
+                    .map_err(|e| Self::Error::App(e.into()))?;
                 session.channel_success(channel)?;
                 Ok(())
             }
@@ -683,7 +689,9 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                 let lang = channel_session.lang(self.backend.language());
                 let (tty, recv_from_tty) = channel_session.new_tty()?;
                 let app_params = self.wrap_pty_parameters(tty, recv_from_tty, lang)?;
-                app::player::shell_request(app_params, channel, session).await?;
+                app::player::shell_request(app_params, channel, session)
+                    .await
+                    .map_err(|e| Self::Error::App(e.into()))?;
                 session.channel_success(channel)?;
                 Ok(())
             }
@@ -707,7 +715,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     .await
                 {
                     session.channel_failure(channel)?;
-                    Err(e)
+                    Err(e.into())
                 } else {
                     session.channel_success(channel)?;
                     Ok(())

@@ -411,7 +411,6 @@ strings! {
     v_user_role_empty,
     v_target_group_empty,
     v_action_group_empty,
-    v_missing_rule_id,
     /// `{error}`
     v_extend_policy,
     /// `{error}`: the parser's own words, in English.

@@ -1,9 +1,11 @@
+use super::error::AdminError;
+use super::loaded;
+use crate::database::Uuid;
 use crate::database::common::{
     TABLE_CASBIN_NAMES, TABLE_CASBIN_RULE, TABLE_LIST, TABLE_LOGS, TABLE_SECRETS,
     TABLE_SESSION_RECORDINGS, TABLE_TARGET_SECRETS, TABLE_TARGETS, TABLE_USERS,
 };
 use crate::database::models::*;
-use crate::error::Error;
 use crate::i18n::Lang;
 use crate::server::event_log;
 use crate::server::widgets::{
@@ -28,17 +30,18 @@ const LENGTH_TIMSTAMP: u16 = 14;
 pub(super) async fn query_table<B>(
     tty: NoTtyEvent,
     writer: SenderWriter,
+    handler_id: Uuid,
     backend: Arc<B>,
     theme: &mut &'static Theme,
     lang: &mut Lang,
-) -> Result<(), Error>
+) -> Result<(), AdminError>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
     let tty_backend = NottyBackend::new(tty.clone(), writer.clone());
     let mut terminal = AsyncTerminal::new(tty_backend)?;
     crossterm::async_execute!(&writer, EnterAlternateScreen).await?;
-    let mut app = App::new(backend, theme, *lang).await;
+    let mut app = App::new(backend, handler_id, theme, *lang).await;
     let result = app.run(tty, &mut terminal).await;
     // The shell starts the next panel in the theme and language this one
     // ended with.
@@ -62,19 +65,22 @@ where
     theme: &'static Theme,
     lang: Lang,
     backend: Arc<B>,
+    handler_id: Uuid,
 }
 
 impl<B> App<B>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    async fn new(backend: Arc<B>, theme: &'static Theme, lang: Lang) -> Self {
+    async fn new(backend: Arc<B>, handler_id: Uuid, theme: &'static Theme, lang: Lang) -> Self {
         let data = TableData::Users(
-            backend
-                .db_repository()
-                .list_users(false)
-                .await
-                .unwrap_or_default(),
+            loaded(
+                handler_id,
+                "Database viewer",
+                TABLE_USERS,
+                backend.db_repository().list_users(false),
+            )
+            .await,
         );
         Self {
             table: AdminTable::new(&data),
@@ -85,6 +91,7 @@ where
             theme,
             lang,
             backend,
+            handler_id,
             items: data,
         }
     }
@@ -113,7 +120,7 @@ where
         &mut self,
         tty: NoTtyEvent,
         terminal: &mut AsyncTerminal<NottyBackend>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AdminError> {
         loop {
             terminal.draw(|frame| self.render(frame)).await?;
 
@@ -177,66 +184,79 @@ where
         match TABLE_LIST[self.selected_tab] {
             TABLE_USERS => {
                 self.items = TableData::Users(
-                    self.backend
-                        .db_repository()
-                        .list_users(false)
-                        .await
-                        .unwrap_or_default(),
+                    loaded(
+                        self.handler_id,
+                        "Database viewer",
+                        TABLE_USERS,
+                        self.backend.db_repository().list_users(false),
+                    )
+                    .await,
                 );
             }
             TABLE_TARGETS => {
                 self.items = TableData::Targets(
-                    self.backend
-                        .db_repository()
-                        .list_targets(false)
-                        .await
-                        .unwrap_or_default(),
+                    loaded(
+                        self.handler_id,
+                        "Database viewer",
+                        TABLE_TARGETS,
+                        self.backend.db_repository().list_targets(false),
+                    )
+                    .await,
                 );
             }
             TABLE_TARGET_SECRETS => {
                 self.items = TableData::TargetSecrets(
-                    self.backend
-                        .db_repository()
-                        .list_target_secrets(false)
-                        .await
-                        .unwrap_or_default(),
+                    loaded(
+                        self.handler_id,
+                        "Database viewer",
+                        TABLE_TARGET_SECRETS,
+                        self.backend.db_repository().list_target_secrets(false),
+                    )
+                    .await,
                 );
             }
             TABLE_SECRETS => {
                 self.items = TableData::Secrets(
-                    self.backend
-                        .db_repository()
-                        .list_secrets(false)
-                        .await
-                        .unwrap_or_default(),
+                    loaded(
+                        self.handler_id,
+                        "Database viewer",
+                        TABLE_SECRETS,
+                        self.backend.db_repository().list_secrets(false),
+                    )
+                    .await,
                 );
             }
             TABLE_CASBIN_NAMES => {
                 self.items = TableData::CasbinNames(
-                    self.backend
-                        .db_repository()
-                        .list_casbin_names(false)
-                        .await
-                        .unwrap_or_default(),
+                    loaded(
+                        self.handler_id,
+                        "Database viewer",
+                        TABLE_CASBIN_NAMES,
+                        self.backend.db_repository().list_casbin_names(false),
+                    )
+                    .await,
                 );
             }
             TABLE_CASBIN_RULE => {
                 self.items = TableData::CasbinRule(
-                    self.backend
-                        .db_repository()
-                        .list_casbin_rules()
-                        .await
-                        .unwrap_or_default(),
+                    loaded(
+                        self.handler_id,
+                        "Database viewer",
+                        TABLE_CASBIN_RULE,
+                        self.backend.db_repository().list_casbin_rules(),
+                    )
+                    .await,
                 );
             }
             TABLE_LOGS => {
                 let tr = self.lang.strings();
-                let mut logs = self
-                    .backend
-                    .db_repository()
-                    .list_logs()
-                    .await
-                    .unwrap_or_default();
+                let mut logs = loaded(
+                    self.handler_id,
+                    "Database viewer",
+                    TABLE_LOGS,
+                    self.backend.db_repository().list_logs(),
+                )
+                .await;
                 // Stored as events in no language; worded here, in the reader's.
                 for l in &mut logs {
                     l.detail = event_log::render(&l.detail, tr);
@@ -245,11 +265,13 @@ where
             }
             TABLE_SESSION_RECORDINGS => {
                 self.items = TableData::SessionRecordings(
-                    self.backend
-                        .db_repository()
-                        .list_session_recordings(None)
-                        .await
-                        .unwrap_or_default(),
+                    loaded(
+                        self.handler_id,
+                        "Database viewer",
+                        TABLE_SESSION_RECORDINGS,
+                        self.backend.db_repository().list_session_recordings(None),
+                    )
+                    .await,
                 );
             }
             _ => {

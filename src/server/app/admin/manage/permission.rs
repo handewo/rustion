@@ -3,8 +3,6 @@ use super::super::validate;
 use super::super::validate::describe;
 use crate::database::entity::casbin_rule;
 use crate::database::models::{ObjectGroup, PermissionPolicy};
-use crate::error::Error;
-use crate::server::app::error::AppError;
 use crate::server::extend_policy::CompiledExtendPolicy;
 use crate::server::widgets::{
     AdminTable, COMMON_HELP, DisplayMode, Help, Message, SingleLineText, Strings, Theme,
@@ -70,7 +68,7 @@ pub(super) struct PermissionEditor {
     cursor_color: Color,
     pub show_cancel_confirmation: bool,
     editing_mode: bool,
-    save_error: Option<Error>,
+    save_error: Option<AdminError>,
     tr: &'static Strings,
     pub help_text: Help,
 }
@@ -89,7 +87,7 @@ impl PermissionEditor {
         let user_items = match backend.db_repository().list_user_group().await {
             Ok(items) => items,
             Err(e) => {
-                save_error = Some(e);
+                save_error = Some(e.into());
                 Vec::new()
             }
         };
@@ -97,7 +95,7 @@ impl PermissionEditor {
         let target_items = match backend.db_repository().list_target_group().await {
             Ok(items) => items,
             Err(e) => {
-                save_error = Some(e);
+                save_error = Some(e.into());
                 Vec::new()
             }
         };
@@ -105,7 +103,7 @@ impl PermissionEditor {
         let action_items = match backend.db_repository().list_action_group().await {
             Ok(items) => items,
             Err(e) => {
-                save_error = Some(e);
+                save_error = Some(e.into());
                 Vec::new()
             }
         };
@@ -197,7 +195,7 @@ impl PermissionEditor {
             match key {
                 KeyCode::Char('s') => {
                     if let Err(e) = self.verify_permission() {
-                        self.save_error = Some(e);
+                        self.save_error = Some(e.into());
                         return false;
                     }
                     return true;
@@ -369,7 +367,7 @@ impl PermissionEditor {
         }
     }
 
-    fn verify_permission(&mut self) -> Result<(), Error> {
+    fn verify_permission(&mut self) -> Result<(), AdminError> {
         // Checked on every save, not only when it changed, and the same way the
         // policy snapshot loads it: a `v3` the snapshot cannot parse grants
         // nothing, so one must never reach the column — including the empty
@@ -384,8 +382,7 @@ impl PermissionEditor {
             &self.perm.user_role,
             &self.perm.target_group,
             &self.perm.action_group,
-        )
-        .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+        )?;
         Ok(())
     }
 

@@ -157,7 +157,6 @@ pub const JA: Strings = Strings {
     v_user_role_empty: "ユーザー/ロールを選択してください",
     v_target_group_empty: "ターゲット/グループを選択してください",
     v_action_group_empty: "アクション/グループを選択してください",
-    v_missing_rule_id: "付与済みロールのルール ID がありません",
     v_extend_policy: "拡張ポリシーが無効です: {error}",
     duplicate_target_user: "ターゲット '{target}' にはユーザー '{user}' のシークレットがすでにバインドされています",
 

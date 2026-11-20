@@ -2,8 +2,6 @@ use super::super::error::AdminError;
 use super::super::validate;
 use crate::database::entity::secret;
 use crate::database::models::target_secret::Secret;
-use crate::error::Error;
-use crate::server::app::error::AppError;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{buffer::Buffer, layout::Rect};
@@ -96,17 +94,16 @@ where
         }
     }
 
-    fn save_secret(&mut self) -> Result<(), Error> {
+    fn save_secret(&mut self) -> Result<(), AdminError> {
         let name = self.form.get_text(F_NAME).trim().to_string();
         if self.secret.name != name || self.secret.name.is_empty() {
-            validate::varify_name(&name).map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            validate::varify_name(&name)?;
             self.active_model.name = Set(name.clone());
         }
 
         let user = self.form.get_text(F_USER).trim().to_string();
         if self.secret.user != user || self.secret.user.is_empty() {
-            validate::varify_secret_user(&user)
-                .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            validate::varify_secret_user(&user)?;
             self.active_model.user = Set(user.clone());
         }
 
@@ -145,8 +142,7 @@ where
             let public_key = validate::varify_private_key(
                 &private_key,
                 (!password.is_empty()).then_some(password.as_str()),
-            )
-            .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            )?;
             self.active_model.private_key =
                 Set(Some(self.backend.encrypt_plain_text(&private_key)?));
             self.active_model.public_key = Set(Some(public_key));

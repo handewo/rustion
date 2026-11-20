@@ -32,7 +32,6 @@ use crate::config::Config;
 use crate::database::models;
 use crate::database::models::{GroupType, Ptype};
 use crate::database::service::DatabaseService;
-use crate::error::Error;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::{Engine as _, engine::general_purpose};
 use std::path::Path;
@@ -43,8 +42,8 @@ type PinBoxStream<'a> = Pin<
     Box<
         dyn Future<
                 Output = Result<
-                    Option<Pin<Box<dyn crate::database::models::target::Stream>>>,
-                    Error,
+                    Option<Pin<Box<dyn super::target_client::Stream>>>,
+                    ServerError,
                 >,
             > + Send
             + 'a,
@@ -80,20 +79,20 @@ impl Server for BastionServer {
 }
 
 impl BastionServer {
-    pub async fn with_config(mut config: Config) -> Result<Self, Error> {
+    pub async fn with_config(mut config: Config) -> Result<Self, ServerError> {
         let b64_token = match config.take_secret_token() {
             Some(token) => token,
-            None => return Err(Error::Server(ServerError::MissingSecretToken)),
+            None => return Err(ServerError::MissingSecretToken),
         };
 
         let plain_token = general_purpose::STANDARD
             .decode(b64_token)
-            .map_err(|e| Error::Server(ServerError::SecretTokenDecode { source: e }))?;
+            .map_err(|e| ServerError::SecretTokenDecode { source: e })?;
 
         let token = aes_gcm::Aes256Gcm::new_from_slice(&plain_token).map_err(|e| {
-            Error::Server(ServerError::EncryptionKeyError {
+            ServerError::EncryptionKeyError {
                 reason: e.to_string(),
-            })
+            }
         })?;
 
         // Initialize database service
@@ -178,7 +177,11 @@ impl BastionServer {
         })
     }
 
-    pub async fn run(&mut self) -> Result<(), Error> {
+    /// The process boundary: called straight from `cli`, and mixes the config
+    /// and russh setup this needs with the server's own errors, so it still
+    /// speaks [`crate::error::Error`]. Everything below it speaks
+    /// [`ServerError`].
+    pub async fn run(&mut self) -> Result<(), crate::error::Error> {
         // Load server key or generate a random one
         let key_file = Path::new(&self.config.server_key);
         let keys = if key_file.exists() {
@@ -229,9 +232,9 @@ impl BastionServer {
                 Some("ssh") => {
                     let host = proxy
                         .host()
-                        .ok_or(Error::Server(ServerError::InvalidProxyUrl))?;
+                        .ok_or(ServerError::InvalidProxyUrl)?;
                     let id = crate::database::Uuid::parse_str(host)
-                        .map_err(|_| Error::Server(ServerError::InvalidProxyUrl))?;
+                        .map_err(|_| ServerError::InvalidProxyUrl)?;
                     let target = if let Some(t) = self
                         .db_repository()
                         .get_target_by_target_secret_id(id, true)
@@ -253,7 +256,7 @@ impl BastionServer {
                         .await
                     {
                         Ok(ch) => Ok(Some(Box::pin(ch.into_stream())
-                            as Pin<Box<dyn crate::database::models::target::Stream>>)),
+                            as Pin<Box<dyn super::target_client::Stream>>)),
                         Err(
                             russh::Error::ChannelOpenFailure(
                                 russh::ChannelOpenFailure::AdministrativelyProhibited,
@@ -276,7 +279,7 @@ impl BastionServer {
                                 )
                                 .await?;
                             Ok(Some(Box::pin(ch.into_stream())
-                                as Pin<Box<dyn crate::database::models::target::Stream>>))
+                                as Pin<Box<dyn super::target_client::Stream>>))
                         }
                         Err(e) => Err(e.into()),
                     }
@@ -284,37 +287,37 @@ impl BastionServer {
                 Some("http") | Some("https") => {
                     let stream = proxy_connect(proxy, dest.hostname.clone(), dest.port).await?;
                     Ok(Some(
-                        Box::pin(stream) as Pin<Box<dyn crate::database::models::target::Stream>>
+                        Box::pin(stream) as Pin<Box<dyn super::target_client::Stream>>
                     ))
                 }
-                _ => Err(Error::Server(ServerError::InvalidProxyUrl)),
+                _ => Err(ServerError::InvalidProxyUrl),
             }
         })
     }
 
-    fn decrypt_with_secret_key(&self, text: &str) -> Result<String, Error> {
+    fn decrypt_with_secret_key(&self, text: &str) -> Result<String, ServerError> {
         let encrypt_key = general_purpose::STANDARD
             .decode(text)
-            .map_err(|e| Error::Server(ServerError::Base64Decode { source: e }))?;
+            .map_err(|e| ServerError::Base64Decode { source: e })?;
         let (nonce, ciphertext) = encrypt_key.split_at(12);
         let nonce = Nonce::from_slice(nonce);
 
         match self.secret_key.decrypt(nonce, ciphertext.as_ref()) {
             Ok(plain) => Ok(String::from_utf8_lossy(&plain).to_string()),
-            Err(e) => Err(Error::Server(ServerError::DecryptionFailed {
+            Err(e) => Err(ServerError::DecryptionFailed {
                 reason: e.to_string(),
-            })),
+            }),
         }
     }
 
     pub async fn generate_random_password(
         &self,
         mut user: user::ActiveModel,
-    ) -> Result<String, Error> {
+    ) -> Result<String, ServerError> {
         let password = crate::common::gen_password(12);
         let h = self
             .hash_password(&password)
-            .map_err(|_| Error::Server(ServerError::PasswordHashFailed))?;
+            .map_err(|_| ServerError::PasswordHashFailed)?;
         user.password_hash = Set(Some(h));
         self.database.repository().update_user(user).await?;
         Ok(password.to_string())
@@ -328,7 +331,7 @@ impl BastionServer {
 /// leave it with no way forward. A missing object is still an error, because
 /// objects have existed since `--init` and losing one means the database is
 /// damaged, not old.
-async fn load_internal_uuids(repo: &dyn DatabaseRepository) -> Result<InternalUuids, Error> {
+async fn load_internal_uuids(repo: &dyn DatabaseRepository) -> Result<InternalUuids, ServerError> {
     let mut ids = HashMap::new();
     for name in INTERNAL_OBJECTS {
         let n = repo.get_casbin_name_by_name(name).await?.ok_or_else(|| {
@@ -370,18 +373,18 @@ impl super::HandlerBackend for BastionServer {
         &self,
         name: &str,
         active_only: bool,
-    ) -> Result<Option<models::User>, Error> {
+    ) -> Result<Option<models::User>, ServerError> {
         self.database
             .repository()
             .get_user_by_username(name, active_only)
-            .await
+            .await.map_err(ServerError::from)
     }
 
     async fn list_targets_for_user(
         &self,
         user_id: &Uuid,
         active_only: bool,
-    ) -> Result<Vec<models::TargetSecretName>, Error> {
+    ) -> Result<Vec<models::TargetSecretName>, ServerError> {
         let mut res = Vec::new();
         // Taken from the snapshot first, so the lock is not held across the
         // queries below: (policy id, its object, every id under that object).
@@ -427,7 +430,7 @@ impl super::HandlerBackend for BastionServer {
         target: models::Target,
         target_secret_id: Uuid,
         force_build_connect: bool,
-    ) -> Result<Option<Arc<ru_client::Handle<models::Target>>>, Error> {
+    ) -> Result<Option<Arc<ru_client::Handle<models::Target>>>, ServerError> {
         if let Some(pool) = self.connection_pool.as_ref() {
             if force_build_connect {
                 pool.invalidate(&target_secret_id).await;
@@ -456,7 +459,7 @@ impl super::HandlerBackend for BastionServer {
             .as_deref()
             .map(http::Uri::try_from)
             .transpose()
-            .map_err(|_| crate::database::error::DatabaseError::InvalidProxy)?;
+            .map_err(|_| ServerError::InvalidProxyUrl)?;
 
         let stream = match proxy {
             Some(p) => {
@@ -533,18 +536,18 @@ impl super::HandlerBackend for BastionServer {
         &self,
         password: String,
         mut user: user::ActiveModel,
-    ) -> Result<models::User, Error> {
+    ) -> Result<models::User, ServerError> {
         let h = self
             .hash_password(&password)
-            .map_err(|_| Error::Server(ServerError::PasswordHashFailed))?;
+            .map_err(|_| ServerError::PasswordHashFailed)?;
         user.password_hash = Set(Some(h));
-        self.database.repository().update_user(user).await
+        self.database.repository().update_user(user).await.map_err(ServerError::from)
     }
 
-    fn set_password(&self, user: &mut user::ActiveModel, password: &str) -> Result<(), Error> {
+    fn set_password(&self, user: &mut user::ActiveModel, password: &str) -> Result<(), ServerError> {
         let h = self
             .hash_password(password)
-            .map_err(|_| Error::Server(ServerError::PasswordHashFailed))?;
+            .map_err(|_| ServerError::PasswordHashFailed)?;
         user.password_hash = Set(Some(h));
         Ok(())
     }
@@ -614,7 +617,7 @@ impl super::HandlerBackend for BastionServer {
         obj: Uuid,
         act: Uuid,
         ext: ExtendPolicyReq,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ServerError> {
         // Decided from the snapshot alone, under one read lock and with no
         // query, so a reload is never left waiting on a database round trip.
         let granted = self.snapshot.read().await.grants(sub, obj, act, &ext)?;
@@ -638,7 +641,7 @@ impl super::HandlerBackend for BastionServer {
         sub: Uuid,
         obj: Uuid,
         ext: ExtendPolicyReq,
-    ) -> Result<Vec<Arc<casbin::CompiledCommandSet>>, Error> {
+    ) -> Result<Vec<Arc<casbin::CompiledCommandSet>>, ServerError> {
         let sets = self
             .snapshot
             .read()
@@ -677,13 +680,13 @@ impl super::HandlerBackend for BastionServer {
 
     /// Read before the lock is taken, so checks keep answering from the old
     /// snapshot until the swap.
-    async fn reload_policies(&self) -> Result<(), Error> {
+    async fn reload_policies(&self) -> Result<(), ServerError> {
         let snapshot = load_snapshot(self.database.repository()).await?;
         *self.snapshot.write().await = snapshot;
         Ok(())
     }
 
-    fn encrypt_plain_text(&self, text: &str) -> Result<String, Error> {
+    fn encrypt_plain_text(&self, text: &str) -> Result<String, ServerError> {
         let mut nonce_bytes = [0u8; 12];
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
@@ -692,9 +695,9 @@ impl super::HandlerBackend for BastionServer {
             .secret_key
             .encrypt(nonce, text.as_bytes())
             .map_err(|e| {
-                Error::Server(ServerError::EncryptionFailed {
+                ServerError::EncryptionFailed {
                     reason: e.to_string(),
-                })
+                }
             })?;
 
         let mut blob = Vec::with_capacity(nonce_bytes.len() + ciphertext.len());
@@ -711,7 +714,7 @@ impl super::HandlerBackend for BastionServer {
 
 /// Read `casbin_rule` into a [`casbin::Snapshot`]: the three role graphs and
 /// the `p` rules, with each rule's `v3` parsed.
-async fn load_snapshot(repo: &dyn DatabaseRepository) -> Result<casbin::Snapshot, Error> {
+async fn load_snapshot(repo: &dyn DatabaseRepository) -> Result<casbin::Snapshot, ServerError> {
     let g1 = repo.list_casbin_rule_group_by_ptype(Ptype::G1).await?;
     let g2 = repo.list_casbin_rule_group_by_ptype(Ptype::G2).await?;
     let g3 = repo.list_casbin_rule_group_by_ptype(Ptype::G3).await?;

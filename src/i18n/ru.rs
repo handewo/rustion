@@ -157,7 +157,6 @@ pub const RU: Strings = Strings {
     v_user_role_empty: "Не выбран пользователь или роль",
     v_target_group_empty: "Не выбран узел или группа",
     v_action_group_empty: "Не выбрано действие или группа",
-    v_missing_rule_id: "У назначенной роли нет ID правила",
     v_extend_policy: "Недопустимая расширенная политика: {error}",
     duplicate_target_user: "К узлу '{target}' уже привязаны учётные данные пользователя '{user}'",
 

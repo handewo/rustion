@@ -27,7 +27,6 @@ use crate::database::models::{
     SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName, User, UserWithRole,
 };
 use crate::database::{DatabaseRepository, redact_url};
-use crate::error::Error;
 
 /// Matches the sqlx pool default. sea-orm defaults SQLite to a single
 /// connection, which would serialise every database call.
@@ -39,7 +38,7 @@ pub struct SeaOrmRepository {
 
 impl SeaOrmRepository {
     /// `url` is handed to sea-orm verbatim; its scheme picks the driver.
-    pub async fn new(url: &str) -> Result<Self, Error> {
+    pub async fn new(url: &str) -> Result<Self, DatabaseError> {
         info!("Connecting to database: {}", redact_url(url));
 
         let mut options = ConnectOptions::new(url);
@@ -96,7 +95,7 @@ impl DatabaseRepository for SeaOrmRepository {
     /// all benign — the stored bytes are identical, only the declared type name
     /// differs. Skipping when nothing is missing keeps the steady-state path
     /// silent, exactly as `CREATE TABLE IF NOT EXISTS` was.
-    async fn initialize(&self) -> Result<(), Error> {
+    async fn initialize(&self) -> Result<(), DatabaseError> {
         debug!("Initializing database schema");
 
         if self.schema_is_complete().await {
@@ -125,14 +124,14 @@ impl DatabaseRepository for SeaOrmRepository {
 
     // ---------------------------------------------------------------- users
 
-    async fn create_user(&self, mut user: user::ActiveModel) -> Result<User, Error> {
+    async fn create_user(&self, mut user: user::ActiveModel) -> Result<User, DatabaseError> {
         let now = Utc::now().timestamp_millis();
         user.updated_at = Set(now);
         let res = user.insert(&self.db).await?;
         Ok(res.into())
     }
 
-    async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>, Error> {
+    async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>, DatabaseError> {
         Ok(user::Entity::find_by_id(id)
             .one(&self.db)
             .await?
@@ -143,7 +142,7 @@ impl DatabaseRepository for SeaOrmRepository {
         &self,
         username: &str,
         active_only: bool,
-    ) -> Result<Option<User>, Error> {
+    ) -> Result<Option<User>, DatabaseError> {
         let mut q = user::Entity::find().filter(user::Column::Username.eq(username));
         if active_only {
             q = q.filter(user::Column::IsActive.eq(true));
@@ -151,13 +150,13 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(q.one(&self.db).await?.map(User::from))
     }
 
-    async fn update_user(&self, mut user: user::ActiveModel) -> Result<User, Error> {
+    async fn update_user(&self, mut user: user::ActiveModel) -> Result<User, DatabaseError> {
         user.updated_at = Set(Utc::now().timestamp_millis());
         let res = user::Entity::update(user).exec(&self.db).await?;
         Ok(res.into())
     }
 
-    async fn delete_user(&self, id: Uuid) -> Result<Option<Dependents>, Error> {
+    async fn delete_user(&self, id: Uuid) -> Result<Option<Dependents>, DatabaseError> {
         debug!("Deleting user: id={}", id);
         let txn = self.db.begin().await?;
         let removed = delete_dependents(&txn, id).await?;
@@ -170,7 +169,7 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(deleted.then_some(removed))
     }
 
-    async fn list_users(&self, active_only: bool) -> Result<Vec<User>, Error> {
+    async fn list_users(&self, active_only: bool) -> Result<Vec<User>, DatabaseError> {
         let mut q = user::Entity::find();
         if active_only {
             q = q.filter(user::Column::IsActive.eq(true));
@@ -183,11 +182,11 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn list_users_with_role(&self, active_only: bool) -> Result<Vec<UserWithRole>, Error> {
+    async fn list_users_with_role(&self, active_only: bool) -> Result<Vec<UserWithRole>, DatabaseError> {
         super::query::list_users_with_role(&self.db, active_only).await
     }
 
-    async fn create_users_batch(&self, users: Vec<User>) -> Result<u64, Error> {
+    async fn create_users_batch(&self, users: Vec<User>) -> Result<u64, DatabaseError> {
         if users.is_empty() {
             return Ok(0);
         }
@@ -204,13 +203,13 @@ impl DatabaseRepository for SeaOrmRepository {
 
     // -------------------------------------------------------------- targets
 
-    async fn create_target(&self, mut target: target::ActiveModel) -> Result<Target, Error> {
+    async fn create_target(&self, mut target: target::ActiveModel) -> Result<Target, DatabaseError> {
         target.updated_at = Set(Utc::now().timestamp_millis());
         let res = target.insert(&self.db).await?;
         Ok(res.into())
     }
 
-    async fn get_target_by_id(&self, id: Uuid, active_only: bool) -> Result<Option<Target>, Error> {
+    async fn get_target_by_id(&self, id: Uuid, active_only: bool) -> Result<Option<Target>, DatabaseError> {
         let mut q = target::Entity::find_by_id(id);
         if active_only {
             q = q.filter(target::Column::IsActive.eq(true));
@@ -218,13 +217,13 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(q.one(&self.db).await?.map(Target::from))
     }
 
-    async fn update_target(&self, mut target: target::ActiveModel) -> Result<Target, Error> {
+    async fn update_target(&self, mut target: target::ActiveModel) -> Result<Target, DatabaseError> {
         target.updated_at = Set(Utc::now().timestamp_millis());
         let res = target::Entity::update(target).exec(&self.db).await?;
         Ok(res.into())
     }
 
-    async fn delete_target(&self, id: Uuid) -> Result<Option<Dependents>, Error> {
+    async fn delete_target(&self, id: Uuid) -> Result<Option<Dependents>, DatabaseError> {
         debug!("Deleting target: id={}", id);
         let txn = self.db.begin().await?;
         let removed = delete_dependents(&txn, id).await?;
@@ -237,7 +236,7 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(deleted.then_some(removed))
     }
 
-    async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, Error> {
+    async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, DatabaseError> {
         let mut q = target::Entity::find();
         if active_only {
             q = q.filter(target::Column::IsActive.eq(true));
@@ -252,7 +251,7 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn list_targets_info(&self) -> Result<Vec<TargetInfo>, Error> {
+    async fn list_targets_info(&self) -> Result<Vec<TargetInfo>, DatabaseError> {
         Ok(target::Entity::find()
             .select_only()
             .column(target::Column::Id)
@@ -265,7 +264,7 @@ impl DatabaseRepository for SeaOrmRepository {
             .await?)
     }
 
-    async fn create_targets_batch(&self, targets: Vec<Target>) -> Result<u64, Error> {
+    async fn create_targets_batch(&self, targets: Vec<Target>) -> Result<u64, DatabaseError> {
         if targets.is_empty() {
             return Ok(0);
         }
@@ -282,19 +281,19 @@ impl DatabaseRepository for SeaOrmRepository {
 
     // -------------------------------------------------------------- secrets
 
-    async fn create_secret(&self, mut secret: secret::ActiveModel) -> Result<Secret, Error> {
+    async fn create_secret(&self, mut secret: secret::ActiveModel) -> Result<Secret, DatabaseError> {
         secret.updated_at = Set(Utc::now().timestamp_millis());
         let res = secret.insert(&self.db).await?;
         Ok(res.into())
     }
 
-    async fn update_secret(&self, mut secret: secret::ActiveModel) -> Result<Secret, Error> {
+    async fn update_secret(&self, mut secret: secret::ActiveModel) -> Result<Secret, DatabaseError> {
         secret.updated_at = Set(Utc::now().timestamp_millis());
         let res = secret::Entity::update(secret).exec(&self.db).await?;
         Ok(res.into())
     }
 
-    async fn list_secrets(&self, active_only: bool) -> Result<Vec<Secret>, Error> {
+    async fn list_secrets(&self, active_only: bool) -> Result<Vec<Secret>, DatabaseError> {
         let mut q = secret::Entity::find();
         if active_only {
             q = q.filter(secret::Column::IsActive.eq(true));
@@ -307,14 +306,14 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn get_secret_by_id(&self, id: Uuid) -> Result<Option<Secret>, Error> {
+    async fn get_secret_by_id(&self, id: Uuid) -> Result<Option<Secret>, DatabaseError> {
         Ok(secret::Entity::find_by_id(id)
             .one(&self.db)
             .await?
             .map(Secret::from))
     }
 
-    async fn delete_secret(&self, id: Uuid) -> Result<Option<Dependents>, Error> {
+    async fn delete_secret(&self, id: Uuid) -> Result<Option<Dependents>, DatabaseError> {
         debug!("Deleting secret: id={}", id);
         let txn = self.db.begin().await?;
         let removed = delete_dependents(&txn, id).await?;
@@ -327,7 +326,7 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(deleted.then_some(removed))
     }
 
-    async fn create_secrets_batch(&self, secrets: Vec<Secret>) -> Result<u64, Error> {
+    async fn create_secrets_batch(&self, secrets: Vec<Secret>) -> Result<u64, DatabaseError> {
         if secrets.is_empty() {
             return Ok(0);
         }
@@ -344,7 +343,7 @@ impl DatabaseRepository for SeaOrmRepository {
 
     // ------------------------------------------------------- target_secrets
 
-    async fn list_target_secrets(&self, active_only: bool) -> Result<Vec<TargetSecret>, Error> {
+    async fn list_target_secrets(&self, active_only: bool) -> Result<Vec<TargetSecret>, DatabaseError> {
         let mut q = target_secret::Entity::find();
         if active_only {
             q = q.filter(target_secret::Column::IsActive.eq(true));
@@ -361,7 +360,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn create_target_secret(
         &self,
         mut target_secret: target_secret::ActiveModel,
-    ) -> Result<TargetSecret, Error> {
+    ) -> Result<TargetSecret, DatabaseError> {
         target_secret.updated_at = Set(Utc::now().timestamp_millis());
         let res = target_secret.insert(&self.db).await?;
         Ok(res.into())
@@ -370,7 +369,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn update_target_secret(
         &self,
         mut target_secret: target_secret::ActiveModel,
-    ) -> Result<TargetSecret, Error> {
+    ) -> Result<TargetSecret, DatabaseError> {
         target_secret.updated_at = Set(Utc::now().timestamp_millis());
         let res = target_secret::Entity::update(target_secret)
             .exec(&self.db)
@@ -378,7 +377,7 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(res.into())
     }
 
-    async fn delete_target_secret(&self, id: Uuid) -> Result<Option<Dependents>, Error> {
+    async fn delete_target_secret(&self, id: Uuid) -> Result<Option<Dependents>, DatabaseError> {
         let txn = self.db.begin().await?;
         let removed = delete_dependents(&txn, id).await?;
         let res = target_secret::Entity::delete_by_id(id).exec(&txn).await?;
@@ -386,7 +385,7 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok((res.rows_affected > 0).then_some(removed))
     }
 
-    async fn dependents(&self, id: Uuid) -> Result<Dependents, Error> {
+    async fn dependents(&self, id: Uuid) -> Result<Dependents, DatabaseError> {
         let (bindings, rules) = find_dependents(&self.db, id).await?;
         Ok(count_dependents(&bindings, &rules))
     }
@@ -401,7 +400,7 @@ impl DatabaseRepository for SeaOrmRepository {
         secret_id: Uuid,
         is_active: bool,
         updated_by: Uuid,
-    ) -> Result<(), Error> {
+    ) -> Result<(), DatabaseError> {
         let existing = target_secret::Entity::find_by_target_secret((target_id, secret_id))
             .one(&self.db)
             .await?;
@@ -438,7 +437,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn create_target_secrets_batch(
         &self,
         target_secrets: Vec<TargetSecret>,
-    ) -> Result<u64, Error> {
+    ) -> Result<u64, DatabaseError> {
         if target_secrets.is_empty() {
             return Ok(0);
         }
@@ -455,7 +454,7 @@ impl DatabaseRepository for SeaOrmRepository {
 
     // ---------------------------------------------------------- casbin_rule
 
-    async fn list_casbin_rules(&self) -> Result<Vec<CasbinRule>, Error> {
+    async fn list_casbin_rules(&self) -> Result<Vec<CasbinRule>, DatabaseError> {
         Ok(casbin_rule::Entity::find()
             .order_by_asc(casbin_rule::Column::Ptype)
             .order_by_asc(casbin_rule::Column::Id)
@@ -466,7 +465,7 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn list_casbin_rules_by_ptype(&self, ptype: Ptype) -> Result<Vec<CasbinRule>, Error> {
+    async fn list_casbin_rules_by_ptype(&self, ptype: Ptype) -> Result<Vec<CasbinRule>, DatabaseError> {
         Ok(casbin_rule::Entity::find()
             .filter(casbin_rule::Column::Ptype.eq(ptype))
             .all(&self.db)
@@ -479,7 +478,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn create_casbin_rule(
         &self,
         mut rule: casbin_rule::ActiveModel,
-    ) -> Result<CasbinRule, Error> {
+    ) -> Result<CasbinRule, DatabaseError> {
         rule.updated_at = Set(Utc::now().timestamp_millis());
         let res = rule.insert(&self.db).await?;
         Ok(res.into())
@@ -488,13 +487,13 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn update_casbin_rule(
         &self,
         mut rule: casbin_rule::ActiveModel,
-    ) -> Result<CasbinRule, Error> {
+    ) -> Result<CasbinRule, DatabaseError> {
         rule.updated_at = Set(Utc::now().timestamp_millis());
         let res = casbin_rule::Entity::update(rule).exec(&self.db).await?;
         Ok(res.into())
     }
 
-    async fn delete_casbin_rule(&self, id: Uuid) -> Result<bool, Error> {
+    async fn delete_casbin_rule(&self, id: Uuid) -> Result<bool, DatabaseError> {
         debug!("Deleting casbin_rule: '({})'", id);
         let res = casbin_rule::Entity::delete_by_id(id).exec(&self.db).await?;
         let deleted = res.rows_affected > 0;
@@ -509,7 +508,7 @@ impl DatabaseRepository for SeaOrmRepository {
         group_type: GroupType,
         v0: Uuid,
         v1: Uuid,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, DatabaseError> {
         let ptype = Ptype::from(group_type);
         debug!(
             "Deleting casbin_rule where ptype={} v0={} v1={}",
@@ -532,7 +531,7 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(deleted)
     }
 
-    async fn create_casbin_rules_batch(&self, rules: Vec<CasbinRule>) -> Result<u64, Error> {
+    async fn create_casbin_rules_batch(&self, rules: Vec<CasbinRule>) -> Result<u64, DatabaseError> {
         if rules.is_empty() {
             return Ok(0);
         }
@@ -552,7 +551,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn create_casbin_name(
         &self,
         mut name: casbin_name::ActiveModel,
-    ) -> Result<CasbinName, Error> {
+    ) -> Result<CasbinName, DatabaseError> {
         name.updated_at = Set(Utc::now().timestamp_millis());
         let res = name.insert(&self.db).await?;
         Ok(res.into())
@@ -561,7 +560,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn update_casbin_name(
         &self,
         mut name: casbin_name::ActiveModel,
-    ) -> Result<CasbinName, Error> {
+    ) -> Result<CasbinName, DatabaseError> {
         // Internal types may not be renamed or re-typed. A `NotSet` column is not
         // being written, so it cannot be a modification — only an explicit `Set`
         // that differs from the stored row counts.
@@ -573,7 +572,7 @@ impl DatabaseRepository for SeaOrmRepository {
             && existing.is_internal()
             && (name.ptype.is_set() || name.name.is_set())
         {
-            return Err(Error::Database(DatabaseError::InternalTypeModification));
+            return Err(DatabaseError::InternalTypeModification);
         }
 
         name.updated_at = Set(Utc::now().timestamp_millis());
@@ -581,7 +580,7 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(res.into())
     }
 
-    async fn delete_casbin_name(&self, id: Uuid) -> Result<Option<Dependents>, Error> {
+    async fn delete_casbin_name(&self, id: Uuid) -> Result<Option<Dependents>, DatabaseError> {
         debug!("Deleting casbin_name: id={}", id);
 
         if let Some(casbin_name) = casbin_name::Entity::find_by_id(id)
@@ -590,7 +589,7 @@ impl DatabaseRepository for SeaOrmRepository {
             .map(CasbinName::from)
             && casbin_name.is_internal()
         {
-            return Err(Error::Database(DatabaseError::InternalTypeModification));
+            return Err(DatabaseError::InternalTypeModification);
         }
 
         let txn = self.db.begin().await?;
@@ -607,7 +606,7 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(deleted.then_some(removed))
     }
 
-    async fn get_casbin_name_by_name(&self, name: &str) -> Result<Option<CasbinName>, Error> {
+    async fn get_casbin_name_by_name(&self, name: &str) -> Result<Option<CasbinName>, DatabaseError> {
         Ok(casbin_name::Entity::find_by_name(name)
             .one(&self.db)
             .await?
@@ -618,7 +617,7 @@ impl DatabaseRepository for SeaOrmRepository {
         &self,
         ptype: NamePtype,
         active_only: bool,
-    ) -> Result<Vec<CasbinName>, Error> {
+    ) -> Result<Vec<CasbinName>, DatabaseError> {
         let mut q = casbin_name::Entity::find().filter(casbin_name::Column::Ptype.eq(ptype));
         if active_only {
             q = q.filter(casbin_name::Column::IsActive.eq(true));
@@ -630,7 +629,7 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn list_casbin_names(&self, active_only: bool) -> Result<Vec<CasbinName>, Error> {
+    async fn list_casbin_names(&self, active_only: bool) -> Result<Vec<CasbinName>, DatabaseError> {
         let mut q = casbin_name::Entity::find();
         if active_only {
             q = q.filter(casbin_name::Column::IsActive.eq(true));
@@ -647,7 +646,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn list_casbin_names_user_visible(
         &self,
         active_only: bool,
-    ) -> Result<Vec<CasbinName>, Error> {
+    ) -> Result<Vec<CasbinName>, DatabaseError> {
         let mut q = casbin_name::Entity::find().filter(casbin_name::Column::Ptype.is_not_in([
             casbin_name::NamePtype::InternalActionType,
             casbin_name::NamePtype::InternalObjectType,
@@ -662,7 +661,7 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn create_casbin_names_batch(&self, names: Vec<CasbinName>) -> Result<u64, Error> {
+    async fn create_casbin_names_batch(&self, names: Vec<CasbinName>) -> Result<u64, DatabaseError> {
         if names.is_empty() {
             return Ok(0);
         }
@@ -682,7 +681,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn create_command_set(
         &self,
         mut set: command_set::ActiveModel,
-    ) -> Result<CommandSet, Error> {
+    ) -> Result<CommandSet, DatabaseError> {
         set.updated_at = Set(Utc::now().timestamp_millis());
         Ok(set.insert(&self.db).await?.into())
     }
@@ -690,7 +689,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn update_command_set(
         &self,
         mut set: command_set::ActiveModel,
-    ) -> Result<CommandSet, Error> {
+    ) -> Result<CommandSet, DatabaseError> {
         set.updated_at = Set(Utc::now().timestamp_millis());
         Ok(command_set::Entity::update(set)
             .exec(&self.db)
@@ -698,7 +697,7 @@ impl DatabaseRepository for SeaOrmRepository {
             .into())
     }
 
-    async fn delete_command_set(&self, id: Uuid) -> Result<Option<Dependents>, Error> {
+    async fn delete_command_set(&self, id: Uuid) -> Result<Option<Dependents>, DatabaseError> {
         debug!("Deleting command_set: id={}", id);
         let txn = self.db.begin().await?;
         let removed = delete_dependents(&txn, id).await?;
@@ -707,7 +706,7 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok((res.rows_affected > 0).then_some(removed))
     }
 
-    async fn list_command_sets(&self, active_only: bool) -> Result<Vec<CommandSet>, Error> {
+    async fn list_command_sets(&self, active_only: bool) -> Result<Vec<CommandSet>, DatabaseError> {
         let mut q = command_set::Entity::find();
         if active_only {
             q = q.filter(command_set::Column::IsActive.eq(true));
@@ -720,7 +719,7 @@ impl DatabaseRepository for SeaOrmRepository {
             .collect())
     }
 
-    async fn create_command_sets_batch(&self, sets: Vec<CommandSet>) -> Result<u64, Error> {
+    async fn create_command_sets_batch(&self, sets: Vec<CommandSet>) -> Result<u64, DatabaseError> {
         if sets.is_empty() {
             return Ok(0);
         }
@@ -735,7 +734,7 @@ impl DatabaseRepository for SeaOrmRepository {
 
     // ------------------------------------------------------------------ logs
 
-    async fn insert_log(&self, mut log: event_log::ActiveModel) -> Result<(), Error> {
+    async fn insert_log(&self, mut log: event_log::ActiveModel) -> Result<(), DatabaseError> {
         log.created_at = Set(Utc::now().timestamp_millis());
         // `exec`, not `ActiveModel::insert`: the row is discarded, and with a
         // generated key `insert` would follow the write with a `SELECT` to
@@ -745,7 +744,7 @@ impl DatabaseRepository for SeaOrmRepository {
         Ok(())
     }
 
-    async fn list_logs(&self) -> Result<Vec<EventLog>, Error> {
+    async fn list_logs(&self) -> Result<Vec<EventLog>, DatabaseError> {
         Ok(event_log::Entity::find()
             // `id` breaks ties: `created_at` is milliseconds, and a burst on one
             // connection shares a stamp. Descending id puts the later write first,
@@ -764,7 +763,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn create_session_recording(
         &self,
         mut recording: session_recording::ActiveModel,
-    ) -> Result<SessionRecording, Error> {
+    ) -> Result<SessionRecording, DatabaseError> {
         // `started_at` is this table's write stamp; the others use `updated_at`.
         recording.started_at = Set(Utc::now().timestamp_millis());
         let res = recording.insert(&self.db).await?;
@@ -774,7 +773,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn update_session_recording(
         &self,
         recording: session_recording::ActiveModel,
-    ) -> Result<SessionRecording, Error> {
+    ) -> Result<SessionRecording, DatabaseError> {
         let res = session_recording::Entity::update(recording)
             .exec(&self.db)
             .await?;
@@ -784,7 +783,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn get_session_recording_by_id(
         &self,
         id: Uuid,
-    ) -> Result<Option<SessionRecording>, Error> {
+    ) -> Result<Option<SessionRecording>, DatabaseError> {
         Ok(session_recording::Entity::find_by_id(id)
             .one(&self.db)
             .await?
@@ -794,7 +793,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn list_session_recordings(
         &self,
         limit: Option<i64>,
-    ) -> Result<Vec<SessionRecording>, Error> {
+    ) -> Result<Vec<SessionRecording>, DatabaseError> {
         let mut q =
             session_recording::Entity::find().order_by_desc(session_recording::Column::StartedAt);
         if let Some(l) = limit {
@@ -810,7 +809,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn list_session_recordings_for_user(
         &self,
         user_id: Uuid,
-    ) -> Result<Vec<SessionRecording>, Error> {
+    ) -> Result<Vec<SessionRecording>, DatabaseError> {
         Ok(session_recording::Entity::find()
             .filter(session_recording::Column::UserId.eq(user_id))
             .order_by_desc(session_recording::Column::StartedAt)
@@ -824,7 +823,7 @@ impl DatabaseRepository for SeaOrmRepository {
     async fn list_session_recordings_for_target(
         &self,
         target_id: Uuid,
-    ) -> Result<Vec<SessionRecording>, Error> {
+    ) -> Result<Vec<SessionRecording>, DatabaseError> {
         Ok(session_recording::Entity::find()
             .filter(session_recording::Column::TargetId.eq(target_id))
             .order_by_desc(session_recording::Column::StartedAt)
@@ -843,7 +842,7 @@ impl DatabaseRepository for SeaOrmRepository {
         &self,
         id: Uuid,
         active_only: bool,
-    ) -> Result<Option<Target>, Error> {
+    ) -> Result<Option<Target>, DatabaseError> {
         super::query::get_target_by_target_secret_id(&self.db, id, active_only).await
     }
 
@@ -851,7 +850,7 @@ impl DatabaseRepository for SeaOrmRepository {
         &self,
         ids: Vec<Uuid>,
         active_only: bool,
-    ) -> Result<Vec<Target>, Error> {
+    ) -> Result<Vec<Target>, DatabaseError> {
         super::query::get_targets_by_target_secret_ids(&self.db, ids, active_only).await
     }
 
@@ -859,22 +858,22 @@ impl DatabaseRepository for SeaOrmRepository {
         &self,
         id: Uuid,
         active_only: bool,
-    ) -> Result<Option<Secret>, Error> {
+    ) -> Result<Option<Secret>, DatabaseError> {
         super::query::get_secret_by_target_secret_id(&self.db, id, active_only).await
     }
 
-    async fn list_secrets_by_target_id(&self, target_id: Uuid) -> Result<Vec<SecretInfo>, Error> {
+    async fn list_secrets_by_target_id(&self, target_id: Uuid) -> Result<Vec<SecretInfo>, DatabaseError> {
         super::query::list_secrets_for_target(&self.db, target_id).await
     }
 
-    async fn list_roles_by_user_id(&self, user_id: Uuid) -> Result<Vec<Role>, Error> {
+    async fn list_roles_by_user_id(&self, user_id: Uuid) -> Result<Vec<Role>, DatabaseError> {
         super::query::list_roles_by_user_id(&self.db, user_id).await
     }
 
     async fn list_casbin_rule_group_by_ptype(
         &self,
         ptype: Ptype,
-    ) -> Result<Vec<CasbinRuleGroup>, Error> {
+    ) -> Result<Vec<CasbinRuleGroup>, DatabaseError> {
         super::query::list_casbin_rule_group_by_ptype(&self.db, ptype).await
     }
 
@@ -883,34 +882,34 @@ impl DatabaseRepository for SeaOrmRepository {
         ids: Vec<Uuid>,
         pid: Uuid,
         active_only: bool,
-    ) -> Result<Vec<TargetSecretName>, Error> {
+    ) -> Result<Vec<TargetSecretName>, DatabaseError> {
         super::query::list_targets_by_ids(&self.db, ids, pid, active_only).await
     }
 
-    async fn list_user_group(&self) -> Result<Vec<ObjectGroup>, Error> {
+    async fn list_user_group(&self) -> Result<Vec<ObjectGroup>, DatabaseError> {
         super::query::list_user_group(&self.db).await
     }
 
-    async fn list_target_group(&self) -> Result<Vec<ObjectGroup>, Error> {
+    async fn list_target_group(&self) -> Result<Vec<ObjectGroup>, DatabaseError> {
         super::query::list_target_group(&self.db).await
     }
 
-    async fn list_action_group(&self) -> Result<Vec<ObjectGroup>, Error> {
+    async fn list_action_group(&self) -> Result<Vec<ObjectGroup>, DatabaseError> {
         super::query::list_action_group(&self.db).await
     }
 
-    async fn check_object_active(&self, id: Uuid) -> Result<bool, Error> {
+    async fn check_object_active(&self, id: Uuid) -> Result<bool, DatabaseError> {
         super::query::check_object_active(&self.db, id).await
     }
 
     async fn list_recording_view_for_user(
         &self,
         user_id: Uuid,
-    ) -> Result<Vec<RecordingView>, Error> {
+    ) -> Result<Vec<RecordingView>, DatabaseError> {
         super::query::list_recording_view_for_user(&self.db, user_id).await
     }
 
-    async fn list_permission_polices(&self) -> Result<Vec<PermissionPolicy>, Error> {
+    async fn list_permission_polices(&self) -> Result<Vec<PermissionPolicy>, DatabaseError> {
         super::query::list_permission_polices(&self.db).await
     }
 }
@@ -926,7 +925,7 @@ impl DatabaseRepository for SeaOrmRepository {
 async fn find_dependents<C: ConnectionTrait>(
     db: &C,
     id: Uuid,
-) -> Result<(Vec<Uuid>, Vec<casbin_rule::Model>), Error> {
+) -> Result<(Vec<Uuid>, Vec<casbin_rule::Model>), DatabaseError> {
     let bindings: Vec<Uuid> = target_secret::Entity::find()
         .filter(
             Condition::any()
@@ -963,7 +962,7 @@ fn count_dependents(bindings: &[Uuid], rules: &[casbin_rule::Model]) -> Dependen
 /// Delete what cannot outlive `id`, before `id` itself goes, in the caller's
 /// transaction. The foreign key would cascade the bindings on its own but not
 /// the rules, so the rules are found while the bindings can still be.
-async fn delete_dependents<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<Dependents, Error> {
+async fn delete_dependents<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<Dependents, DatabaseError> {
     let (bindings, rules) = find_dependents(db, id).await?;
     let removed = count_dependents(&bindings, &rules);
     if !rules.is_empty() {

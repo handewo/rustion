@@ -1,7 +1,7 @@
 //! Running one approved command on its own target channel, and the plumbing
 //! between that channel and the user's terminal.
 
-use crate::error::Error;
+use crate::server::error::ServerError;
 use bytes::Bytes;
 use russh::client as ru_client;
 use russh::{Channel, ChannelMsg, Pty, Sig};
@@ -123,7 +123,7 @@ pub(crate) async fn run(
     shell: &ShellInput,
     from_user: &mut CommandInput,
     out: &mpsc::Sender<Bytes>,
-) -> Result<(Outcome, bool), Error> {
+) -> Result<(Outcome, bool), ServerError> {
     // Keystrokes typed before the command started were meant for the prompt.
     // drops the previous command's undelivered input
     while from_user.input.try_recv().is_ok() {}
@@ -153,7 +153,7 @@ async fn pump(
     job: &Job<'_>,
     from_user: &mut CommandInput,
     out: &mpsc::Sender<Bytes>,
-) -> Result<(Outcome, bool), Error> {
+) -> Result<(Outcome, bool), ServerError> {
     let pty = job.pty.is_some();
     // With a pty and stdin the target's terminal handles every key, Ctrl-C
     // included. Otherwise the bastion does: there is no terminal on the
@@ -254,7 +254,7 @@ async fn pump(
 pub(crate) async fn query(
     channel: Channel<ru_client::Msg>,
     command: &str,
-) -> Result<(Outcome, Vec<u8>, Vec<u8>), Error> {
+) -> Result<(Outcome, Vec<u8>, Vec<u8>), ServerError> {
     let (mut read, write) = channel.split();
     write.exec(true, command).await?;
     write.eof().await?;

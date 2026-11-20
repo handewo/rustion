@@ -157,7 +157,6 @@ pub const ZH_HANS: Strings = Strings {
     v_user_role_empty: "用户/角色不能为空",
     v_target_group_empty: "目标/分组不能为空",
     v_action_group_empty: "操作/分组不能为空",
-    v_missing_rule_id: "已绑定角色缺少规则 ID",
     v_extend_policy: "扩展策略无效：{error}",
     duplicate_target_user: "目标主机“{target}”已绑定用户名为“{user}”的凭据",
 

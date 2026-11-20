@@ -11,10 +11,8 @@
 
 use super::common;
 use super::error::AdminError;
-use crate::error::Error;
 use crate::fill;
 use crate::i18n::{Lang, Strings};
-use crate::server::app::error::AppError;
 use crate::server::error::ServerError;
 use russh::keys::ssh_key::PublicKey;
 use std::str::FromStr;
@@ -43,7 +41,6 @@ pub enum ValidateError {
     UserRoleEmpty,
     TargetGroupEmpty,
     ActionGroupEmpty,
-    MissingRuleId,
 }
 
 impl ValidateError {
@@ -79,7 +76,6 @@ impl ValidateError {
             UserRoleEmpty => tr.v_user_role_empty.to_string(),
             TargetGroupEmpty => tr.v_target_group_empty.to_string(),
             ActionGroupEmpty => tr.v_action_group_empty.to_string(),
-            MissingRuleId => tr.v_missing_rule_id.to_string(),
         }
     }
 }
@@ -94,14 +90,14 @@ impl std::fmt::Display for ValidateError {
 /// An editor's save error as the dialog says it, in `tr`'s language. What the
 /// operator can fix is worded; anything else is an internal error, shown as it
 /// is so it can be reported.
-pub fn describe(e: &Error, tr: &Strings) -> String {
+pub fn describe(e: &AdminError, tr: &Strings) -> String {
     match e {
-        Error::App(AppError::Admin(AdminError::Validate(v))) => v.message(tr),
-        Error::App(AppError::Admin(AdminError::DuplicateTargetUser { target, user })) => {
+        AdminError::Validate(v) => v.message(tr),
+        AdminError::DuplicateTargetUser { target, user } => {
             fill!(tr.duplicate_target_user, target = target, user = user)
         }
-        Error::Json(e) => fill!(tr.v_extend_policy, error = e),
-        Error::Server(ServerError::ExtendPolicy(e)) => fill!(tr.v_extend_policy, error = e),
+        AdminError::Server(ServerError::Json(e)) => fill!(tr.v_extend_policy, error = e),
+        AdminError::Server(ServerError::ExtendPolicy(e)) => fill!(tr.v_extend_policy, error = e),
         e => e.to_string(),
     }
 }

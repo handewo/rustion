@@ -1,13 +1,13 @@
 use super::{ExecParams, PtyParams};
 use crate::database::common as db_common;
-use crate::error::Error;
-use crate::server::error::ServerError;
 use crate::server::event_log::{Audit, EventKind};
 use crate::server::extend_policy;
 use bytes::Bytes;
+use error::AdminError;
 
 use crate::database::Uuid;
 use log::{debug, warn};
+use std::future::Future;
 use tokio::sync::mpsc;
 
 use russh::ChannelId;
@@ -26,18 +26,36 @@ pub async fn check_permission<B>(
     object: Uuid,
     action: Uuid,
     ip: Option<std::net::IpAddr>,
-) -> Result<bool, Error>
+) -> Result<bool, AdminError>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    backend
+    Ok(backend
         .enforce(
             user_id,
             object,
             action,
             extend_policy::ExtendPolicyReq::new(ip),
         )
-        .await
+        .await?)
+}
+
+/// Load a list for a panel, logging why it came back empty: a failed load
+/// must not look the same as an empty table. The line carries the handler
+/// id, so it finds its session, and `panel` names the screen.
+async fn loaded<T>(
+    handler_id: Uuid,
+    panel: &str,
+    what: &'static str,
+    call: impl Future<Output = Result<Vec<T>, crate::database::error::DatabaseError>>,
+) -> Vec<T> {
+    match call.await {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!("[{}] {}: failed to list {}: {}", handler_id, panel, what, e);
+            Vec::new()
+        }
+    }
 }
 
 pub(crate) async fn exec_request_with_pty<B>(
@@ -45,7 +63,7 @@ pub(crate) async fn exec_request_with_pty<B>(
     _channel: ChannelId,
     _data: &[u8],
     _session: &mut ru_server::Session,
-) -> Result<(), Error>
+) -> Result<(), AdminError>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
@@ -60,7 +78,7 @@ where
     )
     .await?
     {
-        return Err(ServerError::PermissionDeny.into());
+        return Err(AdminError::Permission);
     }
     Ok(())
 }
@@ -70,7 +88,7 @@ pub(crate) async fn exec_request_without_pty<B>(
     channel: ChannelId,
     data: &[u8],
     session: &mut ru_server::Session,
-) -> Result<(), Error>
+) -> Result<(), AdminError>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
@@ -86,7 +104,7 @@ where
     )
     .await?
     {
-        return Err(ServerError::PermissionDeny.into());
+        return Err(AdminError::Permission);
     }
     let handle_session = session.handle();
 
@@ -130,7 +148,7 @@ pub(crate) async fn shell_request<B>(
     app_params: PtyParams<B>,
     channel: ChannelId,
     session: &mut ru_server::Session,
-) -> Result<(), Error>
+) -> Result<(), AdminError>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
@@ -147,7 +165,7 @@ where
     )
     .await?
     {
-        return Err(ServerError::PermissionDeny.into());
+        return Err(AdminError::Permission);
     }
     let handle_session = session.handle();
     let (send_to_session, mut recv_from_shell) = mpsc::channel::<Bytes>(16);

@@ -78,14 +78,18 @@ pub(super) async fn shell<B>(
                         break;
                     }
                     CMD_DATABASE => {
-                        let _ = database::query_table(
+                        if let Err(e) = database::query_table(
                             tty.clone(),
                             SenderWriter::new(send_to_session.clone()),
+                            handler_id,
                             backend.clone(),
                             &mut theme,
                             &mut lang,
                         )
-                        .await;
+                        .await
+                        {
+                            warn!("[{}] Database viewer error: {}", handler_id, e);
+                        }
                     }
                     CMD_MANAGE => {
                         let w = SenderWriter::new(send_to_session.clone());

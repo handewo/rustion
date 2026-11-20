@@ -1,9 +1,8 @@
 use super::PtyParams;
 use crate::database::Uuid;
 use crate::database::models::TargetSecretName;
-use crate::error::Error;
-use crate::server::app::NextApplication;
 use crate::server::app::error::AppError;
+use crate::server::app::NextApplication;
 use bytes::Bytes;
 use crossterm::event::SenderWriter;
 use log::{debug, trace, warn};
@@ -29,7 +28,7 @@ pub(crate) async fn shell_request<B>(
     params: PtyParams<B>,
     channel: ChannelId,
     session: &mut ru_server::Session,
-) -> Result<(), Error>
+) -> Result<(), AppError>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {

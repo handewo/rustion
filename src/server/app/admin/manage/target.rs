@@ -2,8 +2,6 @@ use super::super::error::AdminError;
 use super::super::validate;
 use crate::database::entity::target;
 use crate::database::models::Target;
-use crate::error::Error;
-use crate::server::app::error::AppError;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{buffer::Buffer, layout::Rect};
@@ -87,25 +85,23 @@ impl TargetEditor {
         }
     }
 
-    fn save_target(&mut self) -> Result<(), Error> {
+    fn save_target(&mut self) -> Result<(), AdminError> {
         let name = self.form.get_text(F_NAME).trim().to_string();
         if self.target.name != name || self.target.name.is_empty() {
-            validate::varify_name(&name).map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            validate::varify_name(&name)?;
             self.active_model.name = Set(name.clone());
         }
 
         let hostname = self.form.get_text(F_HOSTNAME).trim().to_string();
         if self.target.hostname != hostname || self.target.hostname.is_empty() {
-            validate::varify_hostname(&hostname)
-                .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            validate::varify_hostname(&hostname)?;
             self.active_model.hostname = Set(hostname.clone());
         }
 
         // Compared as text, so a re-typed but identical port is not a write.
         let port = self.form.get_text(F_PORT).trim().to_string();
         if self.target.port.to_string() != port {
-            let port = validate::varify_port(&port)
-                .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            let port = validate::varify_port(&port)?;
             self.active_model.port = Set(port.into());
         }
 
@@ -113,8 +109,7 @@ impl TargetEditor {
         if self.target.server_public_key != server_public_key
             || self.target.server_public_key.is_empty()
         {
-            validate::varify_server_public_key(&server_public_key)
-                .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            validate::varify_server_public_key(&server_public_key)?;
             self.active_model.server_public_key = Set(server_public_key.clone());
         }
 
@@ -128,7 +123,7 @@ impl TargetEditor {
         let proxy = (!proxy.is_empty()).then_some(proxy);
         if self.target.proxy != proxy {
             if let Some(p) = proxy.as_ref() {
-                validate::varify_proxy(p).map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+                validate::varify_proxy(p)?;
             }
             self.active_model.proxy = Set(proxy.clone());
         }

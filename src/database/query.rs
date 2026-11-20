@@ -34,7 +34,7 @@ use crate::database::models::{
     CasbinName, CasbinRule, CasbinRuleGroup, ObjectGroup, PermissionPolicy, RecordingStatus,
     RecordingView, Role, Secret, SecretInfo, Target, TargetSecretName, UserWithRole,
 };
-use crate::error::Error;
+use crate::database::error::DatabaseError;
 
 // ---------------------------------------------------------------- label parts
 
@@ -73,7 +73,7 @@ impl TargetSecretParts {
 /// directly without sorting, so a `HashMap` would reshuffle the list on every
 /// refresh. Sorted explicitly rather than relying on scan order, which differs
 /// between backends. Use [`parts_by_id`] when a lookup is what's wanted.
-async fn target_secret_parts(db: &DatabaseConnection) -> Result<Vec<TargetSecretParts>, Error> {
+async fn target_secret_parts(db: &DatabaseConnection) -> Result<Vec<TargetSecretParts>, DatabaseError> {
     Ok(target_secret::Entity::find()
         .select_only()
         .column_as(target_secret::Column::Id, "id")
@@ -90,7 +90,7 @@ async fn target_secret_parts(db: &DatabaseConnection) -> Result<Vec<TargetSecret
 }
 
 /// [`target_secret_parts`] keyed by `target_secret` id, for label lookups.
-async fn parts_by_id(db: &DatabaseConnection) -> Result<HashMap<Uuid, TargetSecretParts>, Error> {
+async fn parts_by_id(db: &DatabaseConnection) -> Result<HashMap<Uuid, TargetSecretParts>, DatabaseError> {
     Ok(target_secret_parts(db)
         .await?
         .into_iter()
@@ -102,7 +102,7 @@ async fn parts_by_id(db: &DatabaseConnection) -> Result<HashMap<Uuid, TargetSecr
 async fn casbin_name_map(
     db: &DatabaseConnection,
     ptype: Option<NamePtype>,
-) -> Result<HashMap<Uuid, CasbinName>, Error> {
+) -> Result<HashMap<Uuid, CasbinName>, DatabaseError> {
     let mut q = casbin_name::Entity::find();
     if let Some(ptype) = ptype {
         q = q.filter(casbin_name::Column::Ptype.eq(ptype));
@@ -116,7 +116,7 @@ async fn casbin_name_map(
 
 /// Command set names by id. A set is granted like an action, so wherever an
 /// action is labelled, a set may be what the id names.
-async fn command_set_names(db: &DatabaseConnection) -> Result<HashMap<Uuid, String>, Error> {
+async fn command_set_names(db: &DatabaseConnection) -> Result<HashMap<Uuid, String>, DatabaseError> {
     Ok(command_set::Entity::find()
         .all(db)
         .await?
@@ -133,7 +133,7 @@ async fn command_set_names(db: &DatabaseConnection) -> Result<HashMap<Uuid, Stri
 pub(super) async fn list_users_with_role(
     db: &DatabaseConnection,
     active_only: bool,
-) -> Result<Vec<UserWithRole>, Error> {
+) -> Result<Vec<UserWithRole>, DatabaseError> {
     let group_concat = match db.get_database_backend() {
         DbBackend::MySql | DbBackend::Sqlite => "GROUP_CONCAT(casbin_name.name, ', ')",
         DbBackend::Postgres => "STRING_AGG(casbin_name.name, ', ' ORDER BY casbin_name.name)",
@@ -193,7 +193,7 @@ pub(super) async fn get_target_by_target_secret_id(
     db: &DatabaseConnection,
     id: Uuid,
     active_only: bool,
-) -> Result<Option<Target>, Error> {
+) -> Result<Option<Target>, DatabaseError> {
     let mut ts_cond = Condition::all().add(target_secret::Column::Id.eq(id));
 
     if active_only {
@@ -213,7 +213,7 @@ pub(super) async fn get_targets_by_target_secret_ids(
     db: &DatabaseConnection,
     ids: Vec<Uuid>,
     active_only: bool,
-) -> Result<Vec<Target>, Error> {
+) -> Result<Vec<Target>, DatabaseError> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -237,7 +237,7 @@ pub(super) async fn get_secret_by_target_secret_id(
     db: &DatabaseConnection,
     id: Uuid,
     active_only: bool,
-) -> Result<Option<Secret>, Error> {
+) -> Result<Option<Secret>, DatabaseError> {
     let mut ts_cond = Condition::all().add(target_secret::Column::Id.eq(id));
 
     if active_only {
@@ -260,7 +260,7 @@ pub(super) async fn get_secret_by_target_secret_id(
 pub(super) async fn list_secrets_for_target(
     db: &DatabaseConnection,
     target_id: Uuid,
-) -> Result<Vec<SecretInfo>, Error> {
+) -> Result<Vec<SecretInfo>, DatabaseError> {
     Ok(secret::Entity::find()
         .select_only()
         .column(secret::Column::Id)
@@ -289,7 +289,7 @@ pub(super) async fn list_secrets_for_target(
 
 /// True when `id` is an active `target_secret` (with active target and secret)
 /// or an active internal object.
-pub(super) async fn check_object_active(db: &DatabaseConnection, id: Uuid) -> Result<bool, Error> {
+pub(super) async fn check_object_active(db: &DatabaseConnection, id: Uuid) -> Result<bool, DatabaseError> {
     let ts_active = target_secret::Entity::find()
         .join(JoinType::InnerJoin, target_secret::Relation::Target.def())
         .join(JoinType::InnerJoin, target_secret::Relation::Secret.def())
@@ -323,7 +323,7 @@ pub(super) async fn check_object_active(db: &DatabaseConnection, id: Uuid) -> Re
 pub(super) async fn list_roles_by_user_id(
     db: &DatabaseConnection,
     user_id: Uuid,
-) -> Result<Vec<Role>, Error> {
+) -> Result<Vec<Role>, DatabaseError> {
     let q = casbin_name::Entity::find()
         .select_only()
         .column_as(casbin_name::Column::Id, "casbin_name_id")
@@ -361,7 +361,7 @@ pub(super) async fn list_roles_by_user_id(
 pub(super) async fn list_casbin_rule_group_by_ptype(
     db: &DatabaseConnection,
     ptype: Ptype,
-) -> Result<Vec<CasbinRuleGroup>, Error> {
+) -> Result<Vec<CasbinRuleGroup>, DatabaseError> {
     #[derive(DeriveIden, Clone, Copy)]
     pub enum Alias {
         V0,
@@ -505,7 +505,7 @@ pub(super) async fn list_targets_by_ids(
     ids: Vec<Uuid>,
     pid: Uuid,
     active_only: bool,
-) -> Result<Vec<TargetSecretName>, Error> {
+) -> Result<Vec<TargetSecretName>, DatabaseError> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -542,7 +542,7 @@ async fn target_secret_rows(
     db: &DatabaseConnection,
     ids: &[Uuid],
     active_only: bool,
-) -> Result<HashMap<Uuid, TargetSecretRow>, Error> {
+) -> Result<HashMap<Uuid, TargetSecretRow>, DatabaseError> {
     let mut q = target_secret::Entity::find()
         .select_only()
         .column_as(target_secret::Column::Id, "id")
@@ -580,7 +580,7 @@ async fn target_secret_rows(
 /// make no such promise (PostgreSQL in particular reorders rows after updates),
 /// and these lists are rendered unsorted, so the order needs to be explicit to
 /// stop the picker reshuffling between refreshes.
-pub(super) async fn list_user_group(db: &DatabaseConnection) -> Result<Vec<ObjectGroup>, Error> {
+pub(super) async fn list_user_group(db: &DatabaseConnection) -> Result<Vec<ObjectGroup>, DatabaseError> {
     let mut out: Vec<ObjectGroup> = user::Entity::find()
         .order_by_asc(user::Column::Username)
         .all(db)
@@ -612,7 +612,7 @@ pub(super) async fn list_user_group(db: &DatabaseConnection) -> Result<Vec<Objec
 
 /// `target_secret`s (labelled `user(name)@target:port`), then `g2` groups and
 /// internal objects. Internal objects report `is_group: false`, as before.
-pub(super) async fn list_target_group(db: &DatabaseConnection) -> Result<Vec<ObjectGroup>, Error> {
+pub(super) async fn list_target_group(db: &DatabaseConnection) -> Result<Vec<ObjectGroup>, DatabaseError> {
     let mut out: Vec<ObjectGroup> = target_secret_parts(db)
         .await?
         .into_iter()
@@ -645,7 +645,7 @@ pub(super) async fn list_target_group(db: &DatabaseConnection) -> Result<Vec<Obj
 }
 
 /// `g3` groups and internal actions, then command sets.
-pub(super) async fn list_action_group(db: &DatabaseConnection) -> Result<Vec<ObjectGroup>, Error> {
+pub(super) async fn list_action_group(db: &DatabaseConnection) -> Result<Vec<ObjectGroup>, DatabaseError> {
     let mut out: Vec<ObjectGroup> = casbin_name::Entity::find()
         .filter(
             casbin_name::Column::Ptype
@@ -686,7 +686,7 @@ pub(super) async fn list_action_group(db: &DatabaseConnection) -> Result<Vec<Obj
 pub(super) async fn list_recording_view_for_user(
     db: &DatabaseConnection,
     user_id: Uuid,
-) -> Result<Vec<RecordingView>, Error> {
+) -> Result<Vec<RecordingView>, DatabaseError> {
     #[derive(FromQueryResult)]
     struct Row {
         id: Uuid,
@@ -754,7 +754,7 @@ pub(super) async fn list_recording_view_for_user(
 /// * `v2` (action) — a `casbin_name`
 pub(super) async fn list_permission_polices(
     db: &DatabaseConnection,
-) -> Result<Vec<PermissionPolicy>, Error> {
+) -> Result<Vec<PermissionPolicy>, DatabaseError> {
     // TODO: Replace with one query
     let rules = casbin_rule::Entity::find()
         .filter(casbin_rule::Column::Ptype.eq(Ptype::Policy))

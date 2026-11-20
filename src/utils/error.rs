@@ -14,9 +14,6 @@ pub enum HttpProxyError {
     #[error("Proxy URL must start with http:// or https://")]
     InvalidProxyUrl,
 
-    #[error("SSH target must be in format user@host:port")]
-    InvalidSshTarget,
-
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
@@ -28,7 +25,4 @@ pub enum HttpProxyError {
 
     #[error(transparent)]
     Rustls(#[from] rustls::Error),
-
-    #[error(transparent)]
-    InvalidPort(#[from] std::num::ParseIntError),
 }

@@ -1,7 +1,7 @@
+use super::super::error::AdminError;
 use crate::database::Uuid;
 use crate::database::entity::casbin_rule;
 use crate::database::models::{Ptype, Role};
-use crate::error::Error;
 use crate::server::event_log::{Audit, EventLogger, labelled};
 use crate::server::widgets::{
     AdminTable, DisplayMode, FieldsToArray, Help, Message, Strings, TableData, Theme,
@@ -30,7 +30,7 @@ where
     backend: Arc<B>,
     handler_id: Uuid,
     admin_id: Uuid,
-    save_error: Option<Error>,
+    save_error: Option<AdminError>,
     log: EventLogger<B>,
     tr: &'static Strings,
     pub help_text: Help,
@@ -56,7 +56,7 @@ where
         {
             Ok(items) => items,
             Err(e) => {
-                save_error = Some(e);
+                save_error = Some(e.into());
                 Vec::new()
             }
         };
@@ -115,7 +115,7 @@ where
             }
             KeyCode::Char(' ') | KeyCode::Enter => {
                 if let Err(e) = self.save_bindings().await {
-                    self.save_error = Some(e);
+                    self.save_error = Some(e.into());
                 }
             }
             _ => {}
@@ -124,7 +124,7 @@ where
         false
     }
 
-    async fn save_bindings(&mut self) -> Result<(), Error> {
+    async fn save_bindings(&mut self) -> Result<(), AdminError> {
         let idx = self.role_table.state.selected().unwrap();
         let t = self.items.get_mut(idx).unwrap();
         match t.casbin_rule_id {

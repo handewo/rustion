@@ -1,4 +1,4 @@
-use crate::error::Error;
+
 use crate::server::error::{ExtendPolicyError, ServerError};
 use chrono::{DateTime, FixedOffset, NaiveTime, Utc};
 use ipnetwork::IpNetwork;
@@ -58,7 +58,7 @@ impl CompiledExtendPolicy {
     /// Parse a `casbin_rule.v3`. The permission editor checks `v3` with this
     /// before saving it and the snapshot loads it with this, so a `v3` the
     /// editor accepts is one the snapshot can use.
-    pub fn parse(ext_str: &str) -> Result<Self, Error> {
+    pub fn parse(ext_str: &str) -> Result<Self, ServerError> {
         let policy: ExtendPolicy = serde_json::from_str(ext_str)?;
         policy.validate().map_err(ServerError::ExtendPolicy)?;
         let sftp_path = policy
@@ -284,7 +284,7 @@ impl TryFrom<HostPolicy> for IpPolicy {
 pub fn verify_extend_policy(
     ext_req: &ExtendPolicyReq,
     compiled: &CompiledExtendPolicy,
-) -> Result<bool, Error> {
+) -> Result<bool, ServerError> {
     trace!("ext_req: {:?} ext: {:?}", ext_req, compiled.policy);
     let ext = &compiled.policy;
     if !is_ip_in_cidr(ext_req.ip, ext.ip_policy) {

@@ -1,8 +1,7 @@
+use super::super::error::AdminError;
 use super::super::validate::describe;
 use crate::database::Uuid;
 use crate::database::models::{SecretInfo, TargetInfo};
-use crate::error::Error;
-use crate::server::app::admin::error::AdminError;
 use crate::server::event_log::{Audit, EventLogger, labelled};
 use crate::server::widgets::{
     AdminTable, DisplayMode, FieldsToArray, Help, Strings, TableData, Theme,
@@ -49,7 +48,7 @@ where
     backend: Arc<B>,
     handler_id: Uuid,
     admin_id: Uuid,
-    save_error: Option<Error>,
+    save_error: Option<AdminError>,
     log: EventLogger<B>,
     tr: &'static Strings,
     pub help_text: Help,
@@ -169,7 +168,7 @@ where
         false
     }
 
-    async fn save_bindings(&mut self) -> Result<(), Error> {
+    async fn save_bindings(&mut self) -> Result<(), AdminError> {
         let t_idx = self.target_table.state.selected().unwrap();
         let s_idx = self.secret_table.state.selected().unwrap();
         let t = self.targets.get(t_idx).unwrap();
@@ -182,12 +181,10 @@ where
                 .iter()
                 .any(|other| other.id != s.id && other.is_bound && other.user == s.user);
             if duplicate {
-                return Err(crate::server::app::error::AppError::from(
-                    AdminError::DuplicateTargetUser {
-                        target: t.name.clone(),
-                        user: s.user.clone(),
-                    },
-                )
+                return Err(AdminError::from(AdminError::DuplicateTargetUser {
+                    target: t.name.clone(),
+                    user: s.user.clone(),
+                })
                 .into());
             }
         }
@@ -231,7 +228,7 @@ where
                         "[{}] List secrets by target_id failed: {}",
                         self.handler_id, e
                     );
-                    self.save_error = Some(e)
+                    self.save_error = Some(e.into())
                 }
             }
         }
@@ -294,12 +291,7 @@ where
         );
 
         if let Some(err) = self.save_error.as_ref() {
-            if matches!(
-                err,
-                Error::App(crate::server::app::error::AppError::Admin(
-                    AdminError::DuplicateTargetUser { .. }
-                ))
-            ) {
+            if matches!(err, AdminError::DuplicateTargetUser { .. }) {
                 let message = Message::Error(vec![describe(err, tr)]);
                 render_message_popup(area, buf, &message, theme, tr);
             } else {

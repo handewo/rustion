@@ -41,9 +41,6 @@ pub enum ServerError {
         source: DecodeError,
     },
 
-    #[error("Permission deny")]
-    PermissionDeny,
-
     #[error("Failed to decrypt secret: {reason}")]
     DecryptionFailed { reason: String },
 
@@ -77,6 +74,20 @@ pub enum ServerError {
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    /// JSON that would not parse — an extended policy's `v3`, say.
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+
+    /// A database call this server operation depended on. The repository
+    /// speaks [`DatabaseError`](crate::database::error::DatabaseError); this is
+    /// where it crosses into the server layer.
+    #[error(transparent)]
+    Database(#[from] crate::database::error::DatabaseError),
+
+    /// Reaching a target through an HTTP CONNECT proxy.
+    #[error(transparent)]
+    HttpProxy(#[from] crate::utils::HttpProxyError),
 
     #[error("Event log doesn't init")]
     EventLogNotInit,

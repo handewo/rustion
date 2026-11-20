@@ -19,7 +19,6 @@ use crate::database::models::{
     Dependents, EventKind, EventLog, GroupType, NamePtype, Ptype, RecordingStatus, SessionRecording,
 };
 use crate::database::{DatabaseRepository, Uuid};
-use crate::error::Error;
 use sea_orm::ActiveValue::{NotSet, Set, Unchanged};
 use sea_orm::EntityTrait;
 use std::collections::{HashMap, HashSet};
@@ -1410,7 +1409,7 @@ async fn internal_names_are_protected_from_rename_and_delete() {
         .await;
     assert!(matches!(
         renamed,
-        Err(Error::Database(DatabaseError::InternalTypeModification))
+        Err(DatabaseError::InternalTypeModification)
     ));
 
     let retyped = repo
@@ -1422,7 +1421,7 @@ async fn internal_names_are_protected_from_rename_and_delete() {
         .await;
     assert!(matches!(
         retyped,
-        Err(Error::Database(DatabaseError::InternalTypeModification))
+        Err(DatabaseError::InternalTypeModification)
     ));
 
     // Only an explicit `Set` on `ptype` or `name` counts, so toggling
@@ -1443,7 +1442,7 @@ async fn internal_names_are_protected_from_rename_and_delete() {
     let deleted = repo.delete_casbin_name(internal).await;
     assert!(matches!(
         deleted,
-        Err(Error::Database(DatabaseError::InternalTypeModification))
+        Err(DatabaseError::InternalTypeModification)
     ));
     assert!(
         repo.get_casbin_name_by_name(OBJ_ADMIN)

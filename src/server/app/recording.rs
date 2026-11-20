@@ -5,6 +5,7 @@
 use crate::asciinema;
 use crate::database::Uuid;
 use crate::database::entity::session_recording as session_recording_entity;
+use crate::database::error::DatabaseError;
 use crate::database::models::TargetSecretName;
 use crate::database::models::session_recording;
 use crate::server::HandlerBackend;
@@ -23,7 +24,7 @@ pub enum RecordingError {
     CastFile(#[source] asciinema::Error),
 
     #[error("Failed to create the session recording row: {0}")]
-    Row(#[source] Box<crate::error::Error>),
+    Row(#[source] DatabaseError),
 }
 
 /// One recording in progress: the cast writer, and the row that names it.
@@ -60,7 +61,7 @@ impl Recording {
         binding: &TargetSecretName,
         term: Option<String>,
         size: (u16, u16),
-    ) -> Result<Recording, crate::error::Error> {
+    ) -> Result<Recording, AppError> {
         let id = Uuid::now_v7();
         let file_path = session_recording::generate_path(id);
         let session = asciinema::new_recorder(
@@ -71,7 +72,7 @@ impl Recording {
             backend.record_input(),
         )
         .await
-        .map_err(|e| AppError::Recording(RecordingError::CastFile(e)))?;
+        .map_err(RecordingError::CastFile)?;
         backend
             .db_repository()
             .create_session_recording(session_recording_entity::ActiveModel {
@@ -92,7 +93,7 @@ impl Recording {
                 ..Default::default()
             })
             .await
-            .map_err(|e| AppError::Recording(RecordingError::Row(Box::new(e))))?;
+            .map_err(RecordingError::Row)?;
         Ok(Recording { session, id })
     }
 
@@ -132,8 +133,8 @@ mod tests {
     /// the io error inside it does not.
     #[test]
     fn a_start_failure_names_the_recording() {
-        let e = crate::error::Error::from(AppError::Recording(RecordingError::CastFile(
-            asciinema::Error::Io(std::io::Error::from_raw_os_error(13)),
+        let e = AppError::Recording(RecordingError::CastFile(asciinema::Error::Io(
+            std::io::Error::from_raw_os_error(13),
         )));
         assert_eq!(
             e.to_string(),

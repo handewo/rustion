@@ -2,9 +2,7 @@ use super::super::error::AdminError;
 use super::super::validate;
 use crate::database::entity::command_set;
 use crate::database::models::CommandSet;
-use crate::error::Error;
 use crate::fill;
-use crate::server::app::error::AppError;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{buffer::Buffer, layout::Rect};
@@ -95,7 +93,7 @@ impl CommandSetEditor {
         let name = self.form.get_text(F_NAME).trim().to_string();
         if self.command_set.name != name || self.command_set.name.is_empty() {
             validate::varify_group_name(&name).map_err(|e| {
-                let e: Error = AppError::Admin(AdminError::Validate(e)).into();
+                let e = AdminError::Validate(e);
                 vec![validate::describe(&e, self.tr)]
             })?;
             self.active_model.name = Set(name);

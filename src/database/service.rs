@@ -2,7 +2,7 @@ use log::info;
 use std::sync::Arc;
 
 use crate::database::{DatabaseRepository, create_repository};
-use crate::error::Error;
+use crate::database::error::DatabaseError;
 
 /// Database service that provides high-level operations
 #[derive(Clone)]
@@ -12,7 +12,7 @@ pub struct DatabaseService {
 
 impl DatabaseService {
     /// Create a new database service from a sea-orm connection URL
-    pub async fn new(url: &str) -> Result<Self, Error> {
+    pub async fn new(url: &str) -> Result<Self, DatabaseError> {
         info!("Initializing database service");
         let repository = create_repository(url).await?;
         Ok(Self {

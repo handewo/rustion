@@ -1,7 +1,7 @@
+use super::super::error::AdminError;
 use crate::database::Uuid;
 use crate::database::entity::casbin_rule;
 use crate::database::models::{GroupType, ObjectGroup};
-use crate::error::Error;
 use crate::fill;
 use crate::server::event_log::{Audit, EventLogger, MemberKind, labelled};
 use crate::server::widgets::tree;
@@ -100,7 +100,7 @@ where
         backend: &Arc<B>,
         group_type: GroupType,
         tr: &Strings,
-    ) -> Result<BuildTreeResult, Error>
+    ) -> Result<BuildTreeResult, AdminError>
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
@@ -110,21 +110,21 @@ where
                 Ok(i) => i,
                 Err(e) => {
                     error!("[{}] Failed to list 'user role': {}", handler_id, e);
-                    return Err(e);
+                    return Err(e.into());
                 }
             },
             GroupType::Object => match backend.db_repository().list_target_group().await {
                 Ok(i) => i,
                 Err(e) => {
                     error!("[{}] Failed to list 'target group': {}", handler_id, e);
-                    return Err(e);
+                    return Err(e.into());
                 }
             },
             GroupType::Action => match backend.db_repository().list_action_group().await {
                 Ok(i) => i,
                 Err(e) => {
                     error!("[{}] Failed to list 'action group': {}", handler_id, e);
-                    return Err(e);
+                    return Err(e.into());
                 }
             },
         };
@@ -136,7 +136,7 @@ where
             Ok(i) => i,
             Err(e) => {
                 error!("[{}] Failed to build tree: {}", handler_id, e);
-                return Err(Error::IO(e));
+                return Err(AdminError::Io(e));
             }
         };
         if group_type == GroupType::Subject {

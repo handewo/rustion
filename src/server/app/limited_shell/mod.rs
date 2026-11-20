@@ -24,9 +24,10 @@ use super::PtyParams;
 use super::recording::{Recording, SharedRecording, no_recording};
 use crate::database::Uuid;
 use crate::database::models::{Target, TargetSecretName, session_recording};
-use crate::error::Error;
 use crate::fill;
 use crate::i18n::Strings;
+use crate::server::app::error::AppError;
+use crate::server::error::ServerError;
 use crate::server::event_log::{Audit, EventKind, EventLogger, labelled};
 use crate::server::extend_policy::{ExtendPolicyReq, RequestKind};
 use crate::server::{CompiledCommandSet, HandlerBackend};
@@ -67,7 +68,7 @@ pub(crate) async fn shell_request<B>(
     from_user: CommandInput,
     channel: ChannelId,
     session: &mut ru_server::Session,
-) -> Result<(), Error>
+) -> Result<(), AppError>
 where
     B: 'static + HandlerBackend + Send + Sync,
 {
@@ -238,16 +239,17 @@ enum Next {
 }
 
 impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
-    async fn say(&self, text: &str) -> Result<(), Error> {
+    async fn say(&self, text: &str) -> Result<(), AppError> {
         let mut text = text.replace('\n', "\r\n");
         text.push_str("\r\n");
         self.out
             .send(text.into())
             .await
-            .map_err(|e| Error::IO(std::io::Error::other(e)))
+            .map_err(|_| ServerError::ChannelNotExist)?;
+        Ok(())
     }
 
-    async fn say_lines(&self, lines: &[String]) -> Result<(), Error> {
+    async fn say_lines(&self, lines: &[String]) -> Result<(), AppError> {
         self.say(&lines.join("\n")).await
     }
 
@@ -255,14 +257,15 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
         ExtendPolicyReq::of(self.client_ip, RequestKind::Other)
     }
 
-    async fn sets(&self, binding: Uuid) -> Result<Vec<Arc<CompiledCommandSet>>, Error> {
-        self.backend
+    async fn sets(&self, binding: Uuid) -> Result<Vec<Arc<CompiledCommandSet>>, AppError> {
+        Ok(self
+            .backend
             .command_sets_for(self.user_id, binding, self.request())
-            .await
+            .await?)
     }
 
     /// The bindings the user holds a command set on.
-    async fn targets(&self) -> Result<Vec<TargetSecretName>, Error> {
+    async fn targets(&self) -> Result<Vec<TargetSecretName>, AppError> {
         let mut out = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for t in self
@@ -279,7 +282,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
     }
 
     /// The `>` prompt: pick a target.
-    async fn top(&mut self, editor: &mut Editor) -> Result<(), Error> {
+    async fn top(&mut self, editor: &mut Editor) -> Result<(), AppError> {
         self.say(self.tr.ls_welcome).await?;
         loop {
             // TODO: Refresh targets every time after press enter? It's too expensive
@@ -327,7 +330,11 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
     }
 
     /// `user@target>`: run commands there until `exit`.
-    async fn visit(&mut self, editor: &mut Editor, binding: TargetSecretName) -> Result<(), Error> {
+    async fn visit(
+        &mut self,
+        editor: &mut Editor,
+        binding: TargetSecretName,
+    ) -> Result<(), AppError> {
         let tr = self.tr;
         let label = labelled(
             &session_recording::compose_label(&binding.secret_user, &binding.target_name),
@@ -398,7 +405,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
         editor: &mut Editor,
         visit: &mut Visit,
         mut commands: Commands,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AppError> {
         loop {
             // The prompt carries the last command's exit code when it
             // failed, until the next command runs.
@@ -456,7 +463,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
         commands: &Commands,
         line: &str,
         parsed: Line,
-    ) -> Result<Next, Error> {
+    ) -> Result<Next, AppError> {
         let tr = self.tr;
         match parsed {
             Line::Empty => {}
@@ -578,7 +585,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
         commands: &Commands,
         line: &str,
         cd: Cd,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AppError> {
         // The path as typed, with `~` read, and what it names lexically.
         // The allowlist reads the lexical one; the target is handed the one
         // as typed and resolves it itself, so `cd a/..` with no `a` fails
@@ -633,7 +640,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
         }
     }
 
-    async fn cd_denied(&self, visit: &Visit, line: &str, dir: &str) -> Result<(), Error> {
+    async fn cd_denied(&self, visit: &Visit, line: &str, dir: &str) -> Result<(), AppError> {
         self.say(&fill!(self.tr.ls_cd_not_allowed, dir = dir))
             .await?;
         self.log
@@ -649,7 +656,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
     /// The working directory stopped existing on the target. Say so and
     /// change nothing: the visit stays in the deleted directory, as a shell
     /// does, and the user chooses where to go next.
-    async fn pwd_gone(&self, visit: &Visit) -> Result<(), Error> {
+    async fn pwd_gone(&self, visit: &Visit) -> Result<(), AppError> {
         self.say(&fill!(
             self.tr.ls_pwd_gone,
             dir = visit.pwd,
@@ -668,7 +675,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
         line: &str,
         dir: &str,
         answer: Result<String, Vec<u8>>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AppError> {
         match answer {
             Ok(physical) if commands.cd_allows(&physical, &visit.home) => {
                 visit.oldpwd = std::mem::replace(&mut visit.pwd, physical);
@@ -696,7 +703,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
     }
 
     /// A session channel on the target, over the pooled connection.
-    async fn open(&self, visit: &mut Visit) -> Result<Channel<ru_client::Msg>, Error> {
+    async fn open(&self, visit: &mut Visit) -> Result<Channel<ru_client::Msg>, AppError> {
         for force in [false, true] {
             if force || visit.handle.is_none() {
                 visit.handle = self
@@ -716,10 +723,10 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
                     )
                     | russh::Error::SendError,
                 ) if !force => continue,
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(AppError::Server(e.into())),
             }
         }
-        Err(crate::server::app::error::AppError::NoTargetAvailable.into())
+        Err(AppError::NoTargetAvailable)
     }
 
     /// Run one of the bastion's own commands and return its first line of
@@ -728,7 +735,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
         &self,
         visit: &mut Visit,
         command: &str,
-    ) -> Result<Result<String, Vec<u8>>, Error> {
+    ) -> Result<Result<String, Vec<u8>>, AppError> {
         let channel = self.open(visit).await?;
         let (outcome, stdout, stderr) = run::query(channel, command).await?;
         let text = String::from_utf8_lossy(&stdout);
@@ -743,7 +750,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
 
     /// Start the visit's recording. A failure ends the visit: a session
     /// that cannot be recorded must not run unrecorded.
-    async fn start_recording(&self, visit: &Visit) -> Result<(), Error> {
+    async fn start_recording(&self, visit: &Visit) -> Result<(), AppError> {
         if !self.backend.enable_record() {
             return Ok(());
         }

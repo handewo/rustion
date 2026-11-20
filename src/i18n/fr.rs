@@ -157,7 +157,6 @@ pub const FR: Strings = Strings {
     v_user_role_empty: "Choisissez un utilisateur ou un rôle",
     v_target_group_empty: "Choisissez une cible ou un groupe",
     v_action_group_empty: "Choisissez une action ou un groupe",
-    v_missing_rule_id: "Le rôle attribué n'a pas d'ID de règle",
     v_extend_policy: "Politique étendue invalide : {error}",
     duplicate_target_user: "La cible '{target}' a déjà un secret lié avec l'utilisateur '{user}'",
 

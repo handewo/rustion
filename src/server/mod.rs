@@ -7,6 +7,7 @@ pub mod error;
 mod event_log;
 mod extend_policy;
 pub mod init_service;
+mod target_client;
 mod test;
 mod tty;
 mod widgets;
@@ -18,7 +19,7 @@ use crate::database::DatabaseRepository;
 use crate::database::Uuid;
 use crate::database::entity::user;
 use crate::database::models::{GroupType, Target, TargetSecretName, User};
-use crate::error::Error;
+use crate::server::error::ServerError;
 use event_log::Event;
 use petgraph::stable_graph::StableDiGraph;
 use russh::client as ru_client;
@@ -32,19 +33,19 @@ pub(super) trait HandlerBackend: Send + Clone {
         &self,
         name: &str,
         active_only: bool,
-    ) -> impl Future<Output = Result<Option<User>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<User>, ServerError>> + Send;
 
     fn update_user_password(
         &self,
         password: String,
         user: user::ActiveModel,
-    ) -> impl Future<Output = Result<User, Error>> + Send;
+    ) -> impl Future<Output = Result<User, ServerError>> + Send;
 
     fn list_targets_for_user(
         &self,
         user_id: &Uuid,
         active_only: bool,
-    ) -> impl Future<Output = Result<Vec<TargetSecretName>, Error>> + Send;
+    ) -> impl Future<Output = Result<Vec<TargetSecretName>, ServerError>> + Send;
 
     /// Best-effort audit write; failures are reported, not returned. Call
     /// sites go through [`EventLogger`] rather than here.
@@ -68,7 +69,7 @@ pub(super) trait HandlerBackend: Send + Clone {
         target: Target,
         target_secret_id: Uuid,
         force_build_connect: bool,
-    ) -> impl Future<Output = Result<Option<Arc<ru_client::Handle<Target>>>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<Arc<ru_client::Handle<Target>>>, ServerError>> + Send;
 
     /// This is a lightweight implementation of Casbin.
     /// It only supports a single-level group structure.
@@ -102,7 +103,7 @@ pub(super) trait HandlerBackend: Send + Clone {
         obj: Uuid,
         act: Uuid,
         ext: extend_policy::ExtendPolicyReq,
-    ) -> impl Future<Output = Result<bool, Error>> + Send;
+    ) -> impl Future<Output = Result<bool, ServerError>> + Send;
 
     /// The command sets `sub` holds on the binding `obj` for this request, by
     /// name: what the limited shell may run there. Empty when `obj` is not
@@ -112,12 +113,12 @@ pub(super) trait HandlerBackend: Send + Clone {
         sub: Uuid,
         obj: Uuid,
         ext: extend_policy::ExtendPolicyReq,
-    ) -> impl Future<Output = Result<Vec<Arc<CompiledCommandSet>>, Error>> + Send;
+    ) -> impl Future<Output = Result<Vec<Arc<CompiledCommandSet>>, ServerError>> + Send;
 
     /// How long a limited-shell command may run; zero is no limit.
     fn command_timeout(&self) -> std::time::Duration;
 
-    fn encrypt_plain_text(&self, text: &str) -> Result<String, Error>;
+    fn encrypt_plain_text(&self, text: &str) -> Result<String, ServerError>;
     fn enable_record(&self) -> bool;
     fn record_input(&self) -> bool;
     fn record_path(&self) -> &str;
@@ -126,11 +127,11 @@ pub(super) trait HandlerBackend: Send + Clone {
     /// The interface language of a session whose client sent no locale.
     fn language(&self) -> crate::i18n::Lang;
 
-    fn set_password(&self, user: &mut user::ActiveModel, password: &str) -> Result<(), Error>;
+    fn set_password(&self, user: &mut user::ActiveModel, password: &str) -> Result<(), ServerError>;
     /// Reload the role graphs and policies `enforce` answers from. Every
     /// write to `casbin_rule`, deletes that take rules along included, must
     /// be followed by this, or the change does not apply.
-    fn reload_policies(&self) -> impl Future<Output = Result<(), Error>> + Send;
+    fn reload_policies(&self) -> impl Future<Output = Result<(), ServerError>> + Send;
 
     fn get_graph(
         &self,

@@ -1,6 +1,5 @@
 use crate::database::common as db_common;
 use crate::database::models::RecordingView;
-use crate::error::Error;
 use crate::fill;
 use crate::server::error::ServerError;
 use crate::server::extend_policy;
@@ -17,6 +16,7 @@ use crossterm::event::{
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::NottyBackend;
 use ratatui::buffer::Buffer;
+use thiserror::Error;
 use tui_term::widget::PseudoTerminal;
 
 use ratatui::Frame;
@@ -49,31 +49,53 @@ use std::time::{Duration, Instant};
 const SCROLLBACK_LEN: usize = 1000;
 const HELP_TEXT: Help = |tr| [tr.help_player, tr.help_player_nav];
 
+/// What playing a recording back can fail with: which stage gave up — the
+/// permission check, the cast file, the event stream, or the terminal.
+#[derive(Debug, Error)]
+pub enum PlayerError {
+    #[error("Permission deny")]
+    Permission,
+
+    /// The permission check itself failed.
+    #[error(transparent)]
+    Enforce(#[from] ServerError),
+
+    #[error("Failed to open cast: {0}")]
+    Open(#[source] crate::asciinema::Error),
+
+    #[error("Failed to read cast events: {0}")]
+    Events(#[source] crate::asciinema::Error),
+
+    /// Drawing a frame or reading a key.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
 async fn check_permission<B>(
     user_id: Uuid,
     backend: &B,
     object: Uuid,
     action: Uuid,
     ip: Option<std::net::IpAddr>,
-) -> Result<bool, Error>
+) -> Result<bool, PlayerError>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
-    backend
+    Ok(backend
         .enforce(
             user_id,
             object,
             action,
             extend_policy::ExtendPolicyReq::new(ip),
         )
-        .await
+        .await?)
 }
 
 pub(crate) async fn shell_request<B>(
     params: PtyParams<B>,
     channel: ChannelId,
     session: &mut ru_server::Session,
-) -> Result<(), Error>
+) -> Result<(), PlayerError>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {
@@ -89,7 +111,7 @@ where
     )
     .await?
     {
-        return Err(ServerError::PermissionDeny.into());
+        return Err(PlayerError::Permission);
     }
     let handle_session = session.handle();
     let (send_to_session, mut recv_from_shell) = mpsc::channel::<Bytes>(16);
@@ -315,11 +337,12 @@ where
         &mut self,
         tty: &NoTtyEvent,
         terminal: &mut AsyncTerminal<NottyBackend>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), PlayerError> {
         let idx = self.table.state.selected().unwrap();
         let file_path = std::path::PathBuf::from(self.backend.record_path())
             .join(self.items.get(idx).unwrap().generate_path());
-        let recording = asciicast::open_from_path(std::path::Path::new(&file_path))?;
+        let recording = asciicast::open_from_path(std::path::Path::new(&file_path))
+            .map_err(PlayerError::Open)?;
 
         let initial_cols = recording.header.term_cols;
         let initial_rows = recording.header.term_rows;
@@ -327,7 +350,8 @@ where
             recording,
             self.setting.speed,
             self.setting.idle_time_limit,
-        )?;
+        )
+        .map_err(PlayerError::Events)?;
 
         let mut size = Size {
             width: initial_cols,
@@ -341,7 +365,11 @@ where
         )));
 
         let mut epoch = Instant::now();
-        let mut next_event = events.recv().await.transpose()?;
+        let mut next_event = events
+            .recv()
+            .await
+            .transpose()
+            .map_err(PlayerError::Events)?;
         let mut processed_buf = Vec::new();
         let pause_on_markers = self.setting.pause_on_markers;
         let mut pause_elapsed_time: Option<u64> = None;
@@ -381,7 +409,11 @@ where
                                 .draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))
                                 .await?;
 
-                            next_event = events.recv().await.transpose()?;
+                            next_event = events
+                                .recv()
+                                .await
+                                .transpose()
+                                .map_err(PlayerError::Events)?;
                         }
                         KeyCode::Char(']') => {
                             while let Some(asciicast::Event { time, data }) = next_event {
@@ -390,7 +422,11 @@ where
                                         self.player_ui(f, parser.read().unwrap().screen(), size)
                                     })
                                     .await?;
-                                next_event = events.recv().await.transpose()?;
+                                next_event = events
+                                    .recv()
+                                    .await
+                                    .transpose()
+                                    .map_err(PlayerError::Events)?;
 
                                 match data {
                                     EventData::Output(data) => {
@@ -550,7 +586,11 @@ where
 
                         EventData::Marker(_) if pause_on_markers => {
                             pause_elapsed_time = Some(time.as_micros() as u64);
-                            next_event = events.recv().await.transpose()?;
+                            next_event = events
+                                .recv()
+                                .await
+                                .transpose()
+                                .map_err(PlayerError::Events)?;
                             break;
                         }
 
@@ -560,7 +600,11 @@ where
                     terminal
                         .draw(|f| self.player_ui(f, parser.read().unwrap().screen(), size))
                         .await?;
-                    next_event = events.recv().await.transpose()?;
+                    next_event = events
+                        .recv()
+                        .await
+                        .transpose()
+                        .map_err(PlayerError::Events)?;
                 }
             }
         }
@@ -633,7 +677,7 @@ where
         terminal: &mut AsyncTerminal<NottyBackend>,
         send_status: mpsc::Sender<Status>,
         writer: SenderWriter,
-    ) -> Result<(), Error> {
+    ) -> Result<(), PlayerError> {
         let _ = crossterm::async_execute!(&writer, EnterAlternateScreen).await;
         let _ = terminal.hide_cursor().await;
         let _ = terminal.flush().await;

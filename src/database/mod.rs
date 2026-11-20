@@ -14,16 +14,14 @@ pub(crate) mod service;
 #[cfg(test)]
 mod test;
 
-use crate::{
-    database::{
-        entity::{
-            casbin_name, casbin_rule as casbin_rule_entity, command_set, event_log, secret,
-            session_recording, target as target_entity, target_secret as target_secret_entity,
-            user,
-        },
-        models::UserWithRole,
+use crate::database::{
+    entity::{
+        casbin_name, casbin_rule as casbin_rule_entity, command_set, event_log, secret,
+        session_recording, target as target_entity, target_secret as target_secret_entity,
+        user,
     },
-    error::Error,
+    error::DatabaseError,
+    models::UserWithRole,
 };
 use async_trait::async_trait;
 use models::{
@@ -111,7 +109,7 @@ pub trait DatabaseRepository: Send + Sync {
     /// table is already present. That means a renamed table is created empty
     /// beside the old one rather than migrated — see the schema notes in
     /// `repository.rs`.
-    async fn initialize(&self) -> Result<(), Error>;
+    async fn initialize(&self) -> Result<(), DatabaseError>;
 
     // ------------------------------------------------------------------ users
 
@@ -119,13 +117,13 @@ pub trait DatabaseRepository: Send + Sync {
     ///
     /// The caller supplies the id (`Uuid::now_v7()`); `updated_at` is stamped
     /// here.
-    async fn create_user(&self, user: user::ActiveModel) -> Result<User, Error>;
+    async fn create_user(&self, user: user::ActiveModel) -> Result<User, DatabaseError>;
 
     /// Look up one user by id, active or not.
     ///
     /// Authentication deliberately does not use this — it needs the active
     /// check, so it goes through [`Self::get_user_by_username`].
-    async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>, Error>;
+    async fn get_user_by_id(&self, id: Uuid) -> Result<Option<User>, DatabaseError>;
 
     /// Look up one user by username, the authentication entry point.
     ///
@@ -136,7 +134,7 @@ pub trait DatabaseRepository: Send + Sync {
         &self,
         username: &str,
         active_only: bool,
-    ) -> Result<Option<User>, Error>;
+    ) -> Result<Option<User>, DatabaseError>;
 
     /// Apply a partial update and return the whole stored row.
     ///
@@ -144,16 +142,16 @@ pub trait DatabaseRepository: Send + Sync {
     /// admin editor save a password change without touching the authorized keys
     /// (and vice versa). The returned row is current, so a caller can keep
     /// editing from it.
-    async fn update_user(&self, user: user::ActiveModel) -> Result<User, Error>;
+    async fn update_user(&self, user: user::ActiveModel) -> Result<User, DatabaseError>;
 
     /// Delete a user, returning what went with it; `None` when no such row.
     ///
     /// The `casbin_rule` rows naming the user go with it, in one transaction.
     /// Logs and recordings keep the id: they are history.
-    async fn delete_user(&self, id: Uuid) -> Result<Option<Dependents>, Error>;
+    async fn delete_user(&self, id: Uuid) -> Result<Option<Dependents>, DatabaseError>;
 
     /// All users, ordered by username.
-    async fn list_users(&self, active_only: bool) -> Result<Vec<User>, Error>;
+    async fn list_users(&self, active_only: bool) -> Result<Vec<User>, DatabaseError>;
 
     /// All users, each with their `g1` role names joined into one
     /// comma-separated string for display.
@@ -161,7 +159,7 @@ pub trait DatabaseRepository: Send + Sync {
     /// Aggregated in SQL, so the spelling is backend-specific
     /// (`GROUP_CONCAT` vs `STRING_AGG`); a user with no roles gets an empty
     /// string, not a missing row.
-    async fn list_users_with_role(&self, active_only: bool) -> Result<Vec<UserWithRole>, Error>;
+    async fn list_users_with_role(&self, active_only: bool) -> Result<Vec<UserWithRole>, DatabaseError>;
 
     // ---------------------------------------------------------------- targets
 
@@ -169,10 +167,10 @@ pub trait DatabaseRepository: Send + Sync {
     ///
     /// `port` is `i32` in storage because sea-orm cannot read a `u16` on
     /// PostgreSQL; [`Target`] narrows it back on the way out.
-    async fn create_target(&self, target: target_entity::ActiveModel) -> Result<Target, Error>;
+    async fn create_target(&self, target: target_entity::ActiveModel) -> Result<Target, DatabaseError>;
 
     /// Look up one target by its own id.
-    async fn get_target_by_id(&self, id: Uuid, active_only: bool) -> Result<Option<Target>, Error>;
+    async fn get_target_by_id(&self, id: Uuid, active_only: bool) -> Result<Option<Target>, DatabaseError>;
 
     /// Look up the target reached through one `target_secret` binding.
     ///
@@ -184,7 +182,7 @@ pub trait DatabaseRepository: Send + Sync {
         &self,
         id: Uuid,
         active_only: bool,
-    ) -> Result<Option<Target>, Error>;
+    ) -> Result<Option<Target>, DatabaseError>;
 
     /// [`Self::get_target_by_target_secret_id`] for many ids in one query.
     ///
@@ -195,25 +193,25 @@ pub trait DatabaseRepository: Send + Sync {
         &self,
         ids: Vec<Uuid>,
         active_only: bool,
-    ) -> Result<Vec<Target>, Error>;
+    ) -> Result<Vec<Target>, DatabaseError>;
 
     /// Apply a partial update and return the whole stored row.
-    async fn update_target(&self, target: target_entity::ActiveModel) -> Result<Target, Error>;
+    async fn update_target(&self, target: target_entity::ActiveModel) -> Result<Target, DatabaseError>;
 
     /// Delete a target, returning what went with it; `None` when no such row.
     ///
     /// Its bindings go with it, and the `casbin_rule` rows naming them, in one
     /// transaction. The foreign key would cascade the bindings but not the rules.
-    async fn delete_target(&self, id: Uuid) -> Result<Option<Dependents>, Error>;
+    async fn delete_target(&self, id: Uuid) -> Result<Option<Dependents>, DatabaseError>;
 
     /// All targets, ordered by name.
-    async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, Error>;
+    async fn list_targets(&self, active_only: bool) -> Result<Vec<Target>, DatabaseError>;
 
     /// Just the display columns of every target: id, name, hostname, port.
     ///
     /// Ordered by name. Skips the connection fields the admin list does not
     /// render, so the rendered list does not pull them into memory.
-    async fn list_targets_info(&self) -> Result<Vec<TargetInfo>, Error>;
+    async fn list_targets_info(&self) -> Result<Vec<TargetInfo>, DatabaseError>;
 
     // ---------------------------------------------------------------- secrets
 
@@ -222,19 +220,19 @@ pub trait DatabaseRepository: Send + Sync {
     /// The password and private key must already be AES-256-GCM ciphertext —
     /// encryption happens in the admin editor, which holds the backend, not
     /// here. The repository stores whatever bytes it is given.
-    async fn create_secret(&self, secret: secret::ActiveModel) -> Result<Secret, Error>;
+    async fn create_secret(&self, secret: secret::ActiveModel) -> Result<Secret, DatabaseError>;
 
     /// Apply a partial update and return the whole stored row.
     ///
     /// Leaving the password or private key `NotSet` keeps the stored ciphertext,
     /// which is how an edit that only renames a secret avoids a re-encrypt.
-    async fn update_secret(&self, secret: secret::ActiveModel) -> Result<Secret, Error>;
+    async fn update_secret(&self, secret: secret::ActiveModel) -> Result<Secret, DatabaseError>;
 
     /// All secrets, ordered by name. Ciphertext included.
-    async fn list_secrets(&self, active_only: bool) -> Result<Vec<Secret>, Error>;
+    async fn list_secrets(&self, active_only: bool) -> Result<Vec<Secret>, DatabaseError>;
 
     /// Look up one secret by id, active or not. No in-tree caller at present.
-    async fn get_secret_by_id(&self, id: Uuid) -> Result<Option<Secret>, Error>;
+    async fn get_secret_by_id(&self, id: Uuid) -> Result<Option<Secret>, DatabaseError>;
 
     /// Look up the credential reached through one `target_secret` binding.
     ///
@@ -245,12 +243,12 @@ pub trait DatabaseRepository: Send + Sync {
         &self,
         id: Uuid,
         active_only: bool,
-    ) -> Result<Option<Secret>, Error>;
+    ) -> Result<Option<Secret>, DatabaseError>;
 
     /// Delete a secret, returning what went with it; `None` when no such row.
     ///
     /// Takes its bindings and their rules along, as [`Self::delete_target`] does.
-    async fn delete_secret(&self, id: Uuid) -> Result<Option<Dependents>, Error>;
+    async fn delete_secret(&self, id: Uuid) -> Result<Option<Dependents>, DatabaseError>;
 
     /// Every secret, each flagged with whether it is bound to `target_id`.
     ///
@@ -258,7 +256,7 @@ pub trait DatabaseRepository: Send + Sync {
     /// screen's checkbox list, which needs the unbound ones to offer them.
     /// `is_bound` comes from a left join and counts only *active* bindings, so a
     /// deactivated binding reads as unbound. Carries no ciphertext.
-    async fn list_secrets_by_target_id(&self, target_id: Uuid) -> Result<Vec<SecretInfo>, Error>;
+    async fn list_secrets_by_target_id(&self, target_id: Uuid) -> Result<Vec<SecretInfo>, DatabaseError>;
 
     // ---------------------------------------------------------- target_secrets
     // The junction table: one row means "this credential may be used to reach
@@ -267,7 +265,7 @@ pub trait DatabaseRepository: Send + Sync {
     // rather than a target or a secret on its own.
 
     /// All bindings, ordered by target then secret. Ids only, no labels.
-    async fn list_target_secrets(&self, active_only: bool) -> Result<Vec<TargetSecret>, Error>;
+    async fn list_target_secrets(&self, active_only: bool) -> Result<Vec<TargetSecret>, DatabaseError>;
 
     /// Insert a binding and return the stored row.
     ///
@@ -277,13 +275,13 @@ pub trait DatabaseRepository: Send + Sync {
     async fn create_target_secret(
         &self,
         target_secret: target_secret_entity::ActiveModel,
-    ) -> Result<TargetSecret, Error>;
+    ) -> Result<TargetSecret, DatabaseError>;
 
     /// Apply a partial update and return the whole stored row.
     async fn update_target_secret(
         &self,
         target_secret: target_secret_entity::ActiveModel,
-    ) -> Result<TargetSecret, Error>;
+    ) -> Result<TargetSecret, DatabaseError>;
 
     /// Delete a binding by id, and the `casbin_rule` rows naming it, returning
     /// what went with it; `None` when no such row.
@@ -291,14 +289,14 @@ pub trait DatabaseRepository: Send + Sync {
     /// No in-tree caller: the bind screen deactivates through
     /// [`Self::upsert_target_secret`] instead of deleting, which keeps
     /// `updated_by` as an audit trail.
-    async fn delete_target_secret(&self, id: Uuid) -> Result<Option<Dependents>, Error>;
+    async fn delete_target_secret(&self, id: Uuid) -> Result<Option<Dependents>, DatabaseError>;
 
     /// What deleting `id` would take with it, counted without deleting: the
     /// bindings of a target or secret, and the rules naming the row or those
     /// bindings. The delete itself returns what it did take, which can differ
     /// if another admin changes something in between. Shown in the confirm
     /// dialog, so an admin is not surprised by permissions going too.
-    async fn dependents(&self, id: Uuid) -> Result<Dependents, Error>;
+    async fn dependents(&self, id: Uuid) -> Result<Dependents, DatabaseError>;
 
     /// Bind a target to a secret, or flip an existing binding's `is_active`.
     ///
@@ -314,7 +312,7 @@ pub trait DatabaseRepository: Send + Sync {
         secret_id: Uuid,
         is_active: bool,
         updated_by: Uuid,
-    ) -> Result<(), Error>;
+    ) -> Result<(), DatabaseError>;
 
     // ------------------------------------------------------------ casbin_rule
     // The RBAC table. `ptype` says how to read `v0`..`v5`: `p` is a permission
@@ -325,10 +323,10 @@ pub trait DatabaseRepository: Send + Sync {
     // declares its relations `skip_fk` and the table carries no foreign keys.
 
     /// Every rule, ordered by `ptype` then id.
-    async fn list_casbin_rules(&self) -> Result<Vec<CasbinRule>, Error>;
+    async fn list_casbin_rules(&self) -> Result<Vec<CasbinRule>, DatabaseError>;
 
     /// Every rule of one `ptype`, raw ids and no labels.
-    async fn list_casbin_rules_by_ptype(&self, ptype: Ptype) -> Result<Vec<CasbinRule>, Error>;
+    async fn list_casbin_rules_by_ptype(&self, ptype: Ptype) -> Result<Vec<CasbinRule>, DatabaseError>;
 
     /// Group-membership rules of one `ptype`, with a display label on each side.
     ///
@@ -345,7 +343,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn list_casbin_rule_group_by_ptype(
         &self,
         ptype: Ptype,
-    ) -> Result<Vec<CasbinRuleGroup>, Error>;
+    ) -> Result<Vec<CasbinRuleGroup>, DatabaseError>;
 
     /// Every `g1` role, each carrying this user's binding id when one exists.
     ///
@@ -353,7 +351,7 @@ pub trait DatabaseRepository: Send + Sync {
     /// unheld ones to offer them. `casbin_rule_id` is `Some` exactly when the
     /// user holds the role, so it doubles as the checkbox state and as the id to
     /// pass to [`Self::delete_casbin_rule`] when revoking.
-    async fn list_roles_by_user_id(&self, user_id: Uuid) -> Result<Vec<Role>, Error>;
+    async fn list_roles_by_user_id(&self, user_id: Uuid) -> Result<Vec<Role>, DatabaseError>;
 
     /// Insert a rule and return the stored row.
     ///
@@ -363,7 +361,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn create_casbin_rule(
         &self,
         rule: casbin_rule_entity::ActiveModel,
-    ) -> Result<CasbinRule, Error>;
+    ) -> Result<CasbinRule, DatabaseError>;
 
     /// Apply a partial update and return the whole stored row.
     ///
@@ -372,7 +370,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn update_casbin_rule(
         &self,
         rule: casbin_rule_entity::ActiveModel,
-    ) -> Result<CasbinRule, Error>;
+    ) -> Result<CasbinRule, DatabaseError>;
 
     /// Delete one rule by id; `false` when no such row.
     ///
@@ -380,7 +378,7 @@ pub trait DatabaseRepository: Send + Sync {
     /// [`crate::server::HandlerBackend::reload_policies`] — the membership
     /// graphs and the policies are cached in memory and will not notice the
     /// write.
-    async fn delete_casbin_rule(&self, id: Uuid) -> Result<bool, Error>;
+    async fn delete_casbin_rule(&self, id: Uuid) -> Result<bool, DatabaseError>;
     /// Deletes a single group membership.
     ///
     /// Takes [`GroupType`] rather than [`Ptype`] because a `p` row cannot be
@@ -392,7 +390,7 @@ pub trait DatabaseRepository: Send + Sync {
         group_type: GroupType,
         v0: Uuid,
         v1: Uuid,
-    ) -> Result<bool, Error>;
+    ) -> Result<bool, DatabaseError>;
 
     // ------------------------------------------------------------ casbin_name
     // The id → human-readable name table for everything `casbin_rule` refers to
@@ -403,7 +401,7 @@ pub trait DatabaseRepository: Send + Sync {
 
     /// Insert a name and return the stored row.
     async fn create_casbin_name(&self, name: casbin_name::ActiveModel)
-    -> Result<CasbinName, Error>;
+    -> Result<CasbinName, DatabaseError>;
 
     /// Apply a partial update and return the whole stored row.
     ///
@@ -412,7 +410,7 @@ pub trait DatabaseRepository: Send + Sync {
     /// that reaches `ptype` or `name` counts, so an edit that just toggles
     /// `is_active` on an internal row is allowed.
     async fn update_casbin_name(&self, name: casbin_name::ActiveModel)
-    -> Result<CasbinName, Error>;
+    -> Result<CasbinName, DatabaseError>;
 
     /// Delete a name, returning what went with it; `None` when no such row.
     ///
@@ -424,23 +422,23 @@ pub trait DatabaseRepository: Send + Sync {
     /// one transaction. `casbin_rule` has no foreign key to cascade, because
     /// `v0`–`v2` are polymorphic. Rules left dangling by older versions are
     /// skipped by the label-resolving readers and by the role graphs.
-    async fn delete_casbin_name(&self, id: Uuid) -> Result<Option<Dependents>, Error>;
+    async fn delete_casbin_name(&self, id: Uuid) -> Result<Option<Dependents>, DatabaseError>;
 
     /// Look up one name by its text, the reverse direction of this table.
     ///
     /// Used at startup to find the built-in actions and objects, whose ids are
     /// not known ahead of time. Names are unique.
-    async fn get_casbin_name_by_name(&self, name: &str) -> Result<Option<CasbinName>, Error>;
+    async fn get_casbin_name_by_name(&self, name: &str) -> Result<Option<CasbinName>, DatabaseError>;
 
     /// Every name of one `ptype`, unordered. No in-tree caller at present.
     async fn list_casbin_names_by_ptype(
         &self,
         ptype: NamePtype,
         active_only: bool,
-    ) -> Result<Vec<CasbinName>, Error>;
+    ) -> Result<Vec<CasbinName>, DatabaseError>;
 
     /// Every name including the internal ones, ordered by `ptype` then name.
-    async fn list_casbin_names(&self, active_only: bool) -> Result<Vec<CasbinName>, Error>;
+    async fn list_casbin_names(&self, active_only: bool) -> Result<Vec<CasbinName>, DatabaseError>;
 
     /// Every name except the internal actions and objects, unordered.
     ///
@@ -450,13 +448,13 @@ pub trait DatabaseRepository: Send + Sync {
     async fn list_casbin_names_user_visible(
         &self,
         active_only: bool,
-    ) -> Result<Vec<CasbinName>, Error>;
+    ) -> Result<Vec<CasbinName>, DatabaseError>;
 
     /// Returns the number of rows inserted.
     ///
     /// Batch path: writes `updated_at` as given. See the note on the other
     /// `*_batch` methods below.
-    async fn create_casbin_names_batch(&self, names: Vec<CasbinName>) -> Result<u64, Error>;
+    async fn create_casbin_names_batch(&self, names: Vec<CasbinName>) -> Result<u64, DatabaseError>;
 
     // ------------------------------------------------------------ command_set
     // The limited shell's command sets. A set is granted like an action, so
@@ -464,20 +462,20 @@ pub trait DatabaseRepository: Send + Sync {
     // here must be followed by `HandlerBackend::reload_policies`.
 
     /// Insert a set and return the stored row. The caller checks `config`.
-    async fn create_command_set(&self, set: command_set::ActiveModel) -> Result<CommandSet, Error>;
+    async fn create_command_set(&self, set: command_set::ActiveModel) -> Result<CommandSet, DatabaseError>;
 
     /// Apply a partial update and return the whole stored row.
-    async fn update_command_set(&self, set: command_set::ActiveModel) -> Result<CommandSet, Error>;
+    async fn update_command_set(&self, set: command_set::ActiveModel) -> Result<CommandSet, DatabaseError>;
 
     /// Delete a set and the `casbin_rule` rows naming it, in one transaction,
     /// returning what went with it; `None` when no such row.
-    async fn delete_command_set(&self, id: Uuid) -> Result<Option<Dependents>, Error>;
+    async fn delete_command_set(&self, id: Uuid) -> Result<Option<Dependents>, DatabaseError>;
 
     /// Every set, ordered by name.
-    async fn list_command_sets(&self, active_only: bool) -> Result<Vec<CommandSet>, Error>;
+    async fn list_command_sets(&self, active_only: bool) -> Result<Vec<CommandSet>, DatabaseError>;
 
     /// Returns the number of rows inserted. Writes `updated_at` as given.
-    async fn create_command_sets_batch(&self, sets: Vec<CommandSet>) -> Result<u64, Error>;
+    async fn create_command_sets_batch(&self, sets: Vec<CommandSet>) -> Result<u64, DatabaseError>;
 
     // ------------------------------------------------------------- event_log
 
@@ -490,11 +488,11 @@ pub trait DatabaseRepository: Send + Sync {
     ///
     /// Appends unconditionally. Repeating an identical event is not an error:
     /// under the old composite key it was, and the row was lost.
-    async fn insert_log(&self, log: event_log::ActiveModel) -> Result<(), Error>;
+    async fn insert_log(&self, log: event_log::ActiveModel) -> Result<(), DatabaseError>;
 
     /// Every audit event, newest first, ties broken by descending `id`.
     /// Unbounded — the table only grows.
-    async fn list_logs(&self) -> Result<Vec<EventLog>, Error>;
+    async fn list_logs(&self) -> Result<Vec<EventLog>, DatabaseError>;
 
     // ------------------------------------------------------ session_recording
 
@@ -505,7 +503,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn create_session_recording(
         &self,
         recording: session_recording::ActiveModel,
-    ) -> Result<SessionRecording, Error>;
+    ) -> Result<SessionRecording, DatabaseError>;
 
     /// Close or amend a recording — typically `ended_at` and `status`.
     ///
@@ -515,13 +513,13 @@ pub trait DatabaseRepository: Send + Sync {
     async fn update_session_recording(
         &self,
         recording: session_recording::ActiveModel,
-    ) -> Result<SessionRecording, Error>;
+    ) -> Result<SessionRecording, DatabaseError>;
 
     /// Look up one recording by id. No in-tree caller at present.
     async fn get_session_recording_by_id(
         &self,
         id: Uuid,
-    ) -> Result<Option<SessionRecording>, Error>;
+    ) -> Result<Option<SessionRecording>, DatabaseError>;
 
     /// Recordings newest first, optionally capped at `limit`.
     ///
@@ -529,7 +527,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn list_session_recordings(
         &self,
         limit: Option<i64>,
-    ) -> Result<Vec<SessionRecording>, Error>;
+    ) -> Result<Vec<SessionRecording>, DatabaseError>;
 
     /// A user's recordings as the player lists them: newest first, each labelled
     /// `user@target:port`.
@@ -540,7 +538,7 @@ pub trait DatabaseRepository: Send + Sync {
     async fn list_recording_view_for_user(
         &self,
         user_id: Uuid,
-    ) -> Result<Vec<RecordingView>, Error>;
+    ) -> Result<Vec<RecordingView>, DatabaseError>;
 
     /// A user's recordings, newest first, ids only.
     ///
@@ -549,13 +547,13 @@ pub trait DatabaseRepository: Send + Sync {
     async fn list_session_recordings_for_user(
         &self,
         user_id: Uuid,
-    ) -> Result<Vec<SessionRecording>, Error>;
+    ) -> Result<Vec<SessionRecording>, DatabaseError>;
 
     /// One target's recordings, newest first. No in-tree caller at present.
     async fn list_session_recordings_for_target(
         &self,
         target_id: Uuid,
-    ) -> Result<Vec<SessionRecording>, Error>;
+    ) -> Result<Vec<SessionRecording>, DatabaseError>;
 
     // --------------------------------------------------------------- batches
     // Bulk fixture import, used by `--init` and the tests. These take domain
@@ -571,26 +569,26 @@ pub trait DatabaseRepository: Send + Sync {
     // sea-orm does not enable for SQLite or MySQL.
 
     /// Insert users verbatim. Rows inserted.
-    async fn create_users_batch(&self, users: Vec<User>) -> Result<u64, Error>;
+    async fn create_users_batch(&self, users: Vec<User>) -> Result<u64, DatabaseError>;
 
     /// Insert targets verbatim. Rows inserted.
-    async fn create_targets_batch(&self, targets: Vec<Target>) -> Result<u64, Error>;
+    async fn create_targets_batch(&self, targets: Vec<Target>) -> Result<u64, DatabaseError>;
 
     /// Insert secrets verbatim, ciphertext as given. Rows inserted.
-    async fn create_secrets_batch(&self, secrets: Vec<Secret>) -> Result<u64, Error>;
+    async fn create_secrets_batch(&self, secrets: Vec<Secret>) -> Result<u64, DatabaseError>;
 
     /// Insert target/secret bindings verbatim. Rows inserted.
     async fn create_target_secrets_batch(
         &self,
         target_secrets: Vec<TargetSecret>,
-    ) -> Result<u64, Error>;
+    ) -> Result<u64, DatabaseError>;
 
     /// Insert RBAC rules verbatim. Rows inserted.
     ///
     /// Callers must call [`crate::server::HandlerBackend::reload_policies`]
     /// afterwards; the graphs and policies are cached and will not see these
     /// rows.
-    async fn create_casbin_rules_batch(&self, rules: Vec<CasbinRule>) -> Result<u64, Error>;
+    async fn create_casbin_rules_batch(&self, rules: Vec<CasbinRule>) -> Result<u64, DatabaseError>;
 
     // ------------------------------------------------- authorization readers
 
@@ -612,7 +610,7 @@ pub trait DatabaseRepository: Send + Sync {
         ids: Vec<Uuid>,
         pid: Uuid,
         active_only: bool,
-    ) -> Result<Vec<TargetSecretName>, Error>;
+    ) -> Result<Vec<TargetSecretName>, DatabaseError>;
 
     /// Users, then `g1` groups — the subject picker.
     ///
@@ -620,17 +618,17 @@ pub trait DatabaseRepository: Send + Sync {
     /// they can belong to, with `is_group` telling them apart. Ordered within
     /// each section: the lists render unsorted, and only SQLite happens to return
     /// a stable scan order.
-    async fn list_user_group(&self) -> Result<Vec<ObjectGroup>, Error>;
+    async fn list_user_group(&self) -> Result<Vec<ObjectGroup>, DatabaseError>;
 
     /// `target_secret`s labelled `user(name)@target:port`, then `g2` groups and
     /// the internal objects — the object picker.
     ///
     /// Internal objects report `is_group: false`: they are grantable targets in
     /// their own right, like the admin TUI itself, not containers.
-    async fn list_target_group(&self) -> Result<Vec<ObjectGroup>, Error>;
+    async fn list_target_group(&self) -> Result<Vec<ObjectGroup>, DatabaseError>;
 
     /// `g3` groups and the internal actions — the action picker.
-    async fn list_action_group(&self) -> Result<Vec<ObjectGroup>, Error>;
+    async fn list_action_group(&self) -> Result<Vec<ObjectGroup>, DatabaseError>;
 
     /// Whether `id` still names something a policy can grant.
     ///
@@ -639,7 +637,7 @@ pub trait DatabaseRepository: Send + Sync {
     /// where a policy may name an object that has since been deactivated —
     /// deactivating any one of the three links revokes access without touching
     /// the rules.
-    async fn check_object_active(&self, id: Uuid) -> Result<bool, Error>;
+    async fn check_object_active(&self, id: Uuid) -> Result<bool, DatabaseError>;
 
     /// Every `p` rule with its subject, object and action resolved to display
     /// names, for the admin permission list.
@@ -652,12 +650,12 @@ pub trait DatabaseRepository: Send + Sync {
     ///
     /// If any of the three ids has no name in any of its sources. A rule left
     /// behind by [`Self::delete_casbin_name`] will do it.
-    async fn list_permission_polices(&self) -> Result<Vec<PermissionPolicy>, Error>;
+    async fn list_permission_polices(&self) -> Result<Vec<PermissionPolicy>, DatabaseError>;
 }
 
 /// Database factory. sea-orm resolves the backend from the URL scheme, so a
 /// single [`repository::SeaOrmRepository`] serves SQLite, PostgreSQL and MySQL.
-pub async fn create_repository(url: &str) -> Result<Box<dyn DatabaseRepository>, Error> {
+pub async fn create_repository(url: &str) -> Result<Box<dyn DatabaseRepository>, DatabaseError> {
     let repo = repository::SeaOrmRepository::new(url).await?;
     Ok(Box::new(repo))
 }

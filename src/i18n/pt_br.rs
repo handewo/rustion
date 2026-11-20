@@ -157,7 +157,6 @@ pub const PT_BR: Strings = Strings {
     v_user_role_empty: "Escolha um usuário ou papel",
     v_target_group_empty: "Escolha um destino ou grupo",
     v_action_group_empty: "Escolha uma ação ou grupo",
-    v_missing_rule_id: "O papel concedido não tem ID de regra",
     v_extend_policy: "Política estendida inválida: {error}",
     duplicate_target_user: "O destino '{target}' já tem uma credencial vinculada com o usuário '{user}'",
 

@@ -4,7 +4,6 @@ use crate::database::Uuid;
 use crate::database::common::SftpActions;
 use crate::database::models::session_recording;
 use crate::database::models::{Target, TargetSecretName, User};
-use crate::error::Error;
 use crate::server::app::error::AppError;
 use crate::server::app::sftp::SftpContext;
 use crate::server::event_log::{Audit, EventKind, EventLogger, labelled};
@@ -56,7 +55,7 @@ where
         backend: Arc<B>,
         target_user: &str,
         target_name: &str,
-    ) -> Result<ConnectTarget<B>, Error>
+    ) -> Result<ConnectTarget<B>, AppError>
     where
         B: 'static + crate::server::HandlerBackend + Send + Sync,
     {
@@ -86,7 +85,9 @@ where
         {
             t
         } else {
-            return Err(AppError::ConnectTarget(ConnectTargetError::TargetNotFoundById).into());
+            return Err(AppError::ConnectTarget(
+                ConnectTargetError::TargetNotFoundById,
+            ));
         };
 
         debug!(
@@ -116,11 +117,11 @@ where
         log: EventLogger<B>,
         target: Target,
         target_secret_name: TargetSecretName,
-    ) -> Result<ConnectTarget<B>, Error> {
+    ) -> Result<ConnectTarget<B>, AppError> {
         if target.id != target_secret_name.target_id {
-            return Err(
-                AppError::ConnectTarget(ConnectTargetError::NotMatchTargetAndTargetSecret).into(),
-            );
+            return Err(AppError::ConnectTarget(
+                ConnectTargetError::NotMatchTargetAndTargetSecret,
+            ));
         }
         Ok(Self {
             handler_id,
@@ -136,7 +137,7 @@ where
         })
     }
 
-    pub(crate) async fn data(&mut self, data: &[u8]) -> Result<(), Error> {
+    pub(crate) async fn data(&mut self, data: &[u8]) -> Result<(), AppError> {
         self.target_channel
             .as_ref()
             .ok_or(AppError::ConnectTarget(
@@ -152,7 +153,7 @@ where
         Ok(())
     }
 
-    pub(crate) async fn channel_eof(&mut self) -> Result<(), Error> {
+    pub(crate) async fn channel_eof(&mut self) -> Result<(), AppError> {
         self.target_channel
             .as_ref()
             .ok_or(AppError::ConnectTarget(
@@ -173,7 +174,7 @@ where
         originator_address: &str,
         originator_port: u32,
         session: &mut ru_server::Session,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, AppError> {
         if !self
             .check_permission(
                 crate::database::common::InternalUuids::get().act_direct_tcpip,
@@ -181,7 +182,7 @@ where
             )
             .await?
         {
-            return Err(ServerError::PermissionDeny.into());
+            return Err(ConnectTargetError::Permission.into());
         };
         match self
             .do_channel_open_direct_tcpip(
@@ -194,7 +195,9 @@ where
             )
             .await
         {
-            Err(Error::Russh(russh::Error::ChannelOpenFailure(_))) => Ok(false),
+            Err(AppError::Server(ServerError::Russh(russh::Error::ChannelOpenFailure(_)))) => {
+                Ok(false)
+            }
             res => res,
         }
     }
@@ -208,12 +211,12 @@ where
         term: Option<&String>,
         window_size: Option<(u32, u32, u32, u32)>,
         modes: Option<&Vec<(Pty, u32)>>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AppError> {
         if !self
             .check_permission(crate::database::common::InternalUuids::get().act_exec, None)
             .await?
         {
-            return Err(ServerError::PermissionDeny.into());
+            return Err(ConnectTargetError::Permission.into());
         };
         self.do_exec_request(data, term, window_size, modes, channel, session)
             .await
@@ -236,7 +239,7 @@ where
 
     /// Open a target channel and request subsystem `name` on it. `Ok(false)`
     /// when no target connection could be made; the caller answers the client.
-    pub(crate) async fn request_subsystem(&mut self, name: &str) -> Result<bool, Error> {
+    pub(crate) async fn request_subsystem(&mut self, name: &str) -> Result<bool, AppError> {
         let request = Request::SubSystem(name);
         if !self.request_target_channel(&request).await? {
             return Ok(false);
@@ -284,7 +287,7 @@ where
         term: &str,
         window_size: (u32, u32, u32, u32),
         modes: &[(Pty, u32)],
-    ) -> Result<(), Error> {
+    ) -> Result<(), AppError> {
         if !self
             .check_permission(
                 crate::database::common::InternalUuids::get().act_shell,
@@ -292,7 +295,7 @@ where
             )
             .await?
         {
-            return Err(ServerError::PermissionDeny.into());
+            return Err(ConnectTargetError::Permission.into());
         };
         self.connect_to_target_with_shell(term, window_size, modes, channel, session)
             .await
@@ -303,10 +306,10 @@ where
         channel: ChannelId,
         session: &mut ru_server::Session,
         request: &Request<'a>,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, AppError> {
         // TODO: print some info to client
         if !self.request_target_channel(request).await? {
-            session.close(channel)?;
+            session.close(channel).map_err(ServerError::from)?;
             return Ok(false);
         }
 
@@ -322,7 +325,7 @@ where
         originator_address: &str,
         originator_port: u32,
         session: &mut ru_server::Session,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, AppError> {
         let request = Request::OpenDirectTcpip((
             host_to_connect,
             port_to_connect,
@@ -349,17 +352,17 @@ where
         channel: ChannelId,
         session: &mut ru_server::Session,
         request: &Request<'a>,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, AppError> {
         if !self
             .check_permission(crate::database::common::InternalUuids::get().act_pty, None)
             .await?
         {
-            return Err(ServerError::PermissionDeny.into());
+            return Err(ConnectTargetError::Permission.into());
         };
 
         // TODO: print some info to client
         if !self.request_target_channel(request).await? {
-            session.close(channel)?;
+            session.close(channel).map_err(ServerError::from)?;
             return Ok(false);
         }
 
@@ -381,7 +384,7 @@ where
 
         if self.backend.enable_record() {
             if self.record_session.lock().await.is_some() {
-                return Err(AppError::ConnectTarget(ConnectTargetError::ReInitRecord).into());
+                return Err(AppError::ConnectTarget(ConnectTargetError::ReInitRecord));
             }
             let recording = Recording::start(
                 self.backend.as_ref(),
@@ -407,7 +410,7 @@ where
         modes: Option<&Vec<(Pty, u32)>>,
         channel: ChannelId,
         session: &mut ru_server::Session,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AppError> {
         let request = Request::Exec(data);
         let res = match (term, window_size, modes) {
             (Some(t), Some(w), Some(m)) => {
@@ -433,7 +436,7 @@ where
         modes: &[(Pty, u32)],
         channel: ChannelId,
         session: &mut ru_server::Session,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AppError> {
         if self
             .connect_to_target_with_pty(term, window_size, modes, channel, session, &Request::Shell)
             .await?
@@ -451,7 +454,7 @@ where
         row_height: u32,
         pix_width: u32,
         pix_height: u32,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AppError> {
         self.target_channel
             .as_ref()
             .ok_or(AppError::ConnectTarget(
@@ -474,7 +477,7 @@ where
         handle: ru_server::Handle,
         channel: ChannelId,
         request: Request<'a>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AppError> {
         let target_channel = self.target_channel.take().ok_or(AppError::ConnectTarget(
             ConnectTargetError::TargetChannelNotExist,
         ))?;
@@ -563,7 +566,7 @@ where
         &self,
         action_uuid: Uuid,
         open_direct_tcpip: Option<(String, u16)>,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, AppError> {
         // Shell, pty and exec are `Other`: they carry no value any per-kind
         // constraint names. Only a `direct-tcpip` has a destination.
         let kind = match open_direct_tcpip {
@@ -586,7 +589,7 @@ where
         Ok(true)
     }
 
-    async fn do_connect_to_target(&mut self, force_build_connect: bool) -> Result<(), Error> {
+    async fn do_connect_to_target(&mut self, force_build_connect: bool) -> Result<(), AppError> {
         // NOTE: target_handle could be re-assigned.
         self.target_handle = self
             .backend
@@ -609,7 +612,10 @@ where
         Ok(())
     }
 
-    async fn request_target_channel<'a>(&mut self, request: &Request<'a>) -> Result<bool, Error> {
+    async fn request_target_channel<'a>(
+        &mut self,
+        request: &Request<'a>,
+    ) -> Result<bool, AppError> {
         self.do_connect_to_target(false).await?;
         let handle = if let Some(h) = self.target_handle.as_ref() {
             h
@@ -634,9 +640,12 @@ where
                         } else {
                             return Ok(false);
                         };
-                        handle.channel_open_session().await?
+                        handle
+                            .channel_open_session()
+                            .await
+                            .map_err(ServerError::from)?
                     }
-                    Err(e) => return Err(e.into()),
+                    Err(e) => return Err(AppError::Server(e.into())),
                 }
             }
             Request::OpenDirectTcpip(d) => {
@@ -655,9 +664,12 @@ where
                         } else {
                             return Ok(false);
                         };
-                        handle.channel_open_direct_tcpip(d.0, d.1, d.2, d.3).await?
+                        handle
+                            .channel_open_direct_tcpip(d.0, d.1, d.2, d.3)
+                            .await
+                            .map_err(ServerError::from)?
                     }
-                    Err(e) => return Err(e.into()),
+                    Err(e) => return Err(AppError::Server(e.into())),
                 }
             }
         };
@@ -666,7 +678,9 @@ where
             self.target_channel = Some(TargetChannel::ChannelFull(channel));
             Ok(true)
         } else {
-            Err(AppError::ConnectTarget(ConnectTargetError::ReInitTargetChannel).into())
+            Err(AppError::ConnectTarget(
+                ConnectTargetError::ReInitTargetChannel,
+            ))
         }
     }
 }
@@ -713,7 +727,7 @@ impl TargetChannel {
         pix_width: u32,
         pix_height: u32,
         terminal_modes: &[(Pty, u32)],
-    ) -> Result<(), Error> {
+    ) -> Result<(), ServerError> {
         match self {
             TargetChannel::ChannelFull(ch) => {
                 ch.request_pty(
@@ -747,7 +761,7 @@ impl TargetChannel {
         &self,
         want_reply: bool,
         name: A,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ServerError> {
         match self {
             TargetChannel::ChannelFull(ch) => ch.request_subsystem(want_reply, name).await?,
             TargetChannel::ChannelWriteHalf(ch) => ch.request_subsystem(want_reply, name).await?,
@@ -755,7 +769,7 @@ impl TargetChannel {
         Ok(())
     }
 
-    async fn request_shell(&self, want_reply: bool) -> Result<(), Error> {
+    async fn request_shell(&self, want_reply: bool) -> Result<(), ServerError> {
         match self {
             TargetChannel::ChannelFull(ch) => ch.request_shell(want_reply).await?,
             TargetChannel::ChannelWriteHalf(ch) => ch.request_shell(want_reply).await?,
@@ -769,7 +783,7 @@ impl TargetChannel {
         row_height: u32,
         pix_width: u32,
         pix_height: u32,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ServerError> {
         match self {
             TargetChannel::ChannelFull(ch) => {
                 ch.window_change(col_width, row_height, pix_width, pix_height)
@@ -783,7 +797,7 @@ impl TargetChannel {
         Ok(())
     }
 
-    async fn exec(&self, want_reply: bool, data: &[u8]) -> Result<(), Error> {
+    async fn exec(&self, want_reply: bool, data: &[u8]) -> Result<(), ServerError> {
         match self {
             TargetChannel::ChannelFull(ch) => ch.exec(want_reply, data).await?,
             TargetChannel::ChannelWriteHalf(ch) => ch.exec(want_reply, data).await?,
@@ -791,7 +805,7 @@ impl TargetChannel {
         Ok(())
     }
 
-    async fn close(&self) -> Result<(), Error> {
+    async fn close(&self) -> Result<(), ServerError> {
         match self {
             TargetChannel::ChannelFull(ch) => ch.close().await?,
             TargetChannel::ChannelWriteHalf(ch) => ch.close().await?,
@@ -799,7 +813,7 @@ impl TargetChannel {
         Ok(())
     }
 
-    async fn eof(&self) -> Result<(), Error> {
+    async fn eof(&self) -> Result<(), ServerError> {
         match self {
             TargetChannel::ChannelFull(ch) => ch.eof().await?,
             TargetChannel::ChannelWriteHalf(ch) => ch.eof().await?,
@@ -807,7 +821,7 @@ impl TargetChannel {
         Ok(())
     }
 
-    async fn data(&self, data: &[u8]) -> Result<(), Error> {
+    async fn data(&self, data: &[u8]) -> Result<(), ServerError> {
         match self {
             TargetChannel::ChannelFull(ch) => ch.data(data).await?,
             TargetChannel::ChannelWriteHalf(ch) => ch.data(data).await?,
@@ -851,4 +865,8 @@ pub enum ConnectTargetError {
 
     #[error("Target channel not exist")]
     TargetChannelNotExist,
+
+    /// The action's permission check said no.
+    #[error("Permission deny")]
+    Permission,
 }

@@ -1,5 +1,4 @@
 use crate::database::Uuid;
-use crate::error::Error;
 use crate::server::error::ServerError;
 use crate::server::extend_policy::{CompiledExtendPolicy, ExtendPolicyReq, verify_extend_policy};
 use log::{trace, warn};
@@ -110,7 +109,7 @@ impl Snapshot {
         sub: Uuid,
         obj: Uuid,
         ext: &ExtendPolicyReq,
-    ) -> Result<Vec<Arc<CompiledCommandSet>>, Error> {
+    ) -> Result<Vec<Arc<CompiledCommandSet>>, ServerError> {
         let mut out = Vec::new();
         for set in &self.command_sets {
             if self.grants(sub, obj, set.id, ext)? {
@@ -138,7 +137,7 @@ impl Snapshot {
         obj: Uuid,
         act: Uuid,
         ext: &ExtendPolicyReq,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, ServerError> {
         for pol in self.match_sub(sub) {
             let rule = &pol.rule;
             if !(rule.v1 == obj || self.roles.match_role(rule.v1, obj, GroupType::Object)) {
@@ -274,7 +273,7 @@ impl RoleManage {
         r1: Vec<CasbinRuleGroup>,
         r2: Vec<CasbinRuleGroup>,
         r3: Vec<CasbinRuleGroup>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, ServerError> {
         let mut h1 = HashMap::new();
         let g1 = build_graph(r1, &mut h1)?;
         let mut h2 = HashMap::new();
@@ -406,7 +405,7 @@ impl RoleManage {
 fn build_graph(
     rules: Vec<CasbinRuleGroup>,
     hm: &mut HashMap<Uuid, NodeIndex>,
-) -> Result<StableDiGraph<RuleNode, ()>, Error> {
+) -> Result<StableDiGraph<RuleNode, ()>, ServerError> {
     let mut g = StableDiGraph::<RuleNode, ()>::new();
 
     for r in rules.into_iter() {

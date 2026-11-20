@@ -157,7 +157,6 @@ pub const EN: Strings = Strings {
     v_user_role_empty: "User/Role cannot be empty",
     v_target_group_empty: "Target/Group cannot be empty",
     v_action_group_empty: "Action/Group cannot be empty",
-    v_missing_rule_id: "Rule ID is none for bound role",
     v_extend_policy: "Invalid extend policy: {error}",
     duplicate_target_user: "Target '{target}' already has a bound secret with user '{user}'",
 

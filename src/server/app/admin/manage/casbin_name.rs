@@ -2,8 +2,6 @@ use super::super::error::AdminError;
 use super::super::validate;
 use crate::database::entity::casbin_name;
 use crate::database::models::{CasbinName, NamePtype};
-use crate::error::Error;
-use crate::server::app::error::AppError;
 use crate::server::widgets::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{buffer::Buffer, layout::Rect};
@@ -92,24 +90,21 @@ impl CasbinNameEditor {
         }
     }
 
-    fn save_casbin_name(&mut self) -> Result<(), Error> {
+    fn save_casbin_name(&mut self) -> Result<(), AdminError> {
         // The radio carries the name, not the stored value. Both failures are
         // unreachable in practice — `PTYPE_OPTIONS` only offers g1/g2/g3, and the
         // radio is read-only on edit — but it hands back a plain `&str`, so an
         // unknown or internal name has to be rejected somewhere.
         let ptype = NamePtype::from_name(self.form.get_radio(F_PTYPE))
             .filter(|p| !p.is_internal())
-            .ok_or(AppError::Admin(AdminError::Validate(
-                validate::ValidateError::PtypeInvalid,
-            )))?;
+            .ok_or(AdminError::Validate(validate::ValidateError::PtypeInvalid))?;
         if self.casbin_name.ptype != ptype {
             self.active_model.ptype = Set(ptype);
         }
 
         let name = self.form.get_text(F_NAME).trim().to_string();
         if self.casbin_name.name != name || self.casbin_name.name.is_empty() {
-            validate::varify_group_name(&name)
-                .map_err(|e| AppError::Admin(AdminError::Validate(e)))?;
+            validate::varify_group_name(&name)?;
             self.active_model.name = Set(name.clone());
         }
 

@@ -1,7 +1,7 @@
 use super::PtyParams;
 use crate::database::entity::user;
 use crate::database::models::User;
-use crate::error::Error;
+use crate::server::app::error::AppError;
 use crate::fill;
 use crate::i18n::Strings;
 use crate::server::event_log::{Audit, EventKind};
@@ -96,7 +96,7 @@ pub(crate) async fn shell_request<B>(
     params: PtyParams<B>,
     channel: ChannelId,
     session: &mut ru_server::Session,
-) -> Result<(), Error>
+) -> Result<(), AppError>
 where
     B: 'static + crate::server::HandlerBackend + Send + Sync,
 {

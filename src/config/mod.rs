@@ -2,7 +2,6 @@ pub mod error;
 
 use crate::config::error::ConfigError;
 use crate::database::{DEFAULT_DATABASE_URL, SUPPORTED_SCHEMES, redact_url};
-use crate::error::Error;
 use crate::i18n::Lang;
 use aes_gcm::KeyInit;
 use base64::{Engine as _, engine::general_purpose};
@@ -36,7 +35,7 @@ impl std::fmt::Display for LogLevel {
 }
 
 impl std::str::FromStr for LogLevel {
-    type Err = Error;
+    type Err = ConfigError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
@@ -45,9 +44,9 @@ impl std::str::FromStr for LogLevel {
             "info" => Ok(LogLevel::Info),
             "debug" => Ok(LogLevel::Debug),
             "trace" => Ok(LogLevel::Trace),
-            _ => Err(Error::Config(ConfigError::InvalidLogLevel {
+            _ => Err(ConfigError::InvalidLogLevel {
                 level: s.to_string(),
-            })),
+            }),
         }
     }
 }
@@ -233,10 +232,10 @@ impl std::fmt::Display for ListenConfig {
 
 impl Config {
     /// Load configuration from a TOML file
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let content = fs::read_to_string(path)?;
         let config: Config = toml::from_str(&content)
-            .map_err(|e| Error::Config(ConfigError::TomlParse { source: e }))?;
+            .map_err(|e| ConfigError::TomlParse { source: e })?;
         Ok(config)
     }
 
@@ -280,15 +279,15 @@ impl Config {
     }
 
     /// Save configuration to a TOML file
-    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Error> {
+    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), ConfigError> {
         let content = toml::to_string_pretty(self)
-            .map_err(|e| Error::Config(ConfigError::TomlSerialize { source: e }))?;
+            .map_err(|e| ConfigError::TomlSerialize { source: e })?;
         fs::write(path, content)?;
         Ok(())
     }
 
     /// Parse the listen configuration into a SocketAddr
-    pub fn parse_listen_addr(&self) -> Result<SocketAddr, Error> {
+    pub fn parse_listen_addr(&self) -> Result<SocketAddr, ConfigError> {
         match &self.listen {
             ListenConfig::SocketAddr(addr) => Ok(*addr),
             ListenConfig::String(s) => {
@@ -315,52 +314,52 @@ impl Config {
                         addr_str
                             .to_socket_addrs()
                             .map_err(|e| {
-                                Error::Config(ConfigError::AddressResolutionFailed {
+                                ConfigError::AddressResolutionFailed {
                                     addr: addr_str.clone(),
                                     reason: e.to_string(),
-                                })
+                                }
                             })?
                             .next()
                             .ok_or_else(|| {
-                                Error::Config(ConfigError::NoAddressResolved {
+                                ConfigError::NoAddressResolved {
                                     addr: addr_str.clone(),
-                                })
+                                }
                             })
                     })
                     .map_err(|e| {
-                        Error::Config(ConfigError::InvalidListenAddress {
+                        ConfigError::InvalidListenAddress {
                             addr: s.clone(),
                             reason: e.to_string(),
-                        })
+                        }
                     })
             }
         }
     }
 
     /// Validate the configuration
-    pub fn validate(&self) -> Result<(), Error> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         // Validate listen address
         self.parse_listen_addr()?;
 
         // Validate max_auth_attempts
         if self.max_auth_attempts_per_conn == 0 {
-            return Err(Error::Config(ConfigError::MaxAuthAttemptsZero));
+            return Err(ConfigError::MaxAuthAttemptsZero);
         }
 
         let sk = match self.secret_key.as_ref() {
             Some(token) => token,
-            None => return Err(Error::Config(ConfigError::MissingSecretToken)),
+            None => return Err(ConfigError::MissingSecretToken),
         };
         if sk.is_empty() {
-            return Err(Error::Config(ConfigError::EmptySecretToken));
+            return Err(ConfigError::EmptySecretToken);
         }
         let key = general_purpose::STANDARD
             .decode(sk)
-            .map_err(|e| Error::Config(ConfigError::SecretTokenDecode { source: e }))?;
+            .map_err(|e| ConfigError::SecretTokenDecode { source: e })?;
         aes_gcm::Aes256Gcm::new_from_slice(&key).map_err(|e| {
-            Error::Config(ConfigError::SecretTokenKeyError {
+            ConfigError::SecretTokenKeyError {
                 reason: e.to_string(),
-            })
+            }
         })?;
 
         self.validate_database_url()?;
@@ -373,7 +372,7 @@ impl Config {
     /// sea-orm would only report this when the first connection is attempted, by
     /// which point the message is about a parse failure rather than the typo
     /// that caused it. Everything past the scheme is sea-orm's to validate.
-    fn validate_database_url(&self) -> Result<(), Error> {
+    fn validate_database_url(&self) -> Result<(), ConfigError> {
         let scheme = self
             .database
             .split_once(':')
@@ -384,7 +383,7 @@ impl Config {
             return Ok(());
         }
 
-        Err(Error::Config(ConfigError::InvalidDatabaseUrl {
+        Err(ConfigError::InvalidDatabaseUrl {
             // The URL carries the password, so it cannot go into an error
             // verbatim — errors reach the log too.
             url: redact_url(&self.database),
@@ -393,7 +392,7 @@ impl Config {
                 scheme,
                 SUPPORTED_SCHEMES.join(", ")
             ),
-        }))
+        })?
     }
 }
 

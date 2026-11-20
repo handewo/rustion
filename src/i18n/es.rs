@@ -157,7 +157,6 @@ pub const ES: Strings = Strings {
     v_user_role_empty: "Elige un usuario o rol",
     v_target_group_empty: "Elige un destino o grupo",
     v_action_group_empty: "Elige una acción o grupo",
-    v_missing_rule_id: "El rol asignado no tiene ID de regla",
     v_extend_policy: "Política extendida no válida: {error}",
     duplicate_target_user: "El destino '{target}' ya tiene vinculada una credencial con el usuario '{user}'",
 
