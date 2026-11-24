@@ -195,7 +195,7 @@ impl PermissionEditor {
             match key {
                 KeyCode::Char('s') => {
                     if let Err(e) = self.verify_permission() {
-                        self.save_error = Some(e.into());
+                        self.save_error = Some(e);
                         return false;
                     }
                     return true;

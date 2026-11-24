@@ -82,8 +82,8 @@ impl Quoting {
     }
 }
 
-/// Finds the quoting context of every `{{args}}` in `exec` (after `{{escp}}` has
-/// become `\`). They must agree, and `exec` must not leave a quote open.
+/// Finds the quoting context of every `{{args}}` in `exec`.
+/// They must agree, and `exec` must not leave a quote open.
 fn args_quoting(exec: &str) -> Result<Quoting, ExecError> {
     let mut state = Quoting::Bare;
     let mut found: Option<Quoting> = None;
@@ -184,11 +184,9 @@ impl Policy {
                     source,
                 }
             })?;
-            let quoting = args_quoting(&c.exec.replace("{{escp}}", "\\")).map_err(|source| {
-                ConfigError::Exec {
-                    alias: c.alias.clone(),
-                    source,
-                }
+            let quoting = args_quoting(&c.exec).map_err(|source| ConfigError::Exec {
+                alias: c.alias.clone(),
+                source,
             })?;
             let entry = Entry {
                 exec: c.exec,
@@ -266,12 +264,9 @@ impl Policy {
     }
 }
 
-/// Builds the shell command line: `{{escp}}` becomes `\`, then `{{args}}` is
-/// substituted (or the arguments are appended if it's absent).
-///
-/// `{{escp}}` is replaced first so it can never come from user input.
+/// Builds the shell command line: `{{args}}` is substituted
+/// (or the arguments are appended if it's absent).
 fn render(exec: &str, args: &str) -> String {
-    let exec = exec.replace("{{escp}}", "\\");
     let line = if exec.contains("{{args}}") {
         exec.replace("{{args}}", args)
     } else {
@@ -321,17 +316,17 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn escp_becomes_backslash() {
-        let policy = one(json!({
-            "exec": "/usr/bin/rsync -a .ssh/id_rsa .ssh/id_rsa.{{escp}}$USER {{args}}:.ssh",
-            "argsList": ["{{name:HOST}}"], "alias": "syncKey",
-        }));
-        assert_eq!(
-            policy.check("syncKey web01", "/").unwrap().command_line,
-            r"/usr/bin/rsync -a .ssh/id_rsa .ssh/id_rsa.\$USER web01:.ssh"
-        );
-    }
+    // #[test]
+    // fn escp_becomes_backslash() {
+    //     let policy = one(json!({
+    //         "exec": "/usr/bin/rsync -a .ssh/id_rsa .ssh/id_rsa.{{escp}}$USER {{args}}:.ssh",
+    //         "argsList": ["{{name:HOST}}"], "alias": "syncKey",
+    //     }));
+    //     assert_eq!(
+    //         policy.check("syncKey web01", "/").unwrap().command_line,
+    //         r"/usr/bin/rsync -a .ssh/id_rsa .ssh/id_rsa.\$USER web01:.ssh"
+    //     );
+    // }
 
     #[test]
     fn nested_quotes_cannot_be_closed() {

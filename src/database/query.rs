@@ -30,11 +30,11 @@ use crate::database::entity::casbin_rule::Ptype;
 use crate::database::entity::{
     casbin_name, casbin_rule, command_set, secret, session_recording, target, target_secret, user,
 };
+use crate::database::error::DatabaseError;
 use crate::database::models::{
     CasbinName, CasbinRule, CasbinRuleGroup, ObjectGroup, PermissionPolicy, RecordingStatus,
     RecordingView, Role, Secret, SecretInfo, Target, TargetSecretName, UserWithRole,
 };
-use crate::database::error::DatabaseError;
 
 // ---------------------------------------------------------------- label parts
 
@@ -73,7 +73,9 @@ impl TargetSecretParts {
 /// directly without sorting, so a `HashMap` would reshuffle the list on every
 /// refresh. Sorted explicitly rather than relying on scan order, which differs
 /// between backends. Use [`parts_by_id`] when a lookup is what's wanted.
-async fn target_secret_parts(db: &DatabaseConnection) -> Result<Vec<TargetSecretParts>, DatabaseError> {
+async fn target_secret_parts(
+    db: &DatabaseConnection,
+) -> Result<Vec<TargetSecretParts>, DatabaseError> {
     Ok(target_secret::Entity::find()
         .select_only()
         .column_as(target_secret::Column::Id, "id")
@@ -90,7 +92,9 @@ async fn target_secret_parts(db: &DatabaseConnection) -> Result<Vec<TargetSecret
 }
 
 /// [`target_secret_parts`] keyed by `target_secret` id, for label lookups.
-async fn parts_by_id(db: &DatabaseConnection) -> Result<HashMap<Uuid, TargetSecretParts>, DatabaseError> {
+async fn parts_by_id(
+    db: &DatabaseConnection,
+) -> Result<HashMap<Uuid, TargetSecretParts>, DatabaseError> {
     Ok(target_secret_parts(db)
         .await?
         .into_iter()
@@ -116,7 +120,9 @@ async fn casbin_name_map(
 
 /// Command set names by id. A set is granted like an action, so wherever an
 /// action is labelled, a set may be what the id names.
-async fn command_set_names(db: &DatabaseConnection) -> Result<HashMap<Uuid, String>, DatabaseError> {
+async fn command_set_names(
+    db: &DatabaseConnection,
+) -> Result<HashMap<Uuid, String>, DatabaseError> {
     Ok(command_set::Entity::find()
         .all(db)
         .await?
@@ -289,7 +295,10 @@ pub(super) async fn list_secrets_for_target(
 
 /// True when `id` is an active `target_secret` (with active target and secret)
 /// or an active internal object.
-pub(super) async fn check_object_active(db: &DatabaseConnection, id: Uuid) -> Result<bool, DatabaseError> {
+pub(super) async fn check_object_active(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> Result<bool, DatabaseError> {
     let ts_active = target_secret::Entity::find()
         .join(JoinType::InnerJoin, target_secret::Relation::Target.def())
         .join(JoinType::InnerJoin, target_secret::Relation::Secret.def())
@@ -376,6 +385,7 @@ pub(super) async fn list_casbin_rule_group_by_ptype(
                     .column(casbin_rule::Column::Id)
                     .column(casbin_rule::Column::V0)
                     .column_as(Expr::null(), "v0_object_label")
+                    .column_as(Expr::null(), "v0_command_set")
                     .tbl_col_as((Alias::V0, casbin_name::Column::Name), "v0_group_label")
                     .column(casbin_rule::Column::V1)
                     .column_as(user::Column::Username, "v1_object_label")
@@ -431,6 +441,7 @@ pub(super) async fn list_casbin_rule_group_by_ptype(
                         id: r.id,
                         v0: r.v0,
                         v0_object_label,
+                        v0_command_set: None,
                         v0_group_label: target_group_names.get(&r.v0).map(|n| n.name.clone()),
                         v1: r.v1,
                         v1_object_label: None,
@@ -446,6 +457,7 @@ pub(super) async fn list_casbin_rule_group_by_ptype(
                     .column(casbin_rule::Column::Id)
                     .column(casbin_rule::Column::V0)
                     .column_as(casbin_name::Column::Name, "v0_object_label")
+                    .column_as(command_set::Column::Name, "v0_command_set")
                     .tbl_col_as((Alias::V0, casbin_name::Column::Name), "v0_group_label")
                     .column(casbin_rule::Column::V1)
                     .column_as(Expr::null(), "v1_object_label")
@@ -459,6 +471,10 @@ pub(super) async fn list_casbin_rule_group_by_ptype(
                                     .into_condition()
                             },
                         ),
+                    )
+                    .join(
+                        JoinType::LeftJoin,
+                        command_set::Relation::CommandSetV0.def().rev(),
                     )
                     .join_as(
                         JoinType::LeftJoin,
@@ -483,16 +499,9 @@ pub(super) async fn list_casbin_rule_group_by_ptype(
                         Alias::V1,
                     )
                     .filter(casbin_rule::Column::Ptype.eq(Ptype::G3));
+            // debug!("{}", q.build(DbBackend::Sqlite).to_string());
 
-            // A command set in an action group is no `casbin_name`: label it here.
-            let command_sets = command_set_names(db).await?;
-            let mut rows: Vec<CasbinRuleGroup> = q.into_model().all(db).await?;
-            for row in &mut rows {
-                if row.v0_object_label.is_none() && row.v0_group_label.is_none() {
-                    row.v0_object_label = command_sets.get(&row.v0).cloned();
-                }
-            }
-            Ok(rows)
+            Ok(q.into_model().all(db).await?)
         }
         // Now exhaustive: `p` is the only other variant, and a permission policy
         // is not a group membership.
@@ -580,7 +589,9 @@ async fn target_secret_rows(
 /// make no such promise (PostgreSQL in particular reorders rows after updates),
 /// and these lists are rendered unsorted, so the order needs to be explicit to
 /// stop the picker reshuffling between refreshes.
-pub(super) async fn list_user_group(db: &DatabaseConnection) -> Result<Vec<ObjectGroup>, DatabaseError> {
+pub(super) async fn list_user_group(
+    db: &DatabaseConnection,
+) -> Result<Vec<ObjectGroup>, DatabaseError> {
     let mut out: Vec<ObjectGroup> = user::Entity::find()
         .order_by_asc(user::Column::Username)
         .all(db)
@@ -612,7 +623,9 @@ pub(super) async fn list_user_group(db: &DatabaseConnection) -> Result<Vec<Objec
 
 /// `target_secret`s (labelled `user(name)@target:port`), then `g2` groups and
 /// internal objects. Internal objects report `is_group: false`, as before.
-pub(super) async fn list_target_group(db: &DatabaseConnection) -> Result<Vec<ObjectGroup>, DatabaseError> {
+pub(super) async fn list_target_group(
+    db: &DatabaseConnection,
+) -> Result<Vec<ObjectGroup>, DatabaseError> {
     let mut out: Vec<ObjectGroup> = target_secret_parts(db)
         .await?
         .into_iter()
@@ -645,7 +658,9 @@ pub(super) async fn list_target_group(db: &DatabaseConnection) -> Result<Vec<Obj
 }
 
 /// `g3` groups and internal actions, then command sets.
-pub(super) async fn list_action_group(db: &DatabaseConnection) -> Result<Vec<ObjectGroup>, DatabaseError> {
+pub(super) async fn list_action_group(
+    db: &DatabaseConnection,
+) -> Result<Vec<ObjectGroup>, DatabaseError> {
     let mut out: Vec<ObjectGroup> = casbin_name::Entity::find()
         .filter(
             casbin_name::Column::Ptype

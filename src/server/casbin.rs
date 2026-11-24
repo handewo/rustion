@@ -195,7 +195,7 @@ impl RuleNode {
             RuleNode::V0(RuleInfo::parse_casbin_rule_group(
                 r.id,
                 r.v0,
-                r.v0_object_label,
+                r.v0_object_label.or(r.v0_command_set),
                 r.v0_group_label,
             )?),
             RuleNode::V1(RuleInfo::parse_casbin_rule_group(
@@ -412,7 +412,7 @@ fn build_graph(
         // An end with no label names a row that was deleted, from before deletes
         // took their rules with them. It can match nothing, so the rule is
         // dropped rather than keeping the server from starting.
-        if (r.v0_object_label.is_none() && r.v0_group_label.is_none())
+        if (r.v0_object_label.is_none() && r.v0_group_label.is_none() && r.v0_command_set.is_none())
             || (r.v1_object_label.is_none() && r.v1_group_label.is_none())
         {
             warn!(

@@ -181,11 +181,10 @@ where
                 .iter()
                 .any(|other| other.id != s.id && other.is_bound && other.user == s.user);
             if duplicate {
-                return Err(AdminError::from(AdminError::DuplicateTargetUser {
+                return Err(AdminError::DuplicateTargetUser {
                     target: t.name.clone(),
                     user: s.user.clone(),
-                })
-                .into());
+                });
             }
         }
 

@@ -18,6 +18,8 @@ pub struct Model {
     pub is_active: bool,
     pub updated_by: Uuid,
     pub updated_at: i64,
+    #[sea_orm(has_many, relation_enum = "CommandSetV0", via_rel = "CommandSetV0")]
+    pub command_set_v0: HasMany<super::casbin_rule::Entity>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

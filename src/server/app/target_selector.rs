@@ -46,7 +46,7 @@ where
         allowed_targets.retain(|target| target.target_name == t);
     }
     if allowed_targets.is_empty() {
-        return Err(AppError::NoTargetAvailable.into());
+        return Err(AppError::NoTargetAvailable);
     }
 
     let (send_status, mut recv_status) = mpsc::channel(1);

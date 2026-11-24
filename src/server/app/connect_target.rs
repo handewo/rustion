@@ -73,8 +73,7 @@ where
                 );
                 return Err(AppError::ConnectTarget(
                     ConnectTargetError::TargetSecretNotFoundByUser,
-                )
-                .into());
+                ));
             }
         };
 

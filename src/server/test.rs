@@ -1026,7 +1026,10 @@ mod tests {
             .await
             .unwrap();
         let member = members.iter().find(|m| m.v0 == ops).expect("member");
-        assert_eq!(member.v0_object_label.as_deref(), Some("ops"));
+        assert_eq!(member.v1_group_label.as_deref(), Some("ag_batch"));
+        // The name comes from the command_set join, not from `casbin_name`.
+        assert_eq!(member.v0_object_label, None);
+        assert_eq!(member.v0_command_set.as_deref(), Some("ops"));
     }
 
     /// A database from before the SFTP actions existed still starts, and gains

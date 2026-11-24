@@ -554,7 +554,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
                             // The directory is alive — or the target never
                             // answered, which is not a word against it.
                             // Either way the code is the command's own.
-                            Answer::Path(_) | Answer::NoAnswer => {
+                            Answer::Path(_) | Answer::Silence => {
                                 visit.last_status = PWD_GONE;
                             }
                         }
@@ -632,7 +632,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
             // The target said nothing in time: it has not refused the cd,
             // and it has not said the directory is gone. Claim neither —
             // the failed prompt alone says the line did not go through.
-            Answer::NoAnswer => {
+            Answer::Silence => {
                 visit.last_status = EXIT_FAILURE;
                 Ok(())
             }
@@ -663,7 +663,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
                     // The anchor is alive — or the probe went unanswered,
                     // which is not a word against it: the cd's own failure
                     // is shown, as it would be with no probe at all.
-                    Answer::Path(_) | Answer::NoAnswer => {
+                    Answer::Path(_) | Answer::Silence => {
                         self.cd_answer(visit, commands, line, &dir, Answer::Failed(stderr))
                             .await
                     }
@@ -719,7 +719,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
                 visit.last_status = EXIT_FAILURE;
                 self.cd_denied(visit, line, dir).await
             }
-            Answer::NoAnswer => {
+            Answer::Silence => {
                 visit.last_status = EXIT_FAILURE;
                 Ok(())
             }
@@ -768,14 +768,14 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
 
     /// Run one of the bastion's own commands and collect what the target
     /// answered: its first line of output, its stderr when it failed, or
-    /// [`Answer::NoAnswer`] when it said neither in time. A timeout is not
+    /// [`Answer::Silence`] when it said neither in time. A timeout is not
     /// a failure: reading it as one would tell the user a slow target's
     /// directories no longer exist.
     async fn query(&self, visit: &mut Visit, command: &str) -> Result<Answer, AppError> {
         let channel = self.open(visit).await?;
         let (outcome, stdout, stderr) = run::query(channel, command).await?;
         if !matches!(outcome, Outcome::Exited(_)) {
-            return Ok(Answer::NoAnswer);
+            return Ok(Answer::Silence);
         }
         let text = String::from_utf8_lossy(&stdout);
         let line = text.strip_suffix('\n').unwrap_or(&text);
@@ -816,12 +816,12 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
 
 /// What one of the bastion's own queries learned from the target: the path
 /// it answered with, the words it failed with, or nothing at all. A target
-/// slower than the query timeout is [`Answer::NoAnswer`] — it has not said
+/// slower than the query timeout is [`Answer::Silence`] — it has not said
 /// the directory is gone, and must not be read as if it had.
 enum Answer {
     Path(String),
     Failed(Vec<u8>),
-    NoAnswer,
+    Silence,
 }
 
 /// `cd -- '<dir>' && pwd -P`: how the shell asks the target whether a

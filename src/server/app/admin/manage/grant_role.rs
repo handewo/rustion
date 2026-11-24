@@ -115,7 +115,7 @@ where
             }
             KeyCode::Char(' ') | KeyCode::Enter => {
                 if let Err(e) = self.save_bindings().await {
-                    self.save_error = Some(e.into());
+                    self.save_error = Some(e);
                 }
             }
             _ => {}

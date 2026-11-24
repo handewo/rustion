@@ -132,6 +132,7 @@ pub struct CasbinRuleGroup {
     pub id: Uuid,
     pub v0: Uuid,
     pub v0_object_label: Option<String>,
+    pub v0_command_set: Option<String>,
     pub v0_group_label: Option<String>,
     pub v1: Uuid,
     pub v1_object_label: Option<String>,

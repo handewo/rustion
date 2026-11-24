@@ -38,6 +38,14 @@ pub struct Model {
     pub updated_at: i64,
     #[sea_orm(
         belongs_to,
+        relation_enum = "CommandSetV0",
+        from = "v0",
+        to = "id",
+        skip_fk
+    )]
+    pub command_set_v0: BelongsTo<super::command_set::Entity>,
+    #[sea_orm(
+        belongs_to,
         relation_enum = "RoleGroupV0",
         from = "v0",
         to = "id",
