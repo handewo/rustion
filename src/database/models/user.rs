@@ -4,9 +4,10 @@ use uuid::Uuid;
 
 use argon2::{
     Argon2,
-    password_hash::{PasswordHash, PasswordVerifier},
+    password_hash::{PasswordVerifier, phc::PasswordHash},
 };
-use russh::keys::ssh_key::PublicKey;
+use russh::keys::PublicKey;
+use russh::server::VerifiedPublicKey;
 
 /// User model for database storage
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,12 +75,14 @@ impl User {
             .is_ok()
     }
 
-    pub(crate) fn verify_authorized_keys(&self, pub_key: &PublicKey) -> bool {
+    pub(crate) fn verify_authorized_keys(&self, pub_key: VerifiedPublicKey) -> bool {
         if let Some(keys) = self.authorized_keys.as_ref() {
             for k_str in keys.iter() {
                 match PublicKey::from_str(k_str) {
                     Ok(ref k) => {
-                        if k.key_data() == pub_key.key_data() {
+                        if k.key_data() == pub_key.public_key.key_data()
+                            && &k.algorithm() == pub_key.algorithm
+                        {
                             return true;
                         }
                     }

@@ -86,7 +86,7 @@
 
 use std::collections::HashMap;
 
-use argon2::password_hash::{PasswordHasher, SaltString};
+use argon2::password_hash::PasswordHasher;
 use tempfile::TempDir;
 
 use crate::database::common::{
@@ -339,9 +339,8 @@ fn host_group(target: &str) -> &'static str {
 
 /// Argon2, so [`crate::database::models::User::verify_password`] really verifies.
 fn password_hash() -> String {
-    let salt = SaltString::generate(&mut aes_gcm::aead::OsRng);
     argon2::Argon2::default()
-        .hash_password(PASSWORD.as_bytes(), &salt)
+        .hash_password(PASSWORD.as_bytes())
         .expect("hash fixture password")
         .to_string()
 }

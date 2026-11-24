@@ -127,7 +127,7 @@ pub(super) async fn shell<B>(
                     }
                 }
             }
-            Ok(Signal::CtrlC) => {
+            Ok(Signal::CtrlC(_buf)) => {
                 continue;
             }
             Ok(Signal::CtrlD) => {

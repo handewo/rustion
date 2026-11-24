@@ -30,6 +30,9 @@ struct Target {
     /// `/bin/rmdir /var/log/gone` removes one, so a test can delete the visit's
     /// working directory under it.
     dirs: Arc<Mutex<std::collections::HashMap<String, String>>>,
+    /// Whether the shell's own queries (`cd -- ... && pwd -P`) are answered
+    /// more slowly than their timeout: to the shell, not answered at all.
+    slow_queries: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Target {
@@ -127,6 +130,14 @@ impl ru_server::Handler for Target {
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         let cmd = String::from_utf8_lossy(data).into_owned();
+        // A test can make the target answer the shell's own queries more
+        // slowly than their timeout (50ms under the test harness), which
+        // is indistinguishable from a target that does not answer at all.
+        if self.slow_queries.load(std::sync::atomic::Ordering::Relaxed)
+            && cmd.contains("&& pwd -P")
+        {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
         self.push(Ev::Exec(cmd.clone()));
         session.channel_success(channel)?;
         // A run is `cd -- '<pwd>' || exit 125; <program>`, a `cd` query
@@ -897,6 +908,97 @@ mod through_the_bastion {
                 // own instead of reading it as the sentinel.
                 "cd -- '/home/u' || exit 125; /usr/bin/code125",
                 "cd -- '/home/u' && pwd -P",
+                "cd -- '/home/u' || exit 125; /usr/bin/df -h",
+            ]
+        );
+    }
+
+    /// A target slower than the query timeout has not answered, and the
+    /// shell must not read silence as a verdict: a 125 keeps its own
+    /// meaning — nothing says the directory is gone — and a `cd` the
+    /// target never answered moves the visit nowhere and claims nothing.
+    #[tokio::test]
+    async fn a_target_slower_than_the_query_timeout_claims_nothing() {
+        let db = fixture::seed().await;
+        let mut config = Config::default().gen_secret_token();
+        config.database = db.url.clone();
+        config.reuse_target_connection = false;
+        let mut server = BastionServer::with_config(config).await.expect("server");
+        let f = &db.fixture;
+        let luka = f.user(LUKA);
+        grant_login(&server, f, luka).await;
+        let (target, fake) = target_with_commands(&server, f, luka).await;
+        // From here the target answers every query past its timeout.
+        fake.slow_queries
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        server.reload_policies().await.unwrap();
+
+        let mut screen = connect_shell(&mut server).await;
+        screen.until("> ").await;
+        screen.type_line(&target).await;
+        let clean = format!("root@{target}> ");
+        screen.until(&clean).await;
+
+        // The run exits 125 of its own accord, and the check that tells
+        // the sentinel apart never gets its answer: the code stays the
+        // command's own, and the hint is not said.
+        screen.type_line("code125").await;
+        screen.until("\x1b[91m[125]\x1b[92m> ").await;
+        assert!(
+            !screen.text.contains("no longer exists"),
+            "a slow target has not said the directory is gone:\n{}",
+            screen.text
+        );
+
+        // A `cd` the target never answered: no denial, no move, no claim
+        // the anchor is gone — the failed prompt alone says the line did
+        // not go through.
+        screen.type_line("cd /var/log").await;
+        screen.until("\x1b[91m[1]\x1b[92m> ").await;
+        assert!(
+            !screen.text.contains("not allowed"),
+            "the target never resolved it:\n{}",
+            screen.text
+        );
+        assert!(
+            !screen.text.contains("no longer exists"),
+            "the target never said the anchor was gone:\n{}",
+            screen.text
+        );
+
+        // The visit never moved: still at the home the fast opening `pwd`
+        // found, and a later line runs anchored there.
+        fake.slow_queries
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        screen.type_line("pwd").await;
+        screen.until("/home/u\r\n").await;
+        screen.type_line("df").await;
+        screen.until("disk\r\n").await;
+        screen.until(&clean).await;
+
+        screen.type_line("exit").await;
+        screen.until("\x1b[92m> ").await;
+        screen.type_line("exit").await;
+
+        // The sentinel check is sent — its answer just never comes in
+        // time — and the `cd` chain stops at its first unanswered query:
+        // no cd_check, no retry, no guess. The later `df` still runs
+        // anchored at the home the visit never left.
+        let execs: Vec<String> = fake
+            .seen()
+            .into_iter()
+            .filter_map(|e| match e {
+                Ev::Exec(cmd) => Some(cmd),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            execs,
+            [
+                "pwd -P",
+                "cd -- '/home/u' || exit 125; /usr/bin/code125",
+                "cd -- '/home/u' && pwd -P",
+                "cd -- '/home/u' && cd -- '/var/log' && pwd -P",
                 "cd -- '/home/u' || exit 125; /usr/bin/df -h",
             ]
         );

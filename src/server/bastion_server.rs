@@ -8,12 +8,11 @@ use crate::database::models::NamePtype;
 use crate::server::HandlerBackend;
 use crate::server::error::ServerError;
 use crate::utils::proxy_connect;
-use aes_gcm::aead::OsRng;
-use aes_gcm::aead::{Aead, rand_core::RngCore};
-use argon2::{
-    Argon2,
-    password_hash::{PasswordHasher, SaltString},
+use aes_gcm::{
+    Aes256Gcm,
+    aead::{Aead, Generate, KeyInit, Nonce},
 };
+use argon2::{Argon2, password_hash::PasswordHasher};
 use log::{error, info, trace, warn};
 use moka::future::Cache;
 use moka::ops::compute::{CompResult, Op};
@@ -32,7 +31,6 @@ use crate::config::Config;
 use crate::database::models;
 use crate::database::models::{GroupType, Ptype};
 use crate::database::service::DatabaseService;
-use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::{Engine as _, engine::general_purpose};
 use std::path::Path;
 use std::sync::Arc;
@@ -40,12 +38,8 @@ use tokio::sync::RwLock;
 
 type PinBoxStream<'a> = Pin<
     Box<
-        dyn Future<
-                Output = Result<
-                    Option<Pin<Box<dyn super::target_client::Stream>>>,
-                    ServerError,
-                >,
-            > + Send
+        dyn Future<Output = Result<Option<Pin<Box<dyn super::target_client::Stream>>>, ServerError>>
+            + Send
             + 'a,
     >,
 >;
@@ -216,9 +210,8 @@ impl BastionServer {
 
     /// Hash a plain-text password and return a PHC string.
     fn hash_password(&self, password: &str) -> Result<String, argon2::password_hash::Error> {
-        let salt = SaltString::generate(&mut OsRng);
         let argon2 = Argon2::default();
-        let hash = argon2.hash_password(password.as_bytes(), &salt)?;
+        let hash = argon2.hash_password(password.as_bytes())?;
         Ok(hash.to_string())
     }
 
@@ -230,9 +223,7 @@ impl BastionServer {
         Box::pin(async move {
             match proxy.scheme_str() {
                 Some("ssh") => {
-                    let host = proxy
-                        .host()
-                        .ok_or(ServerError::InvalidProxyUrl)?;
+                    let host = proxy.host().ok_or(ServerError::InvalidProxyUrl)?;
                     let id = crate::database::Uuid::parse_str(host)
                         .map_err(|_| ServerError::InvalidProxyUrl)?;
                     let target = if let Some(t) = self
@@ -300,9 +291,13 @@ impl BastionServer {
             .decode(text)
             .map_err(|e| ServerError::Base64Decode { source: e })?;
         let (nonce, ciphertext) = encrypt_key.split_at(12);
-        let nonce = Nonce::from_slice(nonce);
+        let nonce = Nonce::<Aes256Gcm>::try_from(nonce).map_err(|e| {
+            ServerError::DecryptionFailed {
+                reason: e.to_string(),
+            }
+        })?;
 
-        match self.secret_key.decrypt(nonce, ciphertext.as_ref()) {
+        match self.secret_key.decrypt(&nonce, ciphertext) {
             Ok(plain) => Ok(String::from_utf8_lossy(&plain).to_string()),
             Err(e) => Err(ServerError::DecryptionFailed {
                 reason: e.to_string(),
@@ -377,7 +372,8 @@ impl super::HandlerBackend for BastionServer {
         self.database
             .repository()
             .get_user_by_username(name, active_only)
-            .await.map_err(ServerError::from)
+            .await
+            .map_err(ServerError::from)
     }
 
     async fn list_targets_for_user(
@@ -541,10 +537,18 @@ impl super::HandlerBackend for BastionServer {
             .hash_password(&password)
             .map_err(|_| ServerError::PasswordHashFailed)?;
         user.password_hash = Set(Some(h));
-        self.database.repository().update_user(user).await.map_err(ServerError::from)
+        self.database
+            .repository()
+            .update_user(user)
+            .await
+            .map_err(ServerError::from)
     }
 
-    fn set_password(&self, user: &mut user::ActiveModel, password: &str) -> Result<(), ServerError> {
+    fn set_password(
+        &self,
+        user: &mut user::ActiveModel,
+        password: &str,
+    ) -> Result<(), ServerError> {
         let h = self
             .hash_password(password)
             .map_err(|_| ServerError::PasswordHashFailed)?;
@@ -687,21 +691,17 @@ impl super::HandlerBackend for BastionServer {
     }
 
     fn encrypt_plain_text(&self, text: &str) -> Result<String, ServerError> {
-        let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = Nonce::<Aes256Gcm>::generate();
 
         let ciphertext = self
             .secret_key
-            .encrypt(nonce, text.as_bytes())
-            .map_err(|e| {
-                ServerError::EncryptionFailed {
-                    reason: e.to_string(),
-                }
+            .encrypt(&nonce, text.as_bytes())
+            .map_err(|e| ServerError::EncryptionFailed {
+                reason: e.to_string(),
             })?;
 
-        let mut blob = Vec::with_capacity(nonce_bytes.len() + ciphertext.len());
-        blob.extend_from_slice(&nonce_bytes);
+        let mut blob = Vec::with_capacity(nonce.len() + ciphertext.len());
+        blob.extend_from_slice(&nonce);
         blob.extend_from_slice(&ciphertext);
 
         Ok(general_purpose::STANDARD.encode(blob))

@@ -11,7 +11,6 @@ use crate::server::app::{ExecParams, PtyParams, connect_target::ConnectTarget};
 use crate::server::extend_policy::ExtendPolicyReq;
 use bytes::Bytes;
 use log::{debug, info, trace, warn};
-use russh::keys::ssh_key::PublicKey;
 use russh::server as ru_server;
 use russh::{Channel, ChannelId, Pty};
 use std::collections::HashMap;
@@ -147,7 +146,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
     async fn auth_publickey(
         &mut self,
         login_name: &str,
-        public_key: &PublicKey,
+        public_key: ru_server::VerifiedPublicKey<'_>,
     ) -> Result<ru_server::Auth, Self::Error> {
         self.init_login(login_name).await?;
 
@@ -400,8 +399,8 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     let (tty, recv_from_tty) = channel_session.new_tty()?;
                     let app_params = self.wrap_pty_parameters(tty, recv_from_tty, lang)?;
                     app::admin::exec_request_with_pty(app_params, channel, data, session)
-                    .await
-                    .map_err(|e| Self::Error::App(e.into()))?;
+                        .await
+                        .map_err(|e| Self::Error::App(e.into()))?;
                     session.channel_failure(channel)?;
                     Ok(())
                 }
@@ -411,8 +410,8 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
                     channel_session.sender = Some(tx);
                     let params = self.wrap_exec_parameters(rx, lang)?;
                     app::admin::exec_request_without_pty(params, channel, data, session)
-                    .await
-                    .map_err(|e| Self::Error::App(e.into()))?;
+                        .await
+                        .map_err(|e| Self::Error::App(e.into()))?;
                     session.channel_success(channel)?;
                     Ok(())
                 }

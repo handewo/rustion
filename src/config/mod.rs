@@ -4,6 +4,7 @@ use crate::config::error::ConfigError;
 use crate::database::{DEFAULT_DATABASE_URL, SUPPORTED_SCHEMES, redact_url};
 use crate::i18n::Lang;
 use aes_gcm::KeyInit;
+use aes_gcm::aead::Generate;
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -234,8 +235,8 @@ impl Config {
     /// Load configuration from a TOML file
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let content = fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&content)
-            .map_err(|e| ConfigError::TomlParse { source: e })?;
+        let config: Config =
+            toml::from_str(&content).map_err(|e| ConfigError::TomlParse { source: e })?;
         Ok(config)
     }
 
@@ -272,7 +273,7 @@ impl Config {
     }
 
     pub fn gen_secret_token(mut self) -> Self {
-        let key = aes_gcm::Aes256Gcm::generate_key(aes_gcm::aead::OsRng);
+        let key = aes_gcm::Key::<aes_gcm::Aes256Gcm>::generate();
         let encoded = general_purpose::STANDARD.encode(key);
         self.secret_key = Some(encoded);
         self
@@ -280,8 +281,8 @@ impl Config {
 
     /// Save configuration to a TOML file
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), ConfigError> {
-        let content = toml::to_string_pretty(self)
-            .map_err(|e| ConfigError::TomlSerialize { source: e })?;
+        let content =
+            toml::to_string_pretty(self).map_err(|e| ConfigError::TomlSerialize { source: e })?;
         fs::write(path, content)?;
         Ok(())
     }
@@ -313,24 +314,18 @@ impl Config {
                         use std::net::ToSocketAddrs;
                         addr_str
                             .to_socket_addrs()
-                            .map_err(|e| {
-                                ConfigError::AddressResolutionFailed {
-                                    addr: addr_str.clone(),
-                                    reason: e.to_string(),
-                                }
+                            .map_err(|e| ConfigError::AddressResolutionFailed {
+                                addr: addr_str.clone(),
+                                reason: e.to_string(),
                             })?
                             .next()
-                            .ok_or_else(|| {
-                                ConfigError::NoAddressResolved {
-                                    addr: addr_str.clone(),
-                                }
+                            .ok_or_else(|| ConfigError::NoAddressResolved {
+                                addr: addr_str.clone(),
                             })
                     })
-                    .map_err(|e| {
-                        ConfigError::InvalidListenAddress {
-                            addr: s.clone(),
-                            reason: e.to_string(),
-                        }
+                    .map_err(|e| ConfigError::InvalidListenAddress {
+                        addr: s.clone(),
+                        reason: e.to_string(),
                     })
             }
         }
@@ -356,10 +351,8 @@ impl Config {
         let key = general_purpose::STANDARD
             .decode(sk)
             .map_err(|e| ConfigError::SecretTokenDecode { source: e })?;
-        aes_gcm::Aes256Gcm::new_from_slice(&key).map_err(|e| {
-            ConfigError::SecretTokenKeyError {
-                reason: e.to_string(),
-            }
+        aes_gcm::Aes256Gcm::new_from_slice(&key).map_err(|e| ConfigError::SecretTokenKeyError {
+            reason: e.to_string(),
         })?;
 
         self.validate_database_url()?;

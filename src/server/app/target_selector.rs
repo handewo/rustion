@@ -1,8 +1,8 @@
 use super::PtyParams;
 use crate::database::Uuid;
 use crate::database::models::TargetSecretName;
-use crate::server::app::error::AppError;
 use crate::server::app::NextApplication;
+use crate::server::app::error::AppError;
 use bytes::Bytes;
 use crossterm::event::SenderWriter;
 use log::{debug, trace, warn};
@@ -224,7 +224,7 @@ where
                             status = TerminalStatus::SelectUser;
                             selected_target_name = p;
                         }
-                        Ok(Signal::CtrlC) => {
+                        Ok(Signal::CtrlC(_buf)) => {
                             continue;
                         }
                         Ok(Signal::CtrlD) => status = TerminalStatus::Terminate,
@@ -308,7 +308,7 @@ where
                             selected_target_secret_name = target_secret_name;
                             status = TerminalStatus::Connect;
                         }
-                        Ok(Signal::CtrlC) => {
+                        Ok(Signal::CtrlC(_buf)) => {
                             continue;
                         }
                         Ok(Signal::CtrlD) => {

@@ -207,7 +207,7 @@ impl Editor {
         loop {
             match reedline.read_line(&PlainPrompt(prompt.clone())).await {
                 Ok(Signal::Success(line)) => return Some(line),
-                Ok(Signal::CtrlC) => continue,
+                Ok(Signal::CtrlC(_buf)) => continue,
                 Ok(Signal::CtrlD) => return None,
                 Ok(_) => continue,
                 Err(e) => {
@@ -286,6 +286,14 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
         self.say(self.tr.ls_welcome).await?;
         loop {
             // TODO: Refresh targets every time after press enter? It's too expensive
+            // Keep it: the rate is human — once per line at this prompt, never per
+            // keystroke or per command inside a visit — and the menu should follow the
+            // snapshot, so a revoked binding leaves it without a re-login. `visit`
+            // re-checks everything live, so staleness was only ever a UX question.
+            // The cost is not the frequency but the re-asking: the per-binding
+            // `check_object_active` in `command_sets_for` repeats the active-only
+            // filter `list_targets_for_user(_, true)` already applied. Trust the
+            // listing and a refresh is a few indexed queries however long the menu is.
             let targets = self.targets().await?;
             let names = target_names(&targets);
             let Some(line) = editor.read_line("> ".into(), names.clone()).await else {
@@ -367,7 +375,7 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
             last_status: 0,
         };
         let home = match self.query(&mut visit, "pwd -P").await {
-            Ok(Ok(home)) => home,
+            Ok(Answer::Path(home)) => home,
             other => {
                 if let Err(e) = other {
                     warn!(
@@ -536,11 +544,19 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
                     // its own code, which the check tells apart. Either
                     // way the audit row keeps the code the target reported.
                     Outcome::Exited(n) if *n == PWD_GONE => {
-                        if self.query(visit, &cd_check(&visit.pwd)).await?.is_err() {
-                            self.pwd_gone(visit).await?;
-                            visit.last_status = EXIT_FAILURE;
-                        } else {
-                            visit.last_status = PWD_GONE;
+                        match self.query(visit, &cd_check(&visit.pwd)).await? {
+                            // The target confirmed it: say so, and the
+                            // prompt carries the shell's own failure.
+                            Answer::Failed(_) => {
+                                self.pwd_gone(visit).await?;
+                                visit.last_status = EXIT_FAILURE;
+                            }
+                            // The directory is alive — or the target never
+                            // answered, which is not a word against it.
+                            // Either way the code is the command's own.
+                            Answer::Path(_) | Answer::NoAnswer => {
+                                visit.last_status = PWD_GONE;
+                            }
                         }
                     }
                     Outcome::Exited(n) => visit.last_status = *n,
@@ -610,8 +626,17 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
             sh_quote(&named)
         );
         match self.query(visit, &query).await? {
-            answer @ Ok(_) => self.cd_answer(visit, commands, line, &dir, answer).await,
-            Err(stderr) => {
+            answer @ Answer::Path(_) => {
+                self.cd_answer(visit, commands, line, &dir, answer).await
+            }
+            // The target said nothing in time: it has not refused the cd,
+            // and it has not said the directory is gone. Claim neither —
+            // the failed prompt alone says the line did not go through.
+            Answer::NoAnswer => {
+                visit.last_status = EXIT_FAILURE;
+                Ok(())
+            }
+            Answer::Failed(stderr) => {
                 visit.last_status = EXIT_FAILURE;
                 // A `cd` fails the same way whatever the user named when
                 // the working directory itself is gone, and the visit is
@@ -626,16 +651,23 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
                 // just did. A relative path cannot be resolved without
                 // the directory that held it; the hint is all there is
                 // to say for it.
-                if self.query(visit, &cd_check(&visit.pwd)).await?.is_err() {
-                    if !named.starts_with('/') {
-                        return self.pwd_gone(visit).await;
+                match self.query(visit, &cd_check(&visit.pwd)).await? {
+                    Answer::Failed(_) => {
+                        if !named.starts_with('/') {
+                            return self.pwd_gone(visit).await;
+                        }
+                        let retry = format!("cd -- {} && pwd -P", sh_quote(&named));
+                        let answer = self.query(visit, &retry).await?;
+                        return self.cd_answer(visit, commands, line, &dir, answer).await;
                     }
-                    let retry = format!("cd -- {} && pwd -P", sh_quote(&named));
-                    let answer = self.query(visit, &retry).await?;
-                    return self.cd_answer(visit, commands, line, &dir, answer).await;
+                    // The anchor is alive — or the probe went unanswered,
+                    // which is not a word against it: the cd's own failure
+                    // is shown, as it would be with no probe at all.
+                    Answer::Path(_) | Answer::NoAnswer => {
+                        self.cd_answer(visit, commands, line, &dir, Answer::Failed(stderr))
+                            .await
+                    }
                 }
-                self.cd_answer(visit, commands, line, &dir, Err(stderr))
-                    .await
             }
         }
     }
@@ -667,26 +699,31 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
 
     /// What a `cd` query's answer does: move when the target resolved it to
     /// an allowed directory, deny it when it did not, and show the target's
-    /// own words when it failed.
+    /// own words when it failed. No answer does none of these: the visit
+    /// stays where it was, and only the failed prompt speaks.
     async fn cd_answer(
         &mut self,
         visit: &mut Visit,
         commands: &Commands,
         line: &str,
         dir: &str,
-        answer: Result<String, Vec<u8>>,
+        answer: Answer,
     ) -> Result<(), AppError> {
         match answer {
-            Ok(physical) if commands.cd_allows(&physical, &visit.home) => {
+            Answer::Path(physical) if commands.cd_allows(&physical, &visit.home) => {
                 visit.oldpwd = std::mem::replace(&mut visit.pwd, physical);
                 visit.last_status = 0;
                 Ok(())
             }
-            Ok(_) => {
+            Answer::Path(_) => {
                 visit.last_status = EXIT_FAILURE;
                 self.cd_denied(visit, line, dir).await
             }
-            Err(stderr) => {
+            Answer::NoAnswer => {
+                visit.last_status = EXIT_FAILURE;
+                Ok(())
+            }
+            Answer::Failed(stderr) => {
                 visit.last_status = EXIT_FAILURE;
                 // The target's own words when it said any: a missing
                 // directory, no permission. The generic message only when
@@ -729,22 +766,24 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
         Err(AppError::NoTargetAvailable)
     }
 
-    /// Run one of the bastion's own commands and return its first line of
-    /// output, or its stderr when it fails.
-    async fn query(
-        &self,
-        visit: &mut Visit,
-        command: &str,
-    ) -> Result<Result<String, Vec<u8>>, AppError> {
+    /// Run one of the bastion's own commands and collect what the target
+    /// answered: its first line of output, its stderr when it failed, or
+    /// [`Answer::NoAnswer`] when it said neither in time. A timeout is not
+    /// a failure: reading it as one would tell the user a slow target's
+    /// directories no longer exist.
+    async fn query(&self, visit: &mut Visit, command: &str) -> Result<Answer, AppError> {
         let channel = self.open(visit).await?;
         let (outcome, stdout, stderr) = run::query(channel, command).await?;
+        if !matches!(outcome, Outcome::Exited(_)) {
+            return Ok(Answer::NoAnswer);
+        }
         let text = String::from_utf8_lossy(&stdout);
         let line = text.strip_suffix('\n').unwrap_or(&text);
         // A path with a newline in it cannot be told from two lines.
         if outcome == Outcome::Exited(0) && line.starts_with('/') && !line.contains('\n') {
-            Ok(Ok(line.to_owned()))
+            Ok(Answer::Path(line.to_owned()))
         } else {
-            Ok(Err(stderr))
+            Ok(Answer::Failed(stderr))
         }
     }
 
@@ -773,6 +812,16 @@ impl<B: 'static + HandlerBackend + Send + Sync> Shell<B> {
             r.finish(self.backend.as_ref(), self.handler_id).await;
         }
     }
+}
+
+/// What one of the bastion's own queries learned from the target: the path
+/// it answered with, the words it failed with, or nothing at all. A target
+/// slower than the query timeout is [`Answer::NoAnswer`] — it has not said
+/// the directory is gone, and must not be read as if it had.
+enum Answer {
+    Path(String),
+    Failed(Vec<u8>),
+    NoAnswer,
 }
 
 /// `cd -- '<dir>' && pwd -P`: how the shell asks the target whether a

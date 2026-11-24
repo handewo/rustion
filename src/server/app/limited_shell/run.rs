@@ -15,7 +15,15 @@ use unicode_width::UnicodeWidthChar;
 /// How long the bastion waits for a stopped command's channel to close.
 const GRACE: Duration = Duration::from_secs(2);
 /// The longest `pwd` or `cd` may take on the target.
-const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long one of the bastion's own queries (`pwd`, `cd`) waits for the
+/// target's answer before giving up on having one. Short in tests, so a
+/// regression test can make a target slower than it without waiting
+/// seconds.
+const QUERY_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_millis(50)
+} else {
+    Duration::from_secs(10)
+};
 
 /// The client's terminal, for commands that run on a pty.
 #[derive(Debug, Clone)]

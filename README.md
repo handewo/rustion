@@ -22,12 +22,14 @@ Rustion implements this concept with modern Rust technologies, offering security
 ### 🚀 Core Capabilities
 
 - **Fine-grained Authorization** - Control exactly who can access which targets, when, and from where
+- **In-memory policy enforcement** - Every check answers from a snapshot held in memory; the admin TUI reloads it after each change, and `policy_reload_interval` covers changes made outside the process
 - **SSH Protocol Implementation** - Built on `russh` crate for native SSH protocol support (no OpenSSH dependency)
 - **Session Recording** - Record SSH sessions in Asciinema v3 format for auditing and replay
 - **Brute-force Protection** - Rate limiting and slow rejection responses to deter attacks
 - **Connection Pooling** - Reuse target connections for improved performance
 - **SQLite, PostgreSQL and MySQL** - Pick the database with a connection URL; the schema is created on first start
-- **Audit Trail** - Logins, admin changes, target requests and SFTP operations are recorded in `event_log`, and shown in the reader's language
+- **Limited Shell** - Let a user run only the commands an admin listed, with the arguments the admin allowed
+- **Audit Trail** - Logins, admin changes, target requests, SFTP operations and limited-shell commands are recorded in `event_log`, and shown in the reader's language
 
 ### 👥 Role-Based Access Control (RBAC)
 
@@ -54,6 +56,7 @@ A full-featured terminal user interface for administration:
 - Role and permission assignment
 - Policy binding management
 - Session recording viewer
+- Command set editing for the limited shell (the `Commands` tab)
 - Eight interface languages and five colour themes, switchable in any panel
 - Deletes list what goes with the row (bindings, group memberships, permissions) before you confirm
 
@@ -115,50 +118,36 @@ SFTP works on direct target connections:
 sftp -P 2222 user@secretuser@target@localhost
 ```
 
-**Actions** - `__internal_action_sftp` only opens the session. Every operation needs its own action:
+**Actions** - access is granted per operation: opening the session, listing, reading, writing, creating, renaming and deleting each need their own action, so a policy can let a user list and read while refusing every write.
 
-| Action | Operations |
-|---|---|
-| `__internal_action_sftp` | Open the SFTP session, `realpath` |
-| `__internal_action_sftp_list` | `opendir`/`readdir`, `stat`, `lstat`, `readlink` |
-| `__internal_action_sftp_read` | Open a file for reading, read from it |
-| `__internal_action_sftp_write` | Open a file with any write flag (write, append, create, truncate, exclusive), write to it |
-| `__internal_action_sftp_mkdir` | `mkdir` |
-| `__internal_action_sftp_setstat` | `setstat` (change attributes by path) |
-| `__internal_action_sftp_fsetstat` | `fsetstat` (change attributes of an open file) |
-| `__internal_action_sftp_symlink` | `symlink` (both the link and its target are checked) |
-| `__internal_action_sftp_rename` | `rename` (both the source and the destination are checked) |
-| `__internal_action_sftp_delete` | `remove`, `rmdir` |
+**Path rules** - a policy's extended policy can narrow a grant to paths: `sftp_path` holds regex `Allow`/`Deny` lists matched against the whole resolved absolute path (`/dir(/.*)?` covers a directory and its contents). Checks are lexical — existing symlinks on the target can lead outside a pattern.
 
-- `setstat` and `fsetstat` change the same attributes, so grant both or neither. Changing a file's size also requires the write action.
+Every operation and every denial is recorded in `event_log`.
 
-**Path rules** - Add `sftp_path` to a policy's extended policy to restrict it to some paths:
+### 🔒 Limited Shell
 
-```json
-{"sftp_path":{"Allow":["/srv/upload(/.*)?"]}}
+A user who should run only some commands on a target gets a **command set** instead of `shell` or `exec`:
+
+```bash
+ssh -p 2222 user@cmd@localhost
+> help                      # the targets you hold a command set on
+> web1                      # or root@web1 when web1 has more than one user
+root@web1> help             # the commands you may run here
+root@web1> systemctl status nginx
+root@web1> cd /var/log
+root@web1> exit
+>
 ```
 
-- Patterns are regexes matched against the whole resolved absolute path (relative paths resolve against the target user's home)
-- To cover a directory and its contents, write `/dir(/.*)?`
-- `Allow` passes if any pattern matches; `Deny` passes if none does
-- `Allow: []` denies everything; `Deny: []` restricts nothing
+The prompt runs on the bastion: a line is checked against the user's command sets before anything is sent, and an allowed line runs as one `exec` on the target, holding exactly the string that was checked. No shell on the target reads what the user types, so `;`, `|`, `$(...)`, globs and aliases are only text — `df ; sh` is refused, not run.
 
-A path rule only constrains requests that name a path. The session gate and `realpath` name none, so they are not blocked by it, and one policy can both open the session and narrow what happens inside it:
+- **Command sets** are JSON, edited in the `Commands` tab of `manage`: each command is an alias, the program it runs and the argument shapes it accepts (`help ALIAS` prints one usage line per shape). Unknown fields are refused; a config is saved only when it loads.
+- A set is granted like an action — as a permission's action or in an action group — and the permission's extended policy (IP, time window, expiry) applies to it.
+- Built-ins: `help`, `cd` (an allowlist of directories, checked against the path the target resolves it to), `pwd`, `exit`. The prompt shows the last command's exit code.
+- `pty` and `stdin` run interactive tools (`htop`); `command_timeout` in `rustion.toml` bounds how long one command may run.
+- Every command run and every line refused is audited; with `enable_record`, each target visit is a session recording.
 
-```text
-ag_sftp_rw  {"sftp_path":{"Allow":["/srv/upload(/.*)?"]}}
-```
-
-By the same rule, a path rule says nothing about other kinds of request. On a policy whose action group also holds `shell` or `exec`, those are granted unconstrained — what a policy grants is its action list, and the extended policy only narrows the kind it names. Split the group if that is not what you want. The client address, the time window and the expiry are not per-kind: they are checked for every request.
-
-**Audit** - `event_log` records session start and end (with file and byte totals), one row per file with the bytes read or written, every mutation (setstat, mkdir, remove, rename, symlink, ...), and every denial. Listings are not recorded.
-
-**Known limitations:**
-- Path checks are lexical. Existing symlinks on the target can lead outside a pattern.
-- `realpath` reveals whether a path exists.
-- Symlinks created through the bastion store an absolute target.
-- SFTP extensions (`posix-rename`, `hardlink`, ...) are not supported.
-- Requests are processed one at a time.
+A set checks the line, not what a program does with its arguments: commands that can start a shell from their arguments (`find -exec`, `awk`, editors' shell-escape keys) need tight templates, and `exec` paths should be absolute.
 
 ---
 
@@ -197,6 +186,8 @@ database = "sqlite://rustion.db?mode=rwc"   # mode=rwc creates the file if missi
 
 theme = "default"   # default, oled-black, oled-white, nord, gruvbox
 language = "en"     # used when the client sends no locale
+# policy_reload_interval = "1m"  # re-read casbin_rule on a timer ("0s", off, default)
+# command_timeout = "10m"        # bound one limited-shell command ("0s", off, default)
 ```
 
 Percent-encode reserved characters in a database password (`@` becomes `%40`). The password is masked wherever the URL is logged.
