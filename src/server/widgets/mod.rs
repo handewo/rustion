@@ -19,8 +19,13 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget},
 };
-use tui_textarea::{CursorMove, Input, Key, TextArea};
+use ratatui_textarea::{CursorMove, DataCursor, Input, Key};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+/// The textarea as the panels use it. The crate's lifetime covers only its
+/// own block and placeholder, which the shared widgets never set — they draw
+/// the field's frame around it — so it is pinned to `'static`.
+pub type TextArea = ratatui_textarea::TextArea<'static>;
 
 /// Text a widget keeps and words only when it draws, so it follows the
 /// session's language when that changes: `|tr| tr.field_name`.
@@ -173,6 +178,30 @@ pub const MULTILINES_EDIT_HELP: Help = |tr| [tr.help_multiline_edit, tr.help_mul
 pub const MULTILINES_INPUT_HELP: Help = |tr| [tr.help_multiline_input, tr.help_multiline_input_nav];
 pub const READONLY_HELP: Help = |tr| [tr.read_only, tr.help_form_nav];
 
+/// `KeyCode`, from our crossterm fork, as the textarea's backend-agnostic
+/// [`Key`]. The crate's own conversion sits behind its `crossterm` feature
+/// and converts the registry crossterm's `KeyCode`, a different type here.
+fn textarea_key(code: KeyCode) -> Key {
+    match code {
+        KeyCode::Char(c) => Key::Char(c),
+        KeyCode::Backspace => Key::Backspace,
+        KeyCode::Enter => Key::Enter,
+        KeyCode::Left => Key::Left,
+        KeyCode::Right => Key::Right,
+        KeyCode::Up => Key::Up,
+        KeyCode::Down => Key::Down,
+        KeyCode::Tab | KeyCode::BackTab => Key::Tab,
+        KeyCode::Delete => Key::Delete,
+        KeyCode::Home => Key::Home,
+        KeyCode::End => Key::End,
+        KeyCode::PageUp => Key::PageUp,
+        KeyCode::PageDown => Key::PageDown,
+        KeyCode::Esc => Key::Esc,
+        KeyCode::F(x) => Key::F(x),
+        _ => Key::Null,
+    }
+}
+
 pub fn text_editing_style(color: Color, textarea: &mut TextArea) {
     textarea.set_cursor_line_style(Style::default().add_modifier(Modifier::UNDERLINED));
     textarea.set_cursor_style(Style::default().add_modifier(Modifier::REVERSED).fg(color));
@@ -241,7 +270,7 @@ impl SingleLineText {
             | KeyCode::Enter => return true,
             _ => {
                 self.textarea.input(Input {
-                    key: Key::from(key),
+                    key: textarea_key(key),
                     ctrl: false,
                     alt: false,
                     shift: false,
@@ -327,7 +356,7 @@ impl MultiLineText {
             }
             KeyCode::Char('d') if !self.editing_mode => {
                 self.textarea.move_cursor(CursorMove::End);
-                let (row, _) = self.textarea.cursor();
+                let DataCursor(row, _) = self.textarea.cursor();
                 self.textarea.delete_line_by_head();
                 self.textarea.delete_newline();
                 if row == 0 {
@@ -362,7 +391,7 @@ impl MultiLineText {
             }
             _ if self.editing_mode => {
                 self.textarea.input(Input {
-                    key: Key::from(key),
+                    key: textarea_key(key),
                     ctrl: false,
                     alt: false,
                     shift: false,

@@ -611,7 +611,11 @@ where
 
     /// What deleting the row at `idx` would take along. A permission is a
     /// rule itself, and nothing names it.
-    async fn dependents(&self, idx: usize) -> Result<Dependents, AdminError> {
+    /// `&mut self`: the borrow lives across an await inside the task the
+    /// admin shell is spawned into, and a shared borrow would need `App:
+    /// Sync`, which the textarea's render caches (`RefCell`) are not. An
+    /// exclusive one needs only `App: Send`.
+    async fn dependents(&mut self, idx: usize) -> Result<Dependents, AdminError> {
         let id = match self.selected_tab {
             SelectedTab::Users => self.items.get_user(idx).map(|u| u.id),
             SelectedTab::Targets => self.items.get_target(idx).map(|t| t.id),

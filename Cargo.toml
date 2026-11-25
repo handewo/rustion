@@ -66,7 +66,7 @@ ratatui = { git = "https://github.com/handewo/ratatui.git", default-features = f
   "macros",
   "layout-cache",
 ] }
-tui-textarea = { git = "https://github.com/handewo/tui-textarea.git", default-features = false, features = [
+ratatui-textarea = { git = "https://github.com/handewo/ratatui-textarea.git", default-features = false, features = [
   "no-tty",
 ] }
 ipnetwork = { version = "0.21", features = ["serde"] }

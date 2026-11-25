@@ -3554,6 +3554,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratatui-textarea"
+version = "0.9.4"
+source = "git+https://github.com/handewo/ratatui-textarea.git#248fbae7538fe7cae792d136e806fb9800e64a9a"
+dependencies = [
+ "ratatui-core",
+ "ratatui-notty",
+ "ratatui-widgets",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
 name = "ratatui-widgets"
 version = "0.3.2"
 source = "git+https://github.com/handewo/ratatui.git#04a4a19b83e0c6938aadc14f4d3d540e12770023"
@@ -3918,6 +3930,7 @@ dependencies = [
  "rand_core 0.10.1",
  "ratatui",
  "ratatui-core",
+ "ratatui-textarea",
  "reedline",
  "regex",
  "rgb",
@@ -3936,7 +3949,6 @@ dependencies = [
  "tokio-rustls",
  "toml",
  "tui-term",
- "tui-textarea",
  "tui-tree-widget",
  "unicode-width",
  "uuid",
@@ -3953,7 +3965,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5241,16 +5253,6 @@ dependencies = [
  "ratatui-core",
  "ratatui-widgets",
  "vt100",
-]
-
-[[package]]
-name = "tui-textarea"
-version = "0.7.0"
-source = "git+https://github.com/handewo/tui-textarea.git#9d8f4c0f2cd6268ea0a57c846f8b464b9d1049e4"
-dependencies = [
- "crossterm 0.29.0 (git+https://github.com/handewo/crossterm.git)",
- "ratatui",
- "unicode-width",
 ]
 
 [[package]]
