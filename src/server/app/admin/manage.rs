@@ -770,7 +770,7 @@ where
                                     self.clear_form();
                                 }
                             }
-                            KeyCode::Char('r') => {
+                            KeyCode::Char('r') if matches!(self.items, TableData::Users(_)) => {
                                 self.table.dim(true);
                                 if !self.grant_role_form().await {
                                     self.clear_form();

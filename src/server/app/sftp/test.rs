@@ -502,6 +502,17 @@ async fn changing_size_through_setstat_needs_write() {
     assert_eq!(setstats, vec!["setstat /home/u/f"]);
 }
 
+/// Both paths are resolved and checked before anything is forwarded, so an
+/// escape in either half of the operation is refused.
+///
+/// This test can fail on a busy box with nothing wrong: russh-sftp times a
+/// request out after ten seconds, and a refusal is sent only after its audit
+/// row is written — an fsync-committing insert. A disk stall longer than
+/// that returns `Err(Timeout)`, which `denied` does not match. Seen twice in
+/// full-suite runs on the shared dev box; reproduced under deliberate disk
+/// pressure, where the read that followed reported the database still
+/// locked, the audit insert mid-commit. `Env::open` can raise the timeout
+/// if it bites again.
 #[tokio::test]
 async fn two_path_operations_check_both_paths() {
     let env = Env::new().await;

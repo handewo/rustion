@@ -87,13 +87,11 @@ impl Policy {
 impl Snapshot {
     /// `sets` are the active command sets.
     pub fn new(roles: RoleManage, rules: Vec<CasbinRule>, sets: Vec<CommandSet>) -> Self {
-        let mut command_sets: Vec<_> = sets
+        let command_sets: Vec<_> = sets
             .into_iter()
             .filter_map(CompiledCommandSet::new)
             .map(Arc::new)
             .collect();
-        // TODO: sort by database
-        command_sets.sort_by(|a, b| a.name.cmp(&b.name));
         Self {
             roles,
             policies: rules.into_iter().map(Policy::new).collect(),
