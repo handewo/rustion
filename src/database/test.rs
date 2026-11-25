@@ -10,8 +10,8 @@ use crate::database::common::{
     ACT_EXEC, ACT_LOGIN, ACT_SHELL, INTERNAL_ACTIONS, OBJ_ADMIN, OBJ_LOGIN, OBJ_PLAYER,
 };
 use crate::database::entity::{
-    casbin_name, casbin_rule as casbin_rule_entity, event_log, secret, session_recording,
-    target as target_entity, target_secret as target_secret_entity, user,
+    casbin_name, casbin_rule as casbin_rule_entity, command_set, event_log, secret,
+    session_recording, target as target_entity, target_secret as target_secret_entity, user,
 };
 use crate::database::error::DatabaseError;
 use crate::database::fixture::{self, *};
@@ -1894,6 +1894,7 @@ async fn pickers_list_objects_then_groups() {
         .iter()
         .map(|o| o.name.as_str())
         .collect();
+    assert_eq!(labels.len(), TARGET_SECRETS);
     assert!(labels.contains("root(s_root)@sun"));
     assert!(labels.contains("mon(s_mon)@jupiter5"));
     assert!(
@@ -1913,12 +1914,27 @@ async fn pickers_list_objects_then_groups() {
     assert_eq!(tail.iter().filter(|o| o.is_group).count(), 11);
     assert!(tail.iter().any(|o| o.name == TG_SELFSERVICE && o.is_group));
 
-    // Actions: the `g3` groups and the internal actions.
+    // Actions: the `g3` groups, the internal actions and the command sets, one
+    // name-sorted list — a set is granted like an action, so it sits among
+    // them rather than after them.
+    repo.create_command_set(command_set::ActiveModel {
+        id: Set(Uuid::now_v7()),
+        name: Set("ag_axe".to_string()),
+        config: Set("{}".to_string()),
+        is_active: Set(true),
+        updated_by: Set(f.admin_id),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
     let actions = repo.list_action_group().await.unwrap();
-    assert_eq!(actions.len(), 3 + INTERNAL_ACTIONS.len());
+    assert_eq!(actions.len(), 4 + INTERNAL_ACTIONS.len());
+    assert!(
+        actions[..1 + INTERNAL_ACTIONS.len()]
+            .iter()
+            .all(|o| !o.is_group)
+    );
     assert_eq!(actions.iter().filter(|o| o.is_group).count(), 3);
-    let names: Vec<&str> = actions.iter().map(|o| o.name.as_str()).collect();
-    assert!(names.windows(2).all(|w| w[0] <= w[1]), "not name-ordered");
     assert_eq!(
         actions.iter().find(|o| o.name == AG_ALL).unwrap().id,
         f.name(AG_ALL)

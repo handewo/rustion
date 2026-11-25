@@ -63,74 +63,35 @@ impl Completer for BastionCompleter {
             // Also, by replacing the new line character with a space, the insert
             // position is maintain in the line buffer.
             let line = line.replace("\r\n", "  ").replace('\n', " ");
-            let mut split = line.split(' ').rev();
+            let split = line.split(' ').rev();
             let mut span_line: String = String::new();
-            for _ in 0..split.clone().count() {
-                if let Some(s) = split.next() {
-                    if s.is_empty() {
-                        span_line_whitespaces += 1;
-                        continue;
-                    }
-                    if span_line.is_empty() {
-                        span_line = s.to_string();
-                    } else {
-                        span_line = format!("{s} {span_line}");
-                    }
-                    // TODO: Improve sort performance
-                    if let Some(mut extensions) = self.root.complete(span_line.chars()) {
-                        extensions.sort_by(|a, b| {
-                            let sa = [span_line.as_str(), a.as_str()].concat();
-                            let sb = [span_line.as_str(), b.as_str()].concat();
-                            natural_cmp(&sa, &sb)
-                        });
-                        completions.extend(
-                            extensions
-                                .iter()
-                                .map(|ext| {
-                                    let span = Span::new(
-                                        pos - span_line.len() - span_line_whitespaces,
-                                        pos,
-                                    );
-
-                                    Suggestion {
-                                        value: format!("{span_line}{ext}"),
-                                        display_override: None,
-                                        description: None,
-                                        style: Some(Style::new()),
-                                        extra: None,
-                                        span,
-                                        append_whitespace: false,
-                                        match_indices: None,
-                                    }
-                                })
-                                .filter(|t| t.value.len() > (t.span.end - t.span.start))
-                                .collect::<Vec<Suggestion>>(),
-                        );
-                    }
+            for s in split {
+                if s.is_empty() {
+                    span_line_whitespaces += 1;
+                    continue;
+                }
+                if span_line.is_empty() {
+                    span_line = s.to_string();
+                } else {
+                    span_line = format!("{s} {span_line}");
+                }
+                if let Some(extensions) = self.root.complete(span_line.chars()) {
+                    completions.extend(
+                        natural_order(&span_line, &extensions, span_line_whitespaces).map(|ext| {
+                            suggestion(
+                                &span_line,
+                                ext,
+                                Span::new(pos - span_line.len() - span_line_whitespaces, pos),
+                            )
+                        }),
+                    );
                 }
             }
         } else {
-            let mut extensions = self.root.collect("");
-            extensions.sort_by(|a, b| natural_cmp(a, b));
+            let extensions = self.root.collect();
             completions.extend(
-                extensions
-                    .iter()
-                    .map(|ext| {
-                        let span = Span::new(pos - span_line_whitespaces, pos);
-
-                        Suggestion {
-                            value: ext.clone(),
-                            display_override: None,
-                            description: None,
-                            style: Some(Style::new()),
-                            extra: None,
-                            span,
-                            append_whitespace: false,
-                            match_indices: None,
-                        }
-                    })
-                    .filter(|t| t.value.len() > (t.span.end - t.span.start))
-                    .collect::<Vec<Suggestion>>(),
+                natural_order("", &extensions, span_line_whitespaces)
+                    .map(|ext| suggestion("", ext, Span::new(pos - span_line_whitespaces, pos))),
             );
         }
         completions.dedup();
@@ -256,39 +217,263 @@ impl CompletionNode {
                 None
             }
         } else {
-            Some(self.collect(""))
+            Some(self.collect())
         }
     }
 
-    fn collect(&self, partial: &str) -> Vec<String> {
+    /// Every word stored below this node, in key order.
+    fn collect(&self) -> Vec<String> {
         let mut completions = vec![];
-        if self.leaf {
-            completions.push(partial.to_string());
-        }
-
-        if !self.subnodes.is_empty() {
-            for (c, node) in &self.subnodes {
-                let mut partial = partial.to_string();
-                partial.push(*c);
-                completions.append(&mut node.collect(&partial));
-            }
-        }
+        let mut partial = String::new();
+        self.collect_into(&mut partial, &mut completions);
         completions
     }
-}
 
-fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    let (a_prefix, a_num) = split_alpha_num(a);
-    let (b_prefix, b_num) = split_alpha_num(b);
-
-    match a_prefix.cmp(b_prefix) {
-        std::cmp::Ordering::Equal => a_num.cmp(&b_num),
-        ord => ord,
+    /// Collects through one shared buffer: each level appends its character and
+    /// takes it back, so a word is copied once, when it is pushed, instead of
+    /// once per character on the way down.
+    fn collect_into(&self, partial: &mut String, completions: &mut Vec<String>) {
+        if self.leaf {
+            completions.push(partial.clone());
+        }
+        for (c, node) in &self.subnodes {
+            partial.push(*c);
+            node.collect_into(partial, completions);
+            partial.truncate(partial.len() - c.len_utf8());
+        }
     }
 }
 
-fn split_alpha_num(s: &str) -> (&str, u64) {
-    let idx = s.find(|c: char| c.is_ascii_digit()).unwrap_or(s.len());
-    let num = s[idx..].parse().unwrap_or(0);
-    (&s[..idx], num)
+/// The order the natural comparison gives `prefix + rest`, without building the
+/// concatenation.
+///
+/// That comparison splits a string at its first ASCII digit and orders by the
+/// alpha part before the number, so the split lands either in `prefix` or in
+/// `rest`:
+///
+/// * `prefix` holds a digit: every key from the same `prefix` shares its alpha
+///   part, kept empty here and so comparing equal, and the number reads the
+///   digits from that point through the end of `rest`.
+/// * it does not: the shared `prefix` cancels out of the alpha comparison and
+///   the split falls to `rest` alone.
+///
+/// The number is what `u64::from_str` makes of the tail: the whole tail must
+/// be digits and in range, and anything else parses as zero.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct NaturalKey<'a> {
+    alpha: &'a str,
+    num: u64,
+}
+
+impl<'a> NaturalKey<'a> {
+    fn new(prefix: &str, rest: &'a str) -> Self {
+        if let Some(at) = prefix.find(|c: char| c.is_ascii_digit()) {
+            let tail = &prefix[at..];
+            let num = if tail.bytes().all(|b| b.is_ascii_digit())
+                && rest.bytes().all(|b| b.is_ascii_digit())
+            {
+                parse_digits(tail.as_bytes(), rest.as_bytes())
+            } else {
+                0
+            };
+            Self { alpha: "", num }
+        } else {
+            let at = rest
+                .find(|c: char| c.is_ascii_digit())
+                .unwrap_or(rest.len());
+            let tail = &rest[at..];
+            let num = if tail.bytes().all(|b| b.is_ascii_digit()) {
+                parse_digits(tail.as_bytes(), &[])
+            } else {
+                0
+            };
+            Self {
+                alpha: &rest[..at],
+                num,
+            }
+        }
+    }
+}
+
+/// The digits of `first` then `then`, read as one number that comes out zero
+/// on overflow, as a failed `u64::from_str` does.
+fn parse_digits(first: &[u8], then: &[u8]) -> u64 {
+    let mut num: u64 = 0;
+    for &b in first.iter().chain(then) {
+        let digit = u64::from(b - b'0');
+        if num > (u64::MAX - digit) / 10 {
+            return 0;
+        }
+        num = num * 10 + digit;
+    }
+    num
+}
+
+/// Sorts `extensions` by the natural order of `prefix` + extension — one key
+/// per extension, instead of one concatenation per comparison — and yields the
+/// ones that replace more than they cover: the suggestion's value is `prefix` +
+/// extension and its span is `prefix.len() + whitespaces` wide, so what stays
+/// is `ext.len() > whitespaces`.
+fn natural_order<'a>(
+    prefix: &str,
+    extensions: &'a [String],
+    whitespaces: usize,
+) -> impl Iterator<Item = &'a str> {
+    let mut ranked: Vec<(NaturalKey<'a>, &'a str)> = extensions
+        .iter()
+        .map(|ext| (NaturalKey::new(prefix, ext), ext.as_str()))
+        .collect();
+    ranked.sort_by(|a, b| a.0.cmp(&b.0));
+    ranked
+        .into_iter()
+        .filter(move |(_, ext)| ext.len() > whitespaces)
+        .map(|(_, ext)| ext)
+}
+
+/// The suggestion that replaces `span` with `prefix` + `ext`.
+fn suggestion(prefix: &str, ext: &str, span: Span) -> Suggestion {
+    Suggestion {
+        value: format!("{prefix}{ext}"),
+        display_override: None,
+        description: None,
+        style: Some(Style::new()),
+        extra: None,
+        span,
+        append_whitespace: false,
+        match_indices: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The comparator `NaturalKey` stands in for, kept as the oracle.
+    fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+        let (a_prefix, a_num) = split_alpha_num(a);
+        let (b_prefix, b_num) = split_alpha_num(b);
+
+        match a_prefix.cmp(b_prefix) {
+            std::cmp::Ordering::Equal => a_num.cmp(&b_num),
+            ord => ord,
+        }
+    }
+
+    fn split_alpha_num(s: &str) -> (&str, u64) {
+        let idx = s.find(|c: char| c.is_ascii_digit()).unwrap_or(s.len());
+        let num = s[idx..].parse().unwrap_or(0);
+        (&s[..idx], num)
+    }
+
+    /// The key orders exactly as comparing the built concatenations did,
+    /// whichever side of the prefix/extension boundary the digits fall on.
+    #[test]
+    fn the_key_orders_like_the_built_concatenations() {
+        let words = [
+            "",
+            "1",
+            "9",
+            "10",
+            "a",
+            "a1",
+            "a2",
+            "a10",
+            "a01",
+            "a1x",
+            "aa",
+            "b0000000000000000000009",
+            "b18446744073709551615",
+            "b18446744073709551616",
+            "b9999999999999999999999",
+            " 3",
+            "z 09",
+        ];
+        for prefix in ["", "x", "cmd ", "x2", "x2y", "d1 ", "123"] {
+            for a in words {
+                for b in words {
+                    assert_eq!(
+                        NaturalKey::new(prefix, a).cmp(&NaturalKey::new(prefix, b)),
+                        natural_cmp(&format!("{prefix}{a}"), &format!("{prefix}{b}")),
+                        "{prefix:?} + {a:?} vs {b:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Numbers order by value, not by their digits: file2 before file10, and a
+    /// number cut short by a letter orders as zero.
+    #[test]
+    fn numbers_order_by_value() {
+        let mut completer = BastionCompleter::default();
+        completer.insert(
+            ["file1", "file1b", "file2", "file10", "other"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        );
+        let done = completer.complete("file", 4);
+        let values: Vec<&str> = done
+            .suggestions()
+            .iter()
+            .map(|s| s.value.as_str())
+            .collect();
+        assert_eq!(values, ["file1b", "file1", "file2", "file10"]);
+        assert!(done.suggestions().iter().all(|s| s.span == Span::new(0, 4)));
+    }
+
+    /// A completion may span several words, and the span then reaches back
+    /// over every word it replaces.
+    #[test]
+    fn a_completion_may_span_several_words() {
+        let mut completer = BastionCompleter::default();
+        completer.insert(vec!["git pull".to_string(), "git push".to_string()]);
+        let done = completer.complete("git p", 5);
+        let values: Vec<&str> = done
+            .suggestions()
+            .iter()
+            .map(|s| s.value.as_str())
+            .collect();
+        assert_eq!(values, ["git pull", "git push"]);
+        assert!(done.suggestions().iter().all(|s| s.span == Span::new(0, 5)));
+    }
+
+    /// A newline before the word counts as the whitespace it is replaced by.
+    #[test]
+    fn a_newline_before_the_word_widens_the_span() {
+        let mut completer = BastionCompleter::default();
+        completer.insert(vec!["batman".to_string(), "batmobile".to_string()]);
+        let done = completer.complete("to the\r\nbat", 11);
+        let values: Vec<&str> = done
+            .suggestions()
+            .iter()
+            .map(|s| s.value.as_str())
+            .collect();
+        assert_eq!(values, ["batman", "batmobile"]);
+        assert!(
+            done.suggestions()
+                .iter()
+                .all(|s| s.span == Span::new(8, 11))
+        );
+    }
+
+    /// An empty line offers every word, still in natural order.
+    #[test]
+    fn an_empty_line_offers_every_word() {
+        let mut completer = BastionCompleter::default();
+        completer.insert(vec![
+            "a1".to_string(),
+            "a10".to_string(),
+            "a2".to_string(),
+            "zz".to_string(),
+        ]);
+        let done = completer.complete("", 0);
+        let values: Vec<&str> = done
+            .suggestions()
+            .iter()
+            .map(|s| s.value.as_str())
+            .collect();
+        assert_eq!(values, ["a1", "a2", "a10", "zz"]);
+        assert!(done.suggestions().iter().all(|s| s.span == Span::new(0, 0)));
+    }
 }

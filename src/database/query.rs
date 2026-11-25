@@ -18,10 +18,12 @@
 use log::warn;
 use std::collections::HashMap;
 
-use sea_orm::sea_query::{Condition, Expr, ExprTrait, IntoCondition, JoinType};
+use sea_orm::sea_query::{
+    Alias, Condition, Expr, ExprTrait, IntoCondition, JoinType, Order, Query, UnionType,
+};
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, DbBackend, DeriveIden, EntityTrait, FromQueryResult,
-    QueryFilter, QueryOrder, QuerySelect, RelationTrait,
+    ColumnTrait, ConnectionTrait, DatabaseConnection, DbBackend, DeriveIden, EntityTrait,
+    FromQueryResult, QueryFilter, QueryOrder, QuerySelect, RelationTrait,
 };
 use uuid::Uuid;
 
@@ -579,50 +581,70 @@ async fn target_secret_rows(
 }
 
 // ------------------------------------------------------------- group pickers
-// Each was a `UNION ALL` of concrete objects and their groups, feeding the
-// admin pickers. Built as two reads and concatenated, preserving row order.
+// Each picker feeds the admin UI one name-sorted list: the concrete objects
+// and the groups interleave rather than forming sections, so what a row is
+// comes from `is_group`, not from its position. The subject and action
+// pickers sort in the database — a `UNION ALL` with the `ORDER BY` outside
+// it; the object picker sorts in Rust, because its object names are composed
+// there (see the module note on concatenation).
 
-/// Users, then `g1` groups.
+/// Users and `g1` roles, one list sorted by name.
 ///
-/// Ordered within each section. The original queries had no `ORDER BY` and
-/// relied on SQLite's scan order being stable in practice; PostgreSQL and MySQL
-/// make no such promise (PostgreSQL in particular reorders rows after updates),
-/// and these lists are rendered unsorted, so the order needs to be explicit to
-/// stop the picker reshuffling between refreshes.
+/// The sort is the database's own, so it needs no `ORDER BY` inference from
+/// scan order, which differs between backends (PostgreSQL in particular
+/// reorders rows after updates) — without it the picker could reshuffle
+/// between refreshes.
 pub(super) async fn list_user_group(
     db: &DatabaseConnection,
 ) -> Result<Vec<ObjectGroup>, DatabaseError> {
-    let mut out: Vec<ObjectGroup> = user::Entity::find()
-        .order_by_asc(user::Column::Username)
-        .all(db)
+    // The `ORDER BY` outside the union orders the whole list; per side,
+    // `is_group` is a plain false for the users and `ptype = 'g1'` for the
+    // roles.
+    let q = Query::select()
+        .expr_as(Expr::col((user::Entity, user::Column::Id)), "id")
+        .expr_as(Expr::col((user::Entity, user::Column::Username)), "name")
+        .expr_as(Expr::value(false), "is_group")
+        .from(user::Entity)
+        .union(
+            UnionType::All,
+            Query::select()
+                .expr_as(
+                    Expr::col((casbin_name::Entity, casbin_name::Column::Id)),
+                    "id",
+                )
+                .expr_as(
+                    Expr::col((casbin_name::Entity, casbin_name::Column::Name)),
+                    "name",
+                )
+                .expr_as(
+                    Expr::col((casbin_name::Entity, casbin_name::Column::Ptype)).eq(NamePtype::G1),
+                    "is_group",
+                )
+                .from(casbin_name::Entity)
+                .and_where(
+                    Expr::col((casbin_name::Entity, casbin_name::Column::Ptype)).eq(NamePtype::G1),
+                )
+                .to_owned(),
+        )
+        .order_by(Alias::new("is_group"), Order::Asc)
+        .order_by(Alias::new("name"), Order::Asc)
+        .to_owned();
+
+    Ok(db
+        .query_all(&q)
         .await?
-        .into_iter()
-        .map(|u| ObjectGroup {
-            id: u.id,
-            name: u.username,
-            is_group: false,
-        })
-        .collect();
-
-    out.extend(
-        casbin_name::Entity::find()
-            .filter(casbin_name::Column::Ptype.eq(NamePtype::G1))
-            .order_by_asc(casbin_name::Column::Name)
-            .all(db)
-            .await?
-            .into_iter()
-            .map(|n| ObjectGroup {
-                id: n.id,
-                name: n.name,
-                is_group: true,
-            }),
-    );
-
-    Ok(out)
+        .iter()
+        .map(|r| ObjectGroup::from_query_result(r, ""))
+        .collect::<Result<Vec<_>, _>>()?)
 }
 
-/// `target_secret`s (labelled `user(name)@target:port`), then `g2` groups and
-/// internal objects. Internal objects report `is_group: false`, as before.
+/// `target_secret`s (labelled `user(name)@target`), `g2` groups and internal
+/// objects, one list sorted by name.
+///
+/// Sorted in Rust rather than by the database: the binding label is composed
+/// here, so the sort key only exists after the read. The sort is stable and
+/// each side is still read ordered, so equal names keep a deterministic
+/// order. Internal objects report `is_group: false`.
 pub(super) async fn list_target_group(
     db: &DatabaseConnection,
 ) -> Result<Vec<ObjectGroup>, DatabaseError> {
@@ -643,6 +665,7 @@ pub(super) async fn list_target_group(
                     .eq(NamePtype::G2)
                     .or(casbin_name::Column::Ptype.eq(NamePtype::InternalObjectType)),
             )
+            .order_by_desc(casbin_name::Column::Ptype)
             .order_by_asc(casbin_name::Column::Name)
             .all(db)
             .await?
@@ -657,42 +680,65 @@ pub(super) async fn list_target_group(
     Ok(out)
 }
 
-/// `g3` groups and internal actions, then command sets.
+/// `g3` groups, internal actions and command sets, one list sorted by name.
+///
+/// The action picker is the one that interleaves its sections: a command set
+/// is granted exactly like an action, so the sets sit among the groups and
+/// actions instead of after them. The sort is the database's own — a
+/// `UNION ALL` with the `ORDER BY` outside it, which every backend spells the
+/// same, unlike the concatenation and `GROUP_CONCAT` that have no portable
+/// spelling.
 pub(super) async fn list_action_group(
     db: &DatabaseConnection,
 ) -> Result<Vec<ObjectGroup>, DatabaseError> {
-    let mut out: Vec<ObjectGroup> = casbin_name::Entity::find()
-        .filter(
-            casbin_name::Column::Ptype
-                .eq(NamePtype::G3)
-                .or(casbin_name::Column::Ptype.eq(NamePtype::InternalActionType)),
+    // The `ORDER BY` outside the union orders the whole list; per side,
+    // `is_group` is `ptype = 'g3'` for the names and a plain false for the
+    // sets.
+    let q = Query::select()
+        .expr_as(
+            Expr::col((casbin_name::Entity, casbin_name::Column::Id)),
+            "id",
         )
-        .order_by_asc(casbin_name::Column::Name)
-        .all(db)
+        .expr_as(
+            Expr::col((casbin_name::Entity, casbin_name::Column::Name)),
+            "name",
+        )
+        .expr_as(
+            Expr::col((casbin_name::Entity, casbin_name::Column::Ptype)).eq(NamePtype::G3),
+            "is_group",
+        )
+        .from(casbin_name::Entity)
+        .and_where(
+            Expr::col((casbin_name::Entity, casbin_name::Column::Ptype))
+                .eq(NamePtype::G3)
+                .or(Expr::col((casbin_name::Entity, casbin_name::Column::Ptype))
+                    .eq(NamePtype::InternalActionType)),
+        )
+        .union(
+            UnionType::All,
+            Query::select()
+                .expr_as(
+                    Expr::col((command_set::Entity, command_set::Column::Id)),
+                    "id",
+                )
+                .expr_as(
+                    Expr::col((command_set::Entity, command_set::Column::Name)),
+                    "name",
+                )
+                .expr_as(Expr::value(false), "is_group")
+                .from(command_set::Entity)
+                .to_owned(),
+        )
+        .order_by(Alias::new("is_group"), Order::Asc)
+        .order_by(Alias::new("name"), Order::Asc)
+        .to_owned();
+
+    Ok(db
+        .query_all(&q)
         .await?
-        .into_iter()
-        .map(|n| ObjectGroup {
-            is_group: n.ptype == NamePtype::G3,
-            id: n.id,
-            name: n.name,
-        })
-        .collect();
-
-    out.extend(
-        command_set::Entity::find()
-            .order_by_asc(command_set::Column::Name)
-            .all(db)
-            .await?
-            .into_iter()
-            .map(|c| ObjectGroup {
-                id: c.id,
-                name: c.name,
-                is_group: false,
-            }),
-    );
-    //TODO: sort for whole list
-
-    Ok(out)
+        .iter()
+        .map(|r| ObjectGroup::from_query_result(r, ""))
+        .collect::<Result<Vec<_>, _>>()?)
 }
 
 // ---------------------------------------------------------------- recordings
