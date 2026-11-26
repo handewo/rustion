@@ -237,10 +237,10 @@ where
             KeyCode::End => {
                 let _ = self.state.select_last();
             }
-            KeyCode::Char('b') => {
+            KeyCode::Char('b') if ctrl_pressed => {
                 self.page_up();
             }
-            KeyCode::Char('f') => {
+            KeyCode::Char('f') if ctrl_pressed => {
                 self.page_down();
             }
             KeyCode::PageDown => {
@@ -665,7 +665,8 @@ mod tests {
 
     /// The three group tabs are manage tabs — the tree is the tab, so
     /// `Tab`/`Shift Tab` (handed back by `handle_key_event`) switch tabs and
-    /// `q`/`Esc`/`Ctrl+c` quit, as on every tab. Nothing closes.
+    /// `q`/`Esc`/`Ctrl+c` quit, as on every tab. Nothing closes. Paging is
+    /// the keys every other table answers to.
     #[test]
     fn the_help_names_tab_switching_and_quit() {
         let tr = Lang::En.strings();
@@ -680,6 +681,11 @@ mod tests {
             tr.help_group.contains("(q/Esc/Ctrl+c) quit"),
             "{}",
             tr.help_group
+        );
+        assert!(
+            tr.help_group_nav.contains("(PgUp/PgDn/Ctrl+b/f) page up/down"),
+            "{}",
+            tr.help_group_nav
         );
     }
 }

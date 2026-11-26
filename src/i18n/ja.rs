@@ -171,7 +171,7 @@ pub const JA: Strings = Strings {
     help_pick_nav: "(↑↓/jk) 移動 | (+/-) 拡大/縮小 | (PgUp/PgDn/Ctrl+b/f) 前/次のページ",
     help_permission: "(Enter/e/i/a) 編集",
     help_group: "(←→/hl) 折りたたむ/展開 | (a) 追加 | (d) 削除 | (q/Esc/Ctrl+c) 終了",
-    help_group_nav: "(Tab/Shift Tab) 次/前のタブ | (↑↓/jk) 移動 | (Home/End) 先頭/末尾 | (PgUp/PgDn/b/f) 前/次のページ",
+    help_group_nav: "(Tab/Shift Tab) 次/前のタブ | (↑↓/jk) 移動 | (Home/End) 先頭/末尾 | (PgUp/PgDn/Ctrl+b/f) 前/次のページ",
     help_group_pick: "(Space/Enter) 選択して保存 | (q/Esc) 戻る",
     select_one_group: "グループを 1 つ選択してください。",
     select_item_in_group: "グループ {group} の項目を 1 つ選択してください",

@@ -171,7 +171,7 @@ pub const FR: Strings = Strings {
     help_pick_nav: "(↑↓/jk) se déplacer | (+/-) agrandir/réduire | (PgUp/PgDn/Ctrl+b/f) page précédente/suivante",
     help_permission: "(Enter/e/i/a) modifier",
     help_group: "(←→/hl) replier/déplier | (a) ajouter | (d) supprimer | (q/Esc/Ctrl+c) quitter",
-    help_group_nav: "(Tab/Shift Tab) onglet suivant/précédent | (↑↓/jk) se déplacer | (Home/End) début/fin | (PgUp/PgDn/b/f) page précédente/suivante",
+    help_group_nav: "(Tab/Shift Tab) onglet suivant/précédent | (↑↓/jk) se déplacer | (Home/End) début/fin | (PgUp/PgDn/Ctrl+b/f) page précédente/suivante",
     help_group_pick: "(Space/Enter) choisir et enregistrer | (q/Esc) retour",
     select_one_group: "Sélectionnez un groupe.",
     select_item_in_group: "Sélectionnez un élément du groupe {group}",

@@ -171,7 +171,7 @@ pub const EN: Strings = Strings {
     help_pick_nav: "(↑↓/jk) move around | (+/-) zoom in/out | (PgUp/PgDn/Ctrl+b/f) page up/down",
     help_permission: "(Enter/e/i/a) edit",
     help_group: "(←→/hl) collapse/expand | (a) add | (d) delete | (q/Esc/Ctrl+c) quit",
-    help_group_nav: "(Tab/Shift Tab) next/previous tab | (↑↓/jk) move around | (Home/End) first/last | (PgUp/PgDn/b/f) page up/down",
+    help_group_nav: "(Tab/Shift Tab) next/previous tab | (↑↓/jk) move around | (Home/End) first/last | (PgUp/PgDn/Ctrl+b/f) page up/down",
     help_group_pick: "(Space/Enter) select and save | (q/Esc) back",
     select_one_group: "Please select one group.",
     select_item_in_group: "Please select one item in group: {group}",

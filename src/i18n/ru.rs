@@ -171,7 +171,7 @@ pub const RU: Strings = Strings {
     help_pick_nav: "(↑↓/jk) перемещение | (+/-) крупнее/мельче | (PgUp/PgDn/Ctrl+b/f) страница вверх/вниз",
     help_permission: "(Enter/e/i/a) изменить",
     help_group: "(←→/hl) свернуть/развернуть | (a) добавить | (d) удалить | (q/Esc/Ctrl+c) выход",
-    help_group_nav: "(Tab/Shift Tab) следующая/предыдущая вкладка | (↑↓/jk) перемещение | (Home/End) начало/конец | (PgUp/PgDn/b/f) страница вверх/вниз",
+    help_group_nav: "(Tab/Shift Tab) следующая/предыдущая вкладка | (↑↓/jk) перемещение | (Home/End) начало/конец | (PgUp/PgDn/Ctrl+b/f) страница вверх/вниз",
     help_group_pick: "(Space/Enter) выбрать и сохранить | (q/Esc) назад",
     select_one_group: "Выберите одну группу.",
     select_item_in_group: "Выберите один элемент в группе {group}",

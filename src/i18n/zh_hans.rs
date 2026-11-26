@@ -171,7 +171,7 @@ pub const ZH_HANS: Strings = Strings {
     help_pick_nav: "(↑↓/jk) 移动 | (+/-) 放大/缩小 | (PgUp/PgDn/Ctrl+b/f) 上一页/下一页",
     help_permission: "(Enter/e/i/a) 编辑",
     help_group: "(←→/hl) 折叠/展开 | (a) 添加 | (d) 删除 | (q/Esc/Ctrl+c) 退出",
-    help_group_nav: "(Tab/Shift Tab) 下一个/上一个标签页 | (↑↓/jk) 移动 | (Home/End) 开头/结尾 | (PgUp/PgDn/b/f) 上一页/下一页",
+    help_group_nav: "(Tab/Shift Tab) 下一个/上一个标签页 | (↑↓/jk) 移动 | (Home/End) 开头/结尾 | (PgUp/PgDn/Ctrl+b/f) 上一页/下一页",
     help_group_pick: "(Space/Enter) 选择并保存 | (q/Esc) 返回",
     select_one_group: "请选择一个分组。",
     select_item_in_group: "请在分组 {group} 中选择一项",

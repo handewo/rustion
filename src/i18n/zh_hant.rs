@@ -171,7 +171,7 @@ pub const ZH_HANT: Strings = Strings {
     help_pick_nav: "(↑↓/jk) 移動 | (+/-) 放大/縮小 | (PgUp/PgDn/Ctrl+b/f) 上一頁/下一頁",
     help_permission: "(Enter/e/i/a) 編輯",
     help_group: "(←→/hl) 收合/展開 | (a) 新增 | (d) 刪除 | (q/Esc/Ctrl+c) 離開",
-    help_group_nav: "(Tab/Shift Tab) 下一個/上一個分頁 | (↑↓/jk) 移動 | (Home/End) 開頭/結尾 | (PgUp/PgDn/b/f) 上一頁/下一頁",
+    help_group_nav: "(Tab/Shift Tab) 下一個/上一個分頁 | (↑↓/jk) 移動 | (Home/End) 開頭/結尾 | (PgUp/PgDn/Ctrl+b/f) 上一頁/下一頁",
     help_group_pick: "(Space/Enter) 選擇並儲存 | (q/Esc) 返回",
     select_one_group: "請選擇一個群組。",
     select_item_in_group: "請在群組 {group} 中選擇一項",
