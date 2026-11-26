@@ -68,7 +68,7 @@ Nested enum pattern with `thiserror`. Top-level `Error` in `src/error.rs` wraps 
 
 ### Dependencies with Custom Forks
 
-Several dependencies use git forks (not crates.io): `russh`, `crossterm`, `reedline`, `inquire`, `ratatui`, `tui-textarea`, `tui-tree-widget`. Check `Cargo.toml` for exact sources.
+Several dependencies use git forks (not crates.io): `russh`, `crossterm`, `reedline`, `inquire`, `ratatui`, `ratatui-textarea`, `tui-tree-widget`. Check `Cargo.toml` for exact sources.
 
 ## Configuration
 
