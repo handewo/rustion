@@ -5,8 +5,8 @@ use crate::database::entity::casbin_rule;
 use crate::database::models::{ObjectGroup, PermissionPolicy};
 use crate::server::extend_policy::CompiledExtendPolicy;
 use crate::server::widgets::{
-    AdminTable, COMMON_HELP, DisplayMode, Help, Message, SingleLineText, Strings, Theme,
-    centered_area, render_cancel_dialog, render_message_popup, render_textarea,
+    AdminTable, COMMON_HELP, DisplayMode, Help, Message, SingleLineText, Strings, TEXT_EDIT_HELP,
+    Theme, centered_area, render_cancel_dialog, render_message_popup, render_textarea,
     table_object_group_len_calculator, text_editing_style, text_input_position, theme,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -169,6 +169,12 @@ impl PermissionEditor {
         }
     }
 
+    /// Whether a plain character goes into the policy line right now: `?`
+    /// must type there rather than open the panel's help popup.
+    pub fn types_question_mark(&self) -> bool {
+        self.editing_mode && self.focused_field == InputField::ExtendPolicy
+    }
+
     pub fn handle_key_event(&mut self, key: KeyCode, modifiers: KeyModifiers) -> bool {
         // Handle cancel confirmation dialog
         if self.show_cancel_confirmation {
@@ -225,6 +231,7 @@ impl PermissionEditor {
                     if self.extend_policy_text.handle_input(key) {
                         self.editing_mode = false;
                         self.extend_policy_text.clear_style();
+                        self.help_text = COMMON_HELP;
                     }
                 }
             }
@@ -335,6 +342,7 @@ impl PermissionEditor {
                     self.editing_mode = true;
                     text_editing_style(self.cursor_color, &mut self.extend_policy_text.textarea);
                     text_input_position(key, &mut self.extend_policy_text.textarea);
+                    self.help_text = TEXT_EDIT_HELP;
                 }
                 KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('i') | KeyCode::Char('a')
                     if self.focused_field != InputField::ExtendPolicy =>

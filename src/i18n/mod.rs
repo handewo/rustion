@@ -230,8 +230,10 @@ strings! {
     // Shared widgets.
     footer_theme,
     footer_language,
-    /// `{count}`
-    footer_more,
+    /// The word beside the `?` key cap in every footer.
+    footer_help,
+    /// The help popup's title.
+    title_help,
     dialog_info,
     dialog_warning,
     dialog_error,
@@ -254,6 +256,8 @@ strings! {
     // Form help.
     help_form_edit,
     help_form_nav,
+    help_text_edit,
+    help_text_edit_nav,
     help_radio,
     help_radio_edit,
     help_checkbox,
@@ -420,6 +424,7 @@ strings! {
 
     // Bind, grant role, permission and group editors.
     help_bind,
+    help_bind_nav,
     help_grant,
     help_grant_nav,
     help_pick,

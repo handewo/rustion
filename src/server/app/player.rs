@@ -5,8 +5,9 @@ use crate::server::error::ServerError;
 use crate::server::extend_policy;
 use crate::server::widgets::{
     AdminTable, DisplayMode, FormEditor, FormEvent, FormField, Help, Message, Theme, centered_area,
-    common::{DATETIME_LENGTH, MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW},
-    footer_height, popup_block, render_footer, render_message_popup, render_status_bar,
+    common::{DATETIME_LENGTH, FOOTER_ROWS, MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW},
+    closes_help_popup, popup_block, render_footer, render_help_popup, render_message_popup,
+    render_status_bar,
     render_title_bar,
 };
 use bytes::Bytes;
@@ -221,6 +222,7 @@ where
     setting: Setting,
     theme: &'static Theme,
     lang: Lang,
+    help_open: bool,
 
     pub help_text: Help,
 }
@@ -272,6 +274,7 @@ where
             setting: Setting::new(),
             theme,
             lang,
+            help_open: false,
 
             help_text: HELP_TEXT,
         }
@@ -705,6 +708,19 @@ where
                     }
                 }
 
+                if self.help_open {
+                    if closes_help_popup(key.code) {
+                        self.help_open = false;
+                    }
+                    continue;
+                }
+                if let KeyCode::Char('?') = key.code {
+                    if !(self.setting.editing_mode && self.setting.form.types_question_mark()) {
+                        self.help_open = true;
+                        continue;
+                    }
+                }
+
                 if self.setting.editing_mode {
                     match self.setting.form.handle_key_event(key.code, key.modifiers) {
                         FormEvent::Save => {
@@ -775,7 +791,7 @@ where
         let layout = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(5),
-            Constraint::Length(footer_height(self.help_text(), area.width)),
+            Constraint::Length(FOOTER_ROWS),
         ]);
         let [header_area, table_area, footer_area] = layout.areas(area);
 
@@ -796,6 +812,9 @@ where
         }
         if self.setting.editing_mode {
             self.render_setting_popup(frame, table_area);
+        }
+        if self.help_open {
+            render_help_popup(table_area, frame.buffer_mut(), self.help_text(), self.theme, tr);
         }
         self.render_footer(frame, footer_area);
     }

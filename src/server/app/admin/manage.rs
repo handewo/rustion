@@ -7,8 +7,8 @@ use crate::i18n::{Lang, Strings};
 use crate::server::event_log::{Audit, Change, EventKind, EventLogger, Object, dependents_items};
 use crate::server::widgets::{
     AdminTable, DisplayMode, FieldsToArray, Help, Message, TabBar, TableData as TD, Theme,
-    centered_area, common::*, footer_height, popup_block, render_confirm_dialog, render_footer,
-    render_message_popup,
+    centered_area, closes_help_popup, common::*, popup_block, render_confirm_dialog,
+    render_footer, render_help_popup, render_message_popup,
 };
 use ::log::{error, info, warn};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers, NoTtyEvent, SenderWriter};
@@ -154,6 +154,7 @@ where
     admin_id: Uuid,
     editor: Editor<B>,
     message: Option<Message>,
+    help_open: bool,
     log: EventLogger<B>,
     tabs: TabBar,
 }
@@ -194,6 +195,7 @@ where
             admin_id,
             editor: Editor::None,
             message: None,
+            help_open: false,
             log: log.scoped(EventKind::Manage),
             tabs: TabBar::default(),
         }
@@ -703,6 +705,19 @@ where
                     }
                 }
 
+                if self.help_open {
+                    if closes_help_popup(key.code) {
+                        self.help_open = false;
+                    }
+                    continue;
+                }
+                if let KeyCode::Char('?') = key.code {
+                    if !self.editor_types_question_mark() {
+                        self.help_open = true;
+                        continue;
+                    }
+                }
+
                 match self.editor {
                     Editor::Bind(ref mut e) => {
                         if e.handle_key_event(key.code, key.modifiers).await {
@@ -1195,7 +1210,7 @@ where
         let layout = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(5),
-            Constraint::Length(footer_height(self.help_text(), area.width)),
+            Constraint::Length(FOOTER_ROWS),
         ]);
         let [header_area, table_area, footer_area] = layout.areas(area);
 
@@ -1251,6 +1266,9 @@ where
         self.render_popup(frame, table_area);
         if let Some(ref msg) = self.message {
             render_message_popup(table_area, frame.buffer_mut(), msg, theme, tr);
+        }
+        if self.help_open {
+            render_help_popup(table_area, frame.buffer_mut(), self.help_text(), self.theme, tr);
         }
         self.render_footer(frame, footer_area);
     }
@@ -1546,6 +1564,24 @@ where
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let tr = self.lang.strings();
         render_footer(area, frame.buffer_mut(), self.help_text(), self.theme, tr);
+    }
+
+    /// `?` opens the help popup wherever it would not type: only a form's
+    /// text field mid-edit — or the permission editor's policy line —
+    /// takes it as a character. The list, tree and grant editors take no
+    /// free text.
+    fn editor_types_question_mark(&self) -> bool {
+        match &self.editor {
+            Editor::User(e) => e.as_ref().form.types_question_mark(),
+            Editor::Target(e) => e.as_ref().form.types_question_mark(),
+            Editor::Secret(e) => e.as_ref().form.types_question_mark(),
+            Editor::CasbinName(e) => e.as_ref().form.types_question_mark(),
+            Editor::CommandSet(e) => e.as_ref().form.types_question_mark(),
+            Editor::Permission(e) => e.as_ref().types_question_mark(),
+            Editor::Bind(_) | Editor::CasbinGroup(_) | Editor::GrantRole(_) | Editor::None => {
+                false
+            }
+        }
     }
 
     /// The keys the footer lists: the open editor's, or the table's.

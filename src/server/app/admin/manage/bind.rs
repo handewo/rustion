@@ -17,7 +17,7 @@ use ratatui::{
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
 
-pub const HELP_TEXT: Help = |tr| [tr.help_bind, tr.help_manage_nav];
+pub const HELP_TEXT: Help = |tr| [tr.help_bind, tr.help_bind_nav];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum FocusedTable {
@@ -416,4 +416,18 @@ fn secret_len_calculator(data: &[SecretInfo]) -> Vec<Constraint> {
         Constraint::Length(name_len as u16),
         Constraint::Length(user_len as u16),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::Lang;
+
+    /// The binding panel has no tabs: its nav line names the keys that close
+    /// it, not tab switching.
+    #[test]
+    fn the_nav_line_is_the_binding_panels_own() {
+        let tr = Lang::En.strings();
+        assert_eq!((HELP_TEXT)(tr), [tr.help_bind, tr.help_bind_nav]);
+    }
 }

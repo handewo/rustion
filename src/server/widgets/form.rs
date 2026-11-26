@@ -292,12 +292,25 @@ impl FormEditor {
         FormEvent::None
     }
 
+    /// Whether a plain character goes into a text field right now: `?` must
+    /// type there rather than open the panel's help popup. A multiline field
+    /// edits in two layers, and only the input one takes text.
+    pub fn types_question_mark(&self) -> bool {
+        self.editing_mode
+            && match self.fields[self.focused].widget {
+                FormFieldWidget::Text(_) => true,
+                FormFieldWidget::MultiLine(ref t) => t.editing_mode,
+                FormFieldWidget::Checkbox(_) | FormFieldWidget::Radio(_) => false,
+            }
+    }
+
     fn handle_editing_input(&mut self, key: KeyCode) {
         match &mut self.fields[self.focused].widget {
             FormFieldWidget::Text(t) => {
                 if t.handle_input(key) {
                     self.editing_mode = false;
                     t.clear_style();
+                    self.update_help_text();
                 }
             }
             FormFieldWidget::MultiLine(t) => {
@@ -333,6 +346,7 @@ impl FormEditor {
                 }
                 text_editing_style(self.cursor_color, &mut t.textarea);
                 text_input_position(key, &mut t.textarea);
+                self.help_text = TEXT_EDIT_HELP;
             }
             FormFieldWidget::MultiLine(t) => {
                 self.editing_mode = true;
@@ -516,5 +530,50 @@ impl FormEditor {
         if let Some(ref lines) = self.save_error {
             render_message_dialog(area, buf, &Message::Error(lines.clone()), theme, tr);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::Lang;
+
+    /// `?` opens the panel's help everywhere but in a text field taking
+    /// input: there it must type. The form says which state it is in.
+    #[test]
+    fn question_mark_types_only_where_a_field_takes_it() {
+        let mut form = FormEditor::new(vec![FormField::text(|_| "Name", None)]);
+        assert!(!form.types_question_mark());
+        form.handle_key_event(KeyCode::Enter, KeyModifiers::empty());
+        assert!(form.types_question_mark());
+        form.handle_key_event(KeyCode::Esc, KeyModifiers::empty());
+        assert!(!form.types_question_mark());
+    }
+
+    /// While a single-line field takes input, the help names the keys that
+    /// work there; it returns to the form's own help when the field is done.
+    #[test]
+    fn a_text_field_edits_under_its_own_help() {
+        let tr = Lang::En.strings();
+        let mut form = FormEditor::new(vec![FormField::text(|_| "Name", None)]);
+        assert_eq!((form.help_text)(tr), [tr.help_form_edit, tr.help_form_nav]);
+        form.handle_key_event(KeyCode::Enter, KeyModifiers::empty());
+        assert_eq!((form.help_text)(tr), [tr.help_text_edit, tr.help_text_edit_nav]);
+        form.handle_key_event(KeyCode::Esc, KeyModifiers::empty());
+        assert_eq!((form.help_text)(tr), [tr.help_form_edit, tr.help_form_nav]);
+    }
+
+    /// A multiline field edits in two layers: `?` opens the popup on the
+    /// cursor layer and types on the input layer.
+    #[test]
+    fn question_mark_separates_the_multiline_layers() {
+        let mut form = FormEditor::new(vec![FormField::multiline(|_| "Lines", None, 3)]);
+        assert!(!form.types_question_mark());
+        form.handle_key_event(KeyCode::Enter, KeyModifiers::empty());
+        assert!(!form.types_question_mark());
+        form.handle_key_event(KeyCode::Enter, KeyModifiers::empty());
+        assert!(form.types_question_mark());
+        form.handle_key_event(KeyCode::Esc, KeyModifiers::empty());
+        assert!(!form.types_question_mark());
     }
 }

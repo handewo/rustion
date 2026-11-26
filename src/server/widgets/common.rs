@@ -1,7 +1,12 @@
 pub const MAX_POPUP_WINDOW_COL: u16 = 60;
 pub const MAX_POPUP_WINDOW_ROW: u16 = 40;
+/// The help popup's own, larger cap: a help page holds more than a message.
+pub const MAX_HELP_POPUP_COL: u16 = 100;
+pub const MAX_HELP_POPUP_ROW: u16 = 50;
 pub const MIN_WINDOW_COL: u16 = 35;
-pub const MIN_WINDOW_ROW: u16 = 15;
+pub const MIN_WINDOW_ROW: u16 = 20;
+/// The footer's rows: the rule, then the one `?  help` hint.
+pub const FOOTER_ROWS: u16 = 2;
 pub const DATETIME_LENGTH: u16 = 19;
 
 pub fn format_timestamp(ts: i64) -> String {

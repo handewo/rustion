@@ -8,7 +8,6 @@ pub use form::*;
 pub use table::*;
 pub use theme::Theme;
 
-use crate::fill;
 pub use crate::i18n::Strings;
 
 use crossterm::event::KeyCode;
@@ -170,6 +169,7 @@ pub fn render_radio_buttons(
 }
 
 pub const COMMON_HELP: Help = |tr| [tr.help_form_edit, tr.help_form_nav];
+pub const TEXT_EDIT_HELP: Help = |tr| [tr.help_text_edit, tr.help_text_edit_nav];
 pub const RADIO_HELP: Help = |tr| [tr.help_radio, tr.help_form_nav];
 pub const RADIO_EDIT_HELP: Help = |tr| [tr.help_radio_edit, tr.help_form_nav];
 pub const CHECKBOX_HELP: Help = |tr| [tr.help_checkbox, tr.help_form_nav];
@@ -831,11 +831,6 @@ impl<'a> Hint<'a> {
 
 /// Space between two columns of hints.
 const HINT_GAP: usize = 4;
-/// Rows of hints the footer grows to before it cuts the rest.
-const MAX_HINT_ROWS: u16 = 6;
-/// Rows of hints the footer always keeps, so the panel above does not jump
-/// as the help changes.
-const MIN_HINT_ROWS: u16 = 3;
 
 /// Hints laid out row by row in `columns` columns: each column's key caps
 /// right-aligned to one edge and its descriptions left-aligned to the next.
@@ -916,12 +911,19 @@ impl<'a> HintGrid<'a> {
     }
 }
 
-/// The rows the footer for `help` takes at `width`: the rule, then the hints.
-/// Panels lay themselves out with it, so a narrow terminal gets a taller
-/// footer rather than hints cut off at the edge.
-pub fn footer_height(help: [&str; 2], width: u16) -> u16 {
-    let rows = HintGrid::new(&help, width).rows() as u16;
-    1 + rows.clamp(MIN_HINT_ROWS, MAX_HINT_ROWS)
+/// One hint as spans: its key cap, a space, then its description.
+fn hint_spans<'a>(hint: &Hint<'a>, theme: &Theme) -> Vec<Span<'a>> {
+    let mut spans = Vec::new();
+    let key = hint.key_span(theme);
+    let has_key = key.is_some();
+    spans.extend(key);
+    if let Some(what) = hint.what_span(theme) {
+        if has_key {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(what);
+    }
+    spans
 }
 
 /// Help text on one line, for a status bar.
@@ -931,17 +933,42 @@ fn hint_line<'a>(help: &'a str, theme: &Theme) -> Vec<Span<'a>> {
         if i > 0 {
             spans.push(Span::raw("   "));
         }
-        let key = hint.key_span(theme);
-        let has_key = key.is_some();
-        spans.extend(key);
-        if let Some(what) = hint.what_span(theme) {
-            if has_key {
-                spans.push(Span::raw(" "));
-            }
-            spans.push(what);
-        }
+        spans.extend(hint_spans(&hint, theme));
     }
     spans
+}
+
+/// The footer's one hint row: as many of `lines`' hints as `width` holds,
+/// packed left to right, always ending with the `?  help` entry. A hint
+/// that would crowd out the end entry is dropped, and so is every one
+/// after it — the popup shows the rest.
+fn packed_help_line<'a>(
+    lines: [&'a str; 2],
+    width: u16,
+    theme: &Theme,
+    tr: &Strings,
+) -> Line<'a> {
+    let end = Hint::Key("?", tr.footer_help);
+    let end_width = HintGrid::column_width(end.widths());
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    let mut used = 0usize;
+    for hint in Hint::all(&lines) {
+        let natural = HintGrid::column_width(hint.widths());
+        let gap = if used > 0 { 3 } else { 0 };
+        if used + gap + natural + 3 + end_width > width as usize {
+            break;
+        }
+        if used > 0 {
+            spans.push(Span::raw("   "));
+        }
+        spans.extend(hint_spans(&hint, theme));
+        used += gap + natural;
+    }
+    if used > 0 {
+        spans.push(Span::raw("   "));
+    }
+    spans.extend(hint_spans(&end, theme));
+    Line::from(spans)
 }
 
 /// A one-line status bar: a `state` badge in its colour, the key hints, and
@@ -967,10 +994,9 @@ pub fn render_status_bar(
 }
 
 /// The help footer at the bottom of every panel: a rule naming the theme and
-/// the language, then the key hints in aligned columns, centred as one block.
-/// Give it the height [`footer_height`] asks for; hints beyond that are cut,
-/// and the last row says how many. The language is left off the rule when
-/// there is no room for both.
+/// the language, then the hint row — as many of `lines`' hints as the width
+/// holds, always ending with `?  help`, which opens the panel's help popup.
+/// The language is left off the rule when there is no room for both.
 pub fn render_footer(area: Rect, buf: &mut Buffer, lines: [&str; 2], theme: &Theme, tr: &Strings) {
     buf.set_style(area, theme.base());
     if area.height == 0 {
@@ -1007,38 +1033,7 @@ pub fn render_footer(area: Rect, buf: &mut Buffer, lines: [&str; 2], theme: &The
         buf,
     );
 
-    let grid = HintGrid::new(&lines, hints.width);
-    let room = hints.height as usize;
-    let cut = grid.rows() > room;
-    let shown = if cut {
-        room.saturating_sub(1)
-    } else {
-        grid.rows()
-    };
-    let used = shown + cut as usize;
-
-    // One left edge for every row, so the columns line up.
-    let left = hints.width.saturating_sub(grid.width() as u16) / 2;
-    let top = (room - used) as u16 / 2;
-    for row in 0..shown {
-        let y = hints.y + top + row as u16;
-        let line_area = Rect::new(hints.x + left, y, hints.width - left, 1);
-        grid.line(row, theme).render(line_area, buf);
-    }
-    if cut {
-        let y = hints.y + top + shown as u16;
-        let hidden = grid.hints.len() - shown * grid.columns;
-        Line::styled(fill!(tr.footer_more, count = hidden), theme.muted)
-            .centered()
-            .render(
-                Rect {
-                    y,
-                    height: 1,
-                    ..hints
-                },
-                buf,
-            );
-    }
+    packed_help_line(lines, hints.width, theme, tr).render(hints, buf);
 }
 
 /// A row of tabs that scrolls to keep the selected one in view when the
@@ -1225,6 +1220,56 @@ pub fn render_message_popup(
     render_message_dialog(popup_area, buf, message, theme, tr);
 }
 
+/// The help popup every footer's `?  help` opens: the two help lines as
+/// the footer drew them — key caps in aligned columns — but complete,
+/// reflowing to more columns on a narrow terminal instead of being cut.
+/// Sized to its grid like the message dialogs, capped at its own larger
+/// window constants ([`common::MAX_HELP_POPUP_COL`]/[`MAX_HELP_POPUP_ROW`]),
+/// so one page holds more than a message does.
+pub fn render_help_popup(
+    area: Rect,
+    buf: &mut Buffer,
+    lines: [&str; 2],
+    theme: &Theme,
+    tr: &Strings,
+) {
+    let cap = common::MAX_HELP_POPUP_COL.min(area.width);
+    let grid = HintGrid::new(&lines, cap.saturating_sub(DIALOG_FRAME_WIDTH));
+    let width = (grid.width() as u16 + DIALOG_FRAME_WIDTH)
+        .max(tr.title_help.width() as u16 + 4)
+        .min(cap);
+    let height = (grid.rows() as u16 + DIALOG_FRAME_HEIGHT)
+        .min(common::MAX_HELP_POPUP_ROW)
+        .min(area.height);
+    let popup = centered_area(area, width, height);
+    theme.clear(popup, buf);
+    let block = popup_block(tr.title_help, theme);
+    let inner = block.inner(popup);
+    block.render(popup, buf);
+    // Lay the grid out again at the width actually inside, and centre it.
+    let grid = HintGrid::new(&lines, inner.width);
+    let left = inner.width.saturating_sub(grid.width() as u16) / 2;
+    let top = (inner.height.saturating_sub(grid.rows() as u16)) / 2;
+    for row in 0..grid.rows().min(inner.height as usize) {
+        grid.line(row, theme).render(
+            Rect {
+                x: inner.x + left,
+                y: inner.y + top as u16 + row as u16,
+                width: inner.width - left,
+                height: 1,
+            },
+            buf,
+        );
+    }
+}
+
+/// Whether `code` closes an open help popup: `Esc`, `?` or `q`. Every
+/// other key is swallowed while the popup is open, so the panel below
+/// does not act on it.
+pub fn closes_help_popup(code: KeyCode) -> bool {
+    matches!(code, KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1289,8 +1334,9 @@ mod tests {
                 theme,
                 EN,
             );
-            render_footer(
-                footer,
+            render_footer(footer, &mut buf, ["(q) quit | help", "(Read-only)"], theme, EN);
+            render_help_popup(
+                table,
                 &mut buf,
                 ["(q) quit | help", "(Read-only)"],
                 theme,
@@ -1318,36 +1364,54 @@ mod tests {
     fn the_footer_names_the_theme() {
         let area = Rect::new(0, 0, 40, 4);
         let mut buf = Buffer::empty(area);
-        render_footer(
-            area,
-            &mut buf,
-            ["", ""],
-            Theme::of(ThemeName::OledWhite),
-            EN,
-        );
+        render_footer(area, &mut buf, ["", ""], Theme::of(ThemeName::OledWhite), EN);
         assert!(text(&buf).contains(" theme  oled-white "), "{}", text(&buf));
     }
 
-    /// The footer tells keys from what they do: a key is a key cap, its
-    /// description is muted text.
+    /// The hint row packs in as many hints as fit and always ends with
+    /// `?  help`; a narrower width cuts hints from the tail, never the end
+    /// entry.
     #[test]
-    fn the_footer_draws_keys_apart_from_their_descriptions() {
+    fn the_footer_fills_with_hints_and_ends_with_help() {
         let theme = &theme::NORD;
-        let area = Rect::new(0, 0, 60, 4);
-        let mut buf = Buffer::empty(area);
-        render_footer(area, &mut buf, ["(Esc) quit | (t) theme", ""], theme, EN);
+        for (width, shown) in [(120u16, &["add", "grant role", "move around"][..]), (60, &["add"][..])] {
+            let area = Rect::new(0, 0, width, common::FOOTER_ROWS);
+            let mut buf = Buffer::empty(area);
+            render_footer(area, &mut buf, MANAGE_HELP, theme, EN);
+            assert_eq!(buf.area.height, common::FOOTER_ROWS);
+            let row = rows(&buf)[1].trim_end().to_string();
+            assert!(row.ends_with("help"), "{width}: {row}");
+            for what in shown {
+                assert!(row.contains(what), "{width}: {row}");
+            }
+        }
 
-        let (x, y) = find(&buf, "Esc");
-        let key = &buf[(x, y)];
-        assert_eq!((key.fg, key.bg), (theme.bar_fg, theme.bar_bg));
-        let (x, y) = find(&buf, "quit");
-        let what = &buf[(x, y)];
-        assert_eq!((what.fg, what.bg), (theme.muted, theme.bg));
-        assert!(
-            !text(&buf).contains('('),
-            "brackets left in: {}",
-            text(&buf)
-        );
+        // The tail hints a middle width cannot hold are cut, not wrapped.
+        let area = Rect::new(0, 0, 60, common::FOOTER_ROWS);
+        let mut buf = Buffer::empty(area);
+        render_footer(area, &mut buf, MANAGE_HELP, theme, EN);
+        assert!(!rows(&buf)[1].contains("zoom in/out"), "{}", rows(&buf)[1]);
+
+        // A width that holds nothing else: only the `?  help` entry.
+        let area = Rect::new(0, 0, 15, common::FOOTER_ROWS);
+        let mut buf = Buffer::empty(area);
+        render_footer(area, &mut buf, MANAGE_HELP, theme, EN);
+        // The key cap pads the key: ` ? ` + ` ` + `help`.
+        assert_eq!(rows(&buf)[1].trim(), "?  help", "{}", rows(&buf)[1]);
+    }
+
+    /// The `?` stays a key cap and its word stays muted, whatever fills the
+    /// row around them.
+    #[test]
+    fn the_footers_help_entry_stays_a_key_cap() {
+        let theme = &theme::NORD;
+        let area = Rect::new(0, 0, 120, common::FOOTER_ROWS);
+        let mut buf = Buffer::empty(area);
+        render_footer(area, &mut buf, MANAGE_HELP, theme, EN);
+        let (x, y) = find(&buf, "?");
+        assert_eq!((buf[(x, y)].fg, buf[(x, y)].bg), (theme.bar_fg, theme.bar_bg));
+        let (x, y) = find(&buf, "help");
+        assert_eq!((buf[(x, y)].fg, buf[(x, y)].bg), (theme.muted, theme.bg));
     }
 
     const MANAGE_HELP: [&str; 2] = [
@@ -1355,76 +1419,62 @@ mod tests {
         "(Tab/Shift Tab) next/previous tab | (+/-) zoom in/out | (PgUp/PgDn) page up/down",
     ];
 
-    fn footer(help: [&str; 2], width: u16) -> Buffer {
-        let area = Rect::new(0, 0, width, footer_height(help, width));
+    /// The help popup shows every key, cuts nothing, and names itself.
+    #[test]
+    fn the_help_popup_shows_every_key() {
+        let area = Rect::new(0, 0, 100, 30);
         let mut buf = Buffer::empty(area);
-        render_footer(area, &mut buf, help, &theme::NORD, EN);
-        buf
+        render_help_popup(area, &mut buf, MANAGE_HELP, &theme::NORD, EN);
+        find(&buf, "Help");
+        for what in ["add", "edit", "delete", "grant role", "move around", "zoom in/out"] {
+            find(&buf, what);
+        }
+        assert!(!text(&buf).contains('…'));
     }
 
-    /// Hints sit in columns: in each one the key caps end at one edge and the
-    /// descriptions start at the next, whatever the width of the keys.
+    /// A terminal at the minimum width still shows every hint, reflowed.
     #[test]
-    fn the_footer_lines_its_hints_up_in_columns() {
-        let buf = footer(MANAGE_HELP, 80);
-        // The first column at 80 wide, top to bottom.
-        let grid = HintGrid::new(&MANAGE_HELP, 80);
-        let column: Vec<(&str, &str)> = grid
-            .hints
-            .iter()
-            .step_by(grid.columns)
-            .filter_map(|h| match h {
-                Hint::Key(key, what) => Some((*key, *what)),
-                _ => None,
-            })
-            .collect();
-        assert!(column.len() >= 3, "{column:?}");
-        // Row `i` of the grid is the footer's row `i + 1`, under the rule. A
-        // short key like ` d ` can turn up elsewhere, so look only there.
-        let at = |row: usize, needle: &str| {
-            let line = &rows(&buf)[row + 1];
-            let i = line
-                .find(needle)
-                .unwrap_or_else(|| panic!("{needle:?} not in {line:?}"));
-            line[..i].chars().count() as u16
-        };
-        let key_ends = column
-            .iter()
-            .enumerate()
-            .map(|(row, (key, _))| at(row, &format!(" {key} ")) + key.chars().count() as u16 + 2)
-            .collect::<Vec<_>>();
-        let starts = column
-            .iter()
-            .enumerate()
-            .map(|(row, (_, what))| at(row, what))
-            .collect::<Vec<_>>();
-        assert!(key_ends.windows(2).all(|w| w[0] == w[1]), "{key_ends:?}");
-        assert!(starts.windows(2).all(|w| w[0] == w[1]), "{starts:?}");
-        assert_eq!(starts[0], key_ends[0] + 1);
-    }
-
-    /// A narrower terminal gets a taller footer, with every key still shown.
-    #[test]
-    fn the_footer_grows_on_a_narrow_terminal() {
-        assert!(footer_height(MANAGE_HELP, 60) > footer_height(MANAGE_HELP, 120));
-        assert_eq!(footer_height(["(q) quit", ""], 120), 1 + MIN_HINT_ROWS);
-        let buf = footer(MANAGE_HELP, 60);
-        for hint in MANAGE_HELP.iter().flat_map(|l| l.split(" | ")) {
-            let (_, what) = hint.split_once(") ").unwrap();
+    fn the_help_popup_reflows_on_a_narrow_terminal() {
+        let area = Rect::new(0, 0, common::MIN_WINDOW_COL, 20);
+        let mut buf = Buffer::empty(area);
+        render_help_popup(area, &mut buf, MANAGE_HELP, &theme::NORD, EN);
+        for what in ["add", "edit", "delete", "grant role", "move around", "zoom in/out"] {
             find(&buf, what);
         }
     }
 
-    /// Past its tallest the footer cuts whole hints and counts them.
+    /// On a large terminal the popup caps itself and sits centered.
     #[test]
-    fn the_footer_counts_the_keys_it_cannot_show() {
-        let buf = footer(MANAGE_HELP, 25);
-        assert_eq!(buf.area.height, 1 + MAX_HINT_ROWS);
-        let shown = MAX_HINT_ROWS as usize - 1;
-        let total = MANAGE_HELP.iter().flat_map(|l| l.split(" | ")).count();
-        find(&buf, &format!("… {} more", total - shown));
-        find(&buf, "theme");
-        assert!(!text(&buf).contains("quit"), "{}", rows(&buf).join("\n"));
+    fn the_help_popup_caps_itself() {
+        let area = Rect::new(0, 0, 200, 60);
+        let mut buf = Buffer::empty(area);
+        render_help_popup(area, &mut buf, MANAGE_HELP, &theme::NORD, EN);
+        let (x, _) = find(&buf, "Help");
+        assert!(x >= (200 - common::MAX_HELP_POPUP_COL) / 2, "outside the cap");
+    }
+
+    /// Esc, `?` and `q` all close an open help popup; nothing else does.
+    #[test]
+    fn the_help_popup_closes_on_esc_question_and_q() {
+        assert!(closes_help_popup(KeyCode::Esc));
+        assert!(closes_help_popup(KeyCode::Char('?')));
+        assert!(closes_help_popup(KeyCode::Char('q')));
+        assert!(!closes_help_popup(KeyCode::Char('a')));
+        assert!(!closes_help_popup(KeyCode::Enter));
+    }
+
+    /// Keys are key caps and their descriptions are muted text, as in the footer.
+    #[test]
+    fn the_help_popup_draws_keys_apart_from_their_descriptions() {
+        let theme = &theme::NORD;
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buf = Buffer::empty(area);
+        render_help_popup(area, &mut buf, MANAGE_HELP, theme, EN);
+        let (x, y) = find(&buf, "Esc");
+        assert_eq!((buf[(x, y)].fg, buf[(x, y)].bg), (theme.bar_fg, theme.bar_bg));
+        let (x, y) = find(&buf, "quit");
+        assert_eq!((buf[(x, y)].fg, buf[(x, y)].bg), (theme.muted, theme.bg));
+        assert!(!text(&buf).contains('('), "brackets left in: {}", text(&buf));
     }
 
     #[test]
@@ -1531,7 +1581,7 @@ mod tests {
         assert!(!shown.contains("English"), "{shown}");
     }
 
-    /// Every language's help is drawn as key caps: the footer still finds the
+    /// Every language's help is drawn as key caps: the popup still finds the
     /// keys once the descriptions are translated, and every one is shown.
     #[test]
     fn translated_help_keeps_its_key_caps() {
@@ -1539,11 +1589,11 @@ mod tests {
         for lang in Lang::ALL {
             let tr = lang.strings();
             let help = [tr.help_manage_user, tr.help_manage_nav];
-            let area = Rect::new(0, 0, 120, footer_height(help, 120));
+            let area = Rect::new(0, 0, 120, 30);
             let mut buf = Buffer::empty(area);
-            render_footer(area, &mut buf, help, theme, tr);
-            let (x, y) = find(&buf, " Esc ");
-            assert_eq!(buf[(x + 1, y)].bg, theme.bar_bg, "{lang}");
+            render_help_popup(area, &mut buf, help, theme, tr);
+            let (x, y) = find(&buf, "Esc");
+            assert_eq!(buf[(x, y)].bg, theme.bar_bg, "{lang}");
             assert!(!text(&buf).contains("(Esc)"), "{lang}: {}", text(&buf));
         }
     }

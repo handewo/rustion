@@ -9,8 +9,8 @@ use crate::database::models::*;
 use crate::i18n::Lang;
 use crate::server::event_log;
 use crate::server::widgets::{
-    AdminTable, DisplayMode, FieldsToArray, Help, TabBar, TableData as TD, Theme, footer_height,
-    render_footer,
+    AdminTable, DisplayMode, FieldsToArray, Help, TabBar, TableData as TD, Theme,
+    closes_help_popup, common::FOOTER_ROWS, render_footer, render_help_popup,
 };
 use crossterm::event::{self, KeyCode, KeyModifiers, NoTtyEvent, SenderWriter};
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
@@ -66,6 +66,7 @@ where
     lang: Lang,
     backend: Arc<B>,
     handler_id: Uuid,
+    help_open: bool,
 }
 
 impl<B> App<B>
@@ -93,6 +94,7 @@ where
             backend,
             handler_id,
             items: data,
+            help_open: false,
         }
     }
 
@@ -125,6 +127,12 @@ where
             terminal.draw(|frame| self.render(frame)).await?;
 
             if let Some(key) = event::read(&tty).await?.as_key_press_event() {
+                if self.help_open {
+                    if closes_help_popup(key.code) {
+                        self.help_open = false;
+                    }
+                    continue;
+                }
                 let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
                 let items_len = self.items.len();
                 match key.code {
@@ -145,6 +153,7 @@ where
                     KeyCode::Tab => self.next_tab().await,
                     KeyCode::BackTab => self.previous_tab().await,
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Char('?') => self.help_open = true,
                     KeyCode::Char('j') | KeyCode::Down => self.table.next_row(items_len),
                     KeyCode::Char('k') | KeyCode::Up => self.table.previous_row(items_len),
                     KeyCode::Char('l') | KeyCode::Right => self.table.next_column(),
@@ -161,7 +170,7 @@ where
         let layout = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(5),
-            Constraint::Length(footer_height(INFO_TEXT(tr), frame.area().width)),
+            Constraint::Length(FOOTER_ROWS),
         ]);
         let [header_area, table_area, footer_area] = layout.areas(frame.area());
 
@@ -177,6 +186,9 @@ where
             self.theme,
             tr,
         );
+        if self.help_open {
+            render_help_popup(table_area, frame.buffer_mut(), INFO_TEXT(tr), self.theme, tr);
+        }
         self.render_footer(frame, footer_area);
     }
 
