@@ -11,6 +11,9 @@ use thiserror::Error;
 /// type.
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Pty window is zero-sized")]
+    ZeroWindow,
+
     #[error(transparent)]
     Russh(#[from] russh::Error),
 

@@ -312,6 +312,10 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             .channel_session
             .get_mut(&channel)
             .ok_or(ServerError::ChannelNotExist)?;
+
+        if col_width == 0 || row_height == 0 {
+            return Err(Error::ZeroWindow);
+        }
         channel_session.window_size = Some((col_width, row_height, pix_width, pix_height));
         match channel_session.app {
             Application::ConnectTarget(ref mut app) => {
@@ -597,6 +601,10 @@ impl<B: 'static + HandlerBackend + Send + Sync> ru_server::Handler for BastionHa
             .channel_session
             .get_mut(&channel)
             .ok_or(ServerError::ChannelNotExist)?;
+
+        if col_width == 0 || row_height == 0 {
+            return Err(Error::ZeroWindow);
+        }
         channel_session.pty_modes = Some(Vec::from(modes));
         channel_session.pty_term = Some(term.to_string());
         channel_session.window_size = Some((col_width, row_height, pix_width, pix_height));
