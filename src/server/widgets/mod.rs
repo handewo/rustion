@@ -809,6 +809,15 @@ impl<'a> Hint<'a> {
         }
     }
 
+    /// The same widths as the inline surfaces draw this hint: the key cut
+    /// to its primary keys.
+    fn concise_widths(&self) -> (usize, usize) {
+        match self {
+            Hint::Key(key, what) => (concise_key(key).width() + 2, what.width()),
+            hint => hint.widths(),
+        }
+    }
+
     fn key_span(&self, theme: &Theme) -> Option<Span<'static>> {
         match self {
             Hint::Key(key, _) => Some(Span::styled(format!(" {key} "), key_style(theme))),
@@ -827,6 +836,23 @@ impl<'a> Hint<'a> {
             Hint::Plain(what) => Some(Span::styled(*what, Style::new().fg(theme.fg))),
         }
     }
+}
+
+/// A key list cut to its primary keys, as the inline surfaces — the
+/// footer's hint row and the status bar — show it: every alias after the
+/// first key goes (a `Ctrl+…` combo, or a lowercase letter word like
+/// `hjkl`, `jk`, `i`), and at most the first two keys stay. The help
+/// popup spells out the whole list, so the cut is safe.
+fn concise_key(key: &str) -> String {
+    let mut kept: Vec<&str> = Vec::new();
+    for (i, part) in key.split('/').filter(|p| !p.is_empty()).enumerate() {
+        let alias = i > 0
+            && (part.starts_with("Ctrl+") || part.chars().all(|c| c.is_ascii_lowercase()));
+        if !alias && kept.len() < 2 {
+            kept.push(part);
+        }
+    }
+    kept.join("/")
 }
 
 /// Space between two columns of hints.
@@ -911,11 +937,19 @@ impl<'a> HintGrid<'a> {
     }
 }
 
-/// One hint as spans: its key cap, a space, then its description.
+/// One hint as spans for the inline surfaces — the footer's packed row and
+/// the status bar: its key cap, cut to its primary keys, a space, then its
+/// description. The popup's `HintGrid` draws the key in full instead.
 fn hint_spans<'a>(hint: &Hint<'a>, theme: &Theme) -> Vec<Span<'a>> {
-    let mut spans = Vec::new();
-    let key = hint.key_span(theme);
+    let key = match hint {
+        Hint::Key(key, _) => Some(Span::styled(
+            format!(" {} ", concise_key(key)),
+            key_style(theme),
+        )),
+        hint => hint.key_span(theme),
+    };
     let has_key = key.is_some();
+    let mut spans = Vec::new();
     spans.extend(key);
     if let Some(what) = hint.what_span(theme) {
         if has_key {
@@ -941,7 +975,8 @@ fn hint_line<'a>(help: &'a str, theme: &Theme) -> Vec<Span<'a>> {
 /// The footer's one hint row: as many of `lines`' hints as `width` holds,
 /// packed left to right, always ending with the `?  help` entry. A hint
 /// that would crowd out the end entry is dropped, and so is every one
-/// after it — the popup shows the rest.
+/// after it — the popup shows the rest. Each key is cut to its primary
+/// keys, again because the popup spells out every alias.
 fn packed_help_line<'a>(
     lines: [&'a str; 2],
     width: u16,
@@ -953,7 +988,7 @@ fn packed_help_line<'a>(
     let mut spans: Vec<Span<'a>> = Vec::new();
     let mut used = 0usize;
     for hint in Hint::all(&lines) {
-        let natural = HintGrid::column_width(hint.widths());
+        let natural = HintGrid::column_width(hint.concise_widths());
         let gap = if used > 0 { 3 } else { 0 };
         if used + gap + natural + 3 + end_width > width as usize {
             break;
@@ -1412,6 +1447,76 @@ mod tests {
         assert_eq!((buf[(x, y)].fg, buf[(x, y)].bg), (theme.bar_fg, theme.bar_bg));
         let (x, y) = find(&buf, "help");
         assert_eq!((buf[(x, y)].fg, buf[(x, y)].bg), (theme.muted, theme.bg));
+    }
+
+    /// A key list is cut to its primary keys: the aliases after the first
+    /// key — `Ctrl+…` combos and lowercase letter words like `hjkl` — go,
+    /// and at most the first two keys stay.
+    #[test]
+    fn a_key_list_is_cut_to_its_primary_keys() {
+        for (key, cut) in [
+            ("q/Esc/Ctrl+c", "q/Esc"),
+            ("PgUp/PgDn/Ctrl+b/f", "PgUp/PgDn"),
+            ("q/Esc/Ctrl+c/Tab/Shift Tab", "q/Esc"),
+            ("q/Esc/Tab/Shift Tab", "q/Esc"),
+            ("Tab/Shift Tab/↑↓/jk", "Tab/Shift Tab"),
+            ("↑↓←→/hjkl", "↑↓←→"),
+            ("Space/Enter/i/a", "Space/Enter"),
+            ("1-9/↑↓/jk", "1-9/↑↓"),
+            // Single keys and pairs of primaries stand as they are.
+            ("Ctrl+s", "Ctrl+s"),
+            ("Enter/Esc", "Enter/Esc"),
+            ("Home/End", "Home/End"),
+            ("+/-", "+/-"),
+        ] {
+            assert_eq!(concise_key(key), cut, "{key}");
+        }
+    }
+
+    /// The footer cuts each key list to its primary keys; the help popup
+    /// spells out every alias.
+    #[test]
+    fn the_footer_cuts_key_lists_but_the_popup_keeps_them() {
+        let lines = [
+            "(q/Esc/Ctrl+c) quit | (PgUp/PgDn/Ctrl+b/f) page up/down",
+            "(↑↓←→/hjkl) move around",
+        ];
+        let area = Rect::new(0, 0, 120, common::FOOTER_ROWS);
+        let mut buf = Buffer::empty(area);
+        render_footer(area, &mut buf, lines, &theme::NORD, EN);
+        let row = &rows(&buf)[1];
+        for shown in [" q/Esc  quit", " PgUp/PgDn  page up/down", " ↑↓←→  move around"] {
+            assert!(row.contains(shown), "{shown} missing: {row}");
+        }
+        assert!(!row.contains("Ctrl"), "{row}");
+        assert!(!row.contains("hjkl"), "{row}");
+
+        let area = Rect::new(0, 0, 120, 30);
+        let mut buf = Buffer::empty(area);
+        render_help_popup(area, &mut buf, lines, &theme::NORD, EN);
+        let popup = text(&buf);
+        for full in ["q/Esc/Ctrl+c", "PgUp/PgDn/Ctrl+b/f", "↑↓←→/hjkl"] {
+            assert!(popup.contains(full), "{full} missing from the popup");
+        }
+    }
+
+    /// The status bar cuts key lists the same way the footer does.
+    #[test]
+    fn the_status_bar_cuts_key_lists_too() {
+        let area = Rect::new(0, 0, 80, 1);
+        let mut buf = Buffer::empty(area);
+        render_status_bar(
+            area,
+            &mut buf,
+            ("PAUSED", Color::Yellow),
+            "(Space) play | (q/Ctrl+c) exit | (PgUp/PgDn/Ctrl+b/f) scroll back/forward",
+            "",
+            &theme::NORD,
+        );
+        let bar = &rows(&buf)[0];
+        assert!(bar.contains(" q  exit"), "{bar}");
+        assert!(bar.contains(" PgUp/PgDn  scroll back/forward"), "{bar}");
+        assert!(!bar.contains("Ctrl"), "{bar}");
     }
 
     const MANAGE_HELP: [&str; 2] = [
