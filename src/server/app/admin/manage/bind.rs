@@ -423,11 +423,23 @@ mod tests {
     use super::*;
     use crate::i18n::Lang;
 
-    /// The binding panel has no tabs: its nav line names the keys that close
-    /// it, not tab switching.
+    /// The binding tab is one of the manage tabs — its editor is the tab,
+    /// so `Tab`/`Shift Tab` (handed back by `handle_key_event`) switch tabs
+    /// and `q`/`Esc`/`Ctrl+c` quit, as on every tab. Nothing closes.
     #[test]
-    fn the_nav_line_is_the_binding_panels_own() {
+    fn the_help_names_tab_switching_and_quit() {
         let tr = Lang::En.strings();
         assert_eq!((HELP_TEXT)(tr), [tr.help_bind, tr.help_bind_nav]);
+        assert!(
+            tr.help_bind_nav.starts_with("(Tab/Shift Tab) next/previous tab"),
+            "{}",
+            tr.help_bind_nav
+        );
+        assert!(!tr.help_bind_nav.contains("close"), "{}", tr.help_bind_nav);
+        assert!(
+            tr.help_bind.contains("(q/Esc/Ctrl+c) quit"),
+            "{}",
+            tr.help_bind
+        );
     }
 }

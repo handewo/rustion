@@ -657,3 +657,29 @@ fn member_kind(is_group: bool, group_type: GroupType) -> MemberKind {
         GroupType::Action => MemberKind::Action,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::Lang;
+
+    /// The three group tabs are manage tabs — the tree is the tab, so
+    /// `Tab`/`Shift Tab` (handed back by `handle_key_event`) switch tabs and
+    /// `q`/`Esc`/`Ctrl+c` quit, as on every tab. Nothing closes.
+    #[test]
+    fn the_help_names_tab_switching_and_quit() {
+        let tr = Lang::En.strings();
+        assert_eq!((HELP_TEXT)(tr), [tr.help_group, tr.help_group_nav]);
+        assert!(
+            tr.help_group_nav.starts_with("(Tab/Shift Tab) next/previous tab"),
+            "{}",
+            tr.help_group_nav
+        );
+        assert!(!tr.help_group_nav.contains("close"), "{}", tr.help_group_nav);
+        assert!(
+            tr.help_group.contains("(q/Esc/Ctrl+c) quit"),
+            "{}",
+            tr.help_group
+        );
+    }
+}
