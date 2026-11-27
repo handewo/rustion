@@ -5,9 +5,9 @@ use crate::server::error::ServerError;
 use crate::server::extend_policy;
 use crate::server::widgets::{
     AdminTable, DisplayMode, FormEditor, FormEvent, FormField, Help, Message, Theme, centered_area,
+    closes_help_popup,
     common::{DATETIME_LENGTH, FOOTER_ROWS, MAX_POPUP_WINDOW_COL, MAX_POPUP_WINDOW_ROW},
-    closes_help_popup, popup_block, render_footer, render_help_popup, render_message_popup,
-    render_status_bar,
+    popup_block, render_footer, render_help_popup, render_message_popup, render_status_bar,
     render_title_bar,
 };
 use bytes::Bytes;
@@ -714,11 +714,11 @@ where
                     }
                     continue;
                 }
-                if let KeyCode::Char('?') = key.code {
-                    if !(self.setting.editing_mode && self.setting.form.types_question_mark()) {
-                        self.help_open = true;
-                        continue;
-                    }
+                if let KeyCode::Char('?') = key.code
+                    && !(self.setting.editing_mode && self.setting.form.types_question_mark())
+                {
+                    self.help_open = true;
+                    continue;
                 }
 
                 if self.setting.editing_mode {
@@ -814,7 +814,13 @@ where
             self.render_setting_popup(frame, table_area);
         }
         if self.help_open {
-            render_help_popup(table_area, frame.buffer_mut(), self.help_text(), self.theme, tr);
+            render_help_popup(
+                table_area,
+                frame.buffer_mut(),
+                self.help_text(),
+                self.theme,
+                tr,
+            );
         }
         self.render_footer(frame, footer_area);
     }

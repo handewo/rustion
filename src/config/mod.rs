@@ -138,6 +138,10 @@ fn default_command_timeout() -> Duration {
     Duration::ZERO
 }
 
+fn default_history_size() -> usize {
+    3_000
+}
+
 fn default_database() -> String {
     DEFAULT_DATABASE_URL.to_string()
 }
@@ -192,6 +196,19 @@ pub struct Config {
     #[serde(default = "default_command_timeout")]
     #[serde(with = "humantime_serde")]
     pub command_timeout: Duration,
+    /// How many lines each user's history keeps at each of the bastion's own
+    /// prompts (the admin shell, the target selector and the limited shell keep
+    /// separate lists), e.g. `25000`. `0` turns the histories off — the prompts
+    /// then recall nothing, as they always did before the database-backed
+    /// history existed.
+    ///
+    /// The number bounds both the `command_history` table, pruned to it on
+    /// write, and what one session preloads into memory. The default of 3,000
+    /// sits between what stock zsh and bash ship (a thousand or two) and what
+    /// a configured modern shell keeps (oh-my-zsh's ten thousand), and costs
+    /// at most a few hundred kilobytes of rows per user per prompt.
+    #[serde(default = "default_history_size")]
+    pub history_size: usize,
     /// sea-orm connection URL. The scheme picks the backend, so this is the
     /// whole of the database choice — see [`SUPPORTED_SCHEMES`].
     #[serde(default = "default_database")]
@@ -258,6 +275,7 @@ impl Config {
             log_level: LogLevel::default(),
             policy_reload_interval: default_policy_reload_interval(),
             command_timeout: default_command_timeout(),
+            history_size: default_history_size(),
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -414,6 +432,7 @@ impl std::fmt::Display for Config {
             log_level: {}\r
             policy_reload_interval: {}\r
             command_timeout: {}\r
+            history_size: {}\r
             database: {}\r
             enable_record: {}\r
             record_input: {}\r
@@ -440,6 +459,7 @@ impl std::fmt::Display for Config {
             self.log_level,
             humantime::format_duration(self.policy_reload_interval),
             humantime::format_duration(self.command_timeout),
+            self.history_size,
             redact_url(&self.database),
             self.enable_record,
             self.record_input,
@@ -473,6 +493,7 @@ mod tests {
             log_level: LogLevel::Info,
             policy_reload_interval: Duration::ZERO,
             command_timeout: Duration::ZERO,
+            history_size: default_history_size(),
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -499,6 +520,7 @@ mod tests {
             log_level: LogLevel::Info,
             policy_reload_interval: Duration::ZERO,
             command_timeout: Duration::ZERO,
+            history_size: default_history_size(),
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -526,6 +548,7 @@ mod tests {
             log_level: LogLevel::Info,
             policy_reload_interval: Duration::ZERO,
             command_timeout: Duration::ZERO,
+            history_size: default_history_size(),
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -559,6 +582,7 @@ mod tests {
             log_level: LogLevel::Info,
             policy_reload_interval: Duration::ZERO,
             command_timeout: Duration::ZERO,
+            history_size: default_history_size(),
             database: default_database(),
             enable_record: false,
             record_input: false,
@@ -590,6 +614,20 @@ mod tests {
         );
         assert!(parse(r#"policy_reload_interval = "often""#).is_err());
         assert_eq!(Config::default().policy_reload_interval, Duration::ZERO);
+    }
+
+    #[test]
+    fn test_history_size() {
+        #[derive(Deserialize)]
+        struct Only {
+            #[serde(default = "default_history_size")]
+            history_size: usize,
+        }
+        let parse = |s: &str| toml::from_str::<Only>(s).map(|o| o.history_size);
+        assert_eq!(parse("").unwrap(), 3_000, "the default");
+        assert_eq!(parse("history_size = 0").unwrap(), 0, "zero disables");
+        assert_eq!(parse("history_size = 25000").unwrap(), 25_000);
+        assert_eq!(Config::default().history_size, 3_000);
     }
 
     #[test]

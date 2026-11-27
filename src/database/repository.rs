@@ -8,7 +8,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use log::{debug, info};
-use sea_orm::ActiveValue::{Set, Unchanged};
+use sea_orm::ActiveValue::{NotSet, Set, Unchanged};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectOptions, ConnectionTrait, Database,
     DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Schema,
@@ -17,14 +17,15 @@ use sea_orm::{
 use uuid::Uuid;
 
 use crate::database::entity::{
-    casbin_name, casbin_rule, command_set, event_log, secret, session_recording, target,
-    target_secret, user,
+    casbin_name, casbin_rule, command_history, command_set, event_log, secret, session_recording,
+    target, target_secret, user,
 };
 use crate::database::error::DatabaseError;
 use crate::database::models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, CommandSet, Dependents, EventLog, GroupType,
-    NamePtype, ObjectGroup, PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo,
-    SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName, User, UserWithRole,
+    CasbinName, CasbinRule, CasbinRuleGroup, CommandHistory, CommandSet, Dependents, EventLog,
+    GroupType, HistoryScope, NamePtype, ObjectGroup, PermissionPolicy, Ptype, RecordingView, Role,
+    Secret, SecretInfo, SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName, User,
+    UserWithRole,
 };
 use crate::database::{DatabaseRepository, redact_url};
 
@@ -77,6 +78,7 @@ impl SeaOrmRepository {
             && exists!(event_log::Entity)
             && exists!(session_recording::Entity)
             && exists!(command_set::Entity)
+            && exists!(command_history::Entity)
     }
 }
 
@@ -115,6 +117,7 @@ impl DatabaseRepository for SeaOrmRepository {
             .register(event_log::Entity)
             .register(session_recording::Entity)
             .register(command_set::Entity)
+            .register(command_history::Entity)
             .sync(&self.db)
             .await?;
 
@@ -756,6 +759,110 @@ impl DatabaseRepository for SeaOrmRepository {
             .into_iter()
             .map(EventLog::from)
             .collect())
+    }
+
+    // ------------------------------------------------------ command history
+
+    async fn insert_history(
+        &self,
+        mut entry: command_history::ActiveModel,
+    ) -> Result<(), DatabaseError> {
+        // A stamp the caller set is the line's accept time and must survive the
+        // write-behind lag; only fill one in when absent, unlike `insert_log`,
+        // which always stamps. `exec` for the same reason as there: the row is
+        // never read back by the writer, and `id` is left `NotSet` for the
+        // database to assign.
+        if matches!(entry.created_at, NotSet) {
+            entry.created_at = Set(Utc::now().timestamp_millis());
+        }
+        command_history::Entity::insert(entry).exec(&self.db).await?;
+        Ok(())
+    }
+
+    async fn list_history(
+        &self,
+        user_id: Uuid,
+        scope: HistoryScope,
+    ) -> Result<Vec<CommandHistory>, DatabaseError> {
+        Ok(command_history::Entity::find()
+            .filter(command_history::Column::UserId.eq(user_id))
+            .filter(command_history::Column::Scope.eq(scope))
+            // Oldest first: the preload walks this order into the editor, and
+            // reedline's navigation relies on "greater id" meaning "more recent".
+            .order_by_asc(command_history::Column::Id)
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(CommandHistory::from)
+            .collect())
+    }
+
+    async fn prune_history(
+        &self,
+        user_id: Uuid,
+        scope: HistoryScope,
+        keep: usize,
+    ) -> Result<(), DatabaseError> {
+        // One `(user, scope)` filter spelled once. A macro, not a closure:
+        // the finder and the deleter are different types, and a closure
+        // would have to pick one.
+        macro_rules! pair {
+            ($q:expr) => {
+                $q.filter(command_history::Column::UserId.eq(user_id))
+                    .filter(command_history::Column::Scope.eq(scope))
+            };
+        }
+
+        // The id of the oldest survivor: the `keep`-th newest row, reached by
+        // stepping past the `keep - 1` newer ones. Deleting "below that id"
+        // spells the bound as a plain comparison rather than a `NOT IN`
+        // subquery, which MySQL would refuse in a `DELETE`.
+        let cutoff = if keep == 0 {
+            // Keeping nothing deletes the pair outright. A `limit(0)` lookup
+            // would find no cutoff row, which elsewhere means "fewer than
+            // `keep` rows — nothing to prune"; zero is the opposite case, so
+            // it cannot share that path.
+            pair!(command_history::Entity::delete_many())
+                .exec(&self.db)
+                .await?;
+            return Ok(());
+        } else {
+            pair!(command_history::Entity::find())
+                .order_by_desc(command_history::Column::Id)
+                .offset(keep as u64 - 1)
+                .limit(1)
+                .one(&self.db)
+                .await?
+        };
+        // No `keep`-th newest row: there are fewer than `keep` lines, so every
+        // one of them is a survivor.
+        if let Some(cutoff) = cutoff {
+            pair!(command_history::Entity::delete_many())
+                .filter(command_history::Column::Id.lt(cutoff.id))
+                .exec(&self.db)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn delete_history(&self, id: i64) -> Result<(), DatabaseError> {
+        command_history::Entity::delete_by_id(id)
+            .exec(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    async fn clear_history(
+        &self,
+        user_id: Uuid,
+        scope: HistoryScope,
+    ) -> Result<(), DatabaseError> {
+        command_history::Entity::delete_many()
+            .filter(command_history::Column::UserId.eq(user_id))
+            .filter(command_history::Column::Scope.eq(scope))
+            .exec(&self.db)
+            .await?;
+        Ok(())
     }
 
     // ------------------------------------------------------ session records

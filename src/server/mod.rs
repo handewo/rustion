@@ -118,6 +118,10 @@ pub(super) trait HandlerBackend: Send + Clone {
     /// How long a limited-shell command may run; zero is no limit.
     fn command_timeout(&self) -> std::time::Duration;
 
+    /// How many history rows a prompt keeps per user and scope; zero
+    /// disables the histories.
+    fn history_size(&self) -> usize;
+
     fn encrypt_plain_text(&self, text: &str) -> Result<String, ServerError>;
     fn enable_record(&self) -> bool;
     fn record_input(&self) -> bool;

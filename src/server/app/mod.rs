@@ -1,6 +1,7 @@
 pub(super) mod admin;
 pub(super) mod change_password;
 pub(super) mod connect_target;
+pub(super) mod history;
 pub(crate) mod limited_shell;
 pub(super) mod sftp;
 use bytes::Bytes;

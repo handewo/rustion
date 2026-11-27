@@ -16,8 +16,8 @@ mod test;
 
 use crate::database::{
     entity::{
-        casbin_name, casbin_rule as casbin_rule_entity, command_set, event_log, secret,
-        session_recording, target as target_entity, target_secret as target_secret_entity,
+        casbin_name, casbin_rule as casbin_rule_entity, command_history, command_set, event_log,
+        secret, session_recording, target as target_entity, target_secret as target_secret_entity,
         user,
     },
     error::DatabaseError,
@@ -25,9 +25,9 @@ use crate::database::{
 };
 use async_trait::async_trait;
 use models::{
-    CasbinName, CasbinRule, CasbinRuleGroup, CommandSet, Dependents, EventLog, GroupType,
-    NamePtype, ObjectGroup, PermissionPolicy, Ptype, RecordingView, Role, Secret, SecretInfo,
-    SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName, User,
+    CasbinName, CasbinRule, CasbinRuleGroup, CommandHistory, CommandSet, Dependents, EventLog,
+    GroupType, HistoryScope, NamePtype, ObjectGroup, PermissionPolicy, Ptype, RecordingView, Role,
+    Secret, SecretInfo, SessionRecording, Target, TargetInfo, TargetSecret, TargetSecretName, User,
 };
 pub use uuid::Uuid;
 
@@ -493,6 +493,43 @@ pub trait DatabaseRepository: Send + Sync {
     /// Every audit event, newest first, ties broken by descending `id`.
     /// Unbounded — the table only grows.
     async fn list_logs(&self) -> Result<Vec<EventLog>, DatabaseError>;
+
+    // -------------------------------------------------------- command_history
+
+    /// Append one line accepted at a prompt. `id` is assigned by the database;
+    /// leave it `NotSet`.
+    ///
+    /// `created_at` is the line's accept time, which the caller knows and a
+    /// write-behind insert must not shift — unlike `insert_log`, a stamp left
+    /// `NotSet` is filled in here but one that is `Set` survives.
+    async fn insert_history(
+        &self,
+        entry: command_history::ActiveModel,
+    ) -> Result<(), DatabaseError>;
+
+    /// One user's lines at one prompt, oldest first — the order a session
+    /// preloads them in, so ascending `id` means ascending recency.
+    async fn list_history(
+        &self,
+        user_id: Uuid,
+        scope: HistoryScope,
+    ) -> Result<Vec<CommandHistory>, DatabaseError>;
+
+    /// Keep only the newest `keep` lines of that `(user, scope)` pair, capping
+    /// the table where the reader's preload already stops.
+    async fn prune_history(
+        &self,
+        user_id: Uuid,
+        scope: HistoryScope,
+        keep: usize,
+    ) -> Result<(), DatabaseError>;
+
+    /// Remove one line by row id — reedline's per-entry delete.
+    async fn delete_history(&self, id: i64) -> Result<(), DatabaseError>;
+
+    /// Empty that `(user, scope)` pair — reedline's `clear`.
+    async fn clear_history(&self, user_id: Uuid, scope: HistoryScope)
+    -> Result<(), DatabaseError>;
 
     // ------------------------------------------------------ session_recording
 

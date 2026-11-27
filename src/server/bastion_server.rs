@@ -662,6 +662,10 @@ impl super::HandlerBackend for BastionServer {
         self.config.command_timeout
     }
 
+    fn history_size(&self) -> usize {
+        self.config.history_size
+    }
+
     fn enable_record(&self) -> bool {
         self.config.enable_record
     }

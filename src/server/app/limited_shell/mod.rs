@@ -23,7 +23,7 @@ pub(crate) use run::{CommandInput, ShellInput, Terminal};
 use super::PtyParams;
 use super::recording::{Recording, SharedRecording, no_recording};
 use crate::database::Uuid;
-use crate::database::models::{Target, TargetSecretName, session_recording};
+use crate::database::models::{HistoryScope, Target, TargetSecretName, session_recording};
 use crate::fill;
 use crate::i18n::Strings;
 use crate::server::app::error::AppError;
@@ -36,8 +36,8 @@ use commands::{Cd, Commands, EXIT_FAILURE, EXIT_NOT_FOUND, Line, expand_tilde, s
 use crossterm::event::SenderWriter;
 use log::{debug, warn};
 use reedline::{
-    ColumnarMenu, Emacs, FileBackedHistory, KeyCode, KeyModifiers, Keybindings, MenuBuilder,
-    Prompt, PromptEditMode, PromptHistorySearch, Reedline, ReedlineEvent, ReedlineMenu, Signal,
+    ColumnarMenu, Emacs, KeyCode, KeyModifiers, Keybindings, MenuBuilder, Prompt, PromptEditMode,
+    PromptHistorySearch, PromptHistorySearchStatus, Reedline, ReedlineEvent, ReedlineMenu, Signal,
     default_emacs_keybindings,
 };
 use run::{Job, Outcome};
@@ -136,7 +136,8 @@ where
 
     let (tty, _) = tty.split();
     tokio::spawn(async move {
-        let history = Box::new(FileBackedHistory::new(0).expect("a zero capacity is valid"));
+        let history =
+            super::history::history(&backend, user_id, HistoryScope::Limited).await;
         let mut keybindings = default_emacs_keybindings();
         add_menu_keybindings(&mut keybindings);
         let editor = Reedline::create(tty, SenderWriter::new(send_to_session.clone()))
@@ -895,7 +896,10 @@ fn pick<'a>(targets: &'a [TargetSecretName], name: &str) -> Pick<'a> {
     }
 }
 
-/// A prompt shown as given, with no mode indicator.
+/// A prompt shown as given, with no edit-mode indicator. The history search
+/// still says what it is doing — the same words as the admin and selector
+/// prompts — because without it Ctrl+R looks dead: the mode is entered and
+/// the typed keys become the search term, but the screen says nothing.
 struct PlainPrompt(String);
 
 impl Prompt for PlainPrompt {
@@ -911,8 +915,12 @@ impl Prompt for PlainPrompt {
     fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
         Cow::Borrowed("")
     }
-    fn render_prompt_history_search_indicator(&self, _search: PromptHistorySearch) -> Cow<'_, str> {
-        Cow::Borrowed("")
+    fn render_prompt_history_search_indicator(&self, search: PromptHistorySearch) -> Cow<'_, str> {
+        let prefix = match search.status {
+            PromptHistorySearchStatus::Passing => "",
+            PromptHistorySearchStatus::Failing => "failing ",
+        };
+        Cow::Owned(format!("({prefix}reverse-search: {}) ", search.term))
     }
 }
 
@@ -930,4 +938,34 @@ fn add_menu_keybindings(keybindings: &mut Keybindings) {
         KeyCode::BackTab,
         ReedlineEvent::MenuPrevious,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The history search says what it is doing, as the admin and selector
+    /// prompts do: without it Ctrl+R looks dead — the mode is entered, the
+    /// typed keys become the search term, and the screen does not change
+    /// until a line matches.
+    #[test]
+    fn the_history_search_indicator_names_the_mode_and_term() {
+        let prompt = PlainPrompt(String::new());
+        let passing = PromptHistorySearch::new(
+            reedline::PromptHistorySearchStatus::Passing,
+            "df".to_string(),
+        );
+        assert_eq!(
+            prompt.render_prompt_history_search_indicator(passing),
+            "(reverse-search: df) "
+        );
+        let failing = PromptHistorySearch::new(
+            reedline::PromptHistorySearchStatus::Failing,
+            "dfx".to_string(),
+        );
+        assert_eq!(
+            prompt.render_prompt_history_search_indicator(failing),
+            "(failing reverse-search: dfx) "
+        );
+    }
 }

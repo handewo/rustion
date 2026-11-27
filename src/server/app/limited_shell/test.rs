@@ -491,7 +491,7 @@ mod through_the_bastion {
         casbin_name, casbin_rule, command_set, secret, target, target_secret,
     };
     use crate::database::fixture::{self, LUKA, PASSWORD};
-    use crate::database::models::{EventKind, NamePtype, Ptype};
+    use crate::database::models::{EventKind, HistoryScope, NamePtype, Ptype};
     use crate::server::{BastionServer, HandlerBackend};
     use russh::keys::{Algorithm, PrivateKey};
     use russh::{ChannelMsg, client as ru_client, server as ru_server};
@@ -841,6 +841,70 @@ mod through_the_bastion {
         for event in ["command_shell", "command_ran", "command_denied"] {
             assert!(rows.iter().any(|r| r.contains(event)), "{event}: {rows:?}");
         }
+    }
+
+    /// The lines accepted at the limited shell's prompts land in
+    /// `command_history` under the one `limited` scope, behind the prompt;
+    /// the admin shell's scope stays apart.
+    #[tokio::test]
+    async fn the_lines_run_are_kept_in_the_limited_history() {
+        let db = fixture::seed().await;
+        let mut config = Config::default().gen_secret_token();
+        config.database = db.url.clone();
+        config.reuse_target_connection = false;
+        let mut server = BastionServer::with_config(config).await.expect("server");
+        let f = &db.fixture;
+        let luka = f.user(LUKA);
+        grant_login(&server, f, luka).await;
+        let (target, _fake) = target_with_commands(&server, f, luka).await;
+        server.reload_policies().await.unwrap();
+
+        let mut screen = connect_shell(&mut server).await;
+        screen.until("> ").await;
+        screen.type_line(&target).await;
+        let prompt = format!("root@{target}> ");
+        screen.until(&prompt).await;
+        screen.type_line("df").await;
+        screen.until("disk\r\n").await;
+
+        // The write lands behind the prompt; give the drain task its moment.
+        let wait = async {
+            loop {
+                let rows = server
+                    .db_repository()
+                    .list_history(luka, HistoryScope::Limited)
+                    .await
+                    .unwrap();
+                if rows.iter().any(|r| r.command_line == "df") {
+                    return rows;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        let rows = tokio::time::timeout(Duration::from_secs(2), wait)
+            .await
+            .expect("the run reaches the history table");
+        let df = rows.iter().find(|r| r.command_line == "df").unwrap();
+        assert!(df.created_at > 0, "the row carries its time: {df:?}");
+        // Both prompt levels share the scope: the binding's name, read at
+        // `>`, is kept too.
+        assert!(
+            rows.iter().any(|r| r.command_line == target),
+            "{rows:?}"
+        );
+        // The admin shell's history is another scope entirely.
+        assert!(
+            server
+                .db_repository()
+                .list_history(luka, HistoryScope::Admin)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        screen.type_line("exit").await;
+        screen.until("\x1b[92m> ").await;
+        screen.type_line("exit").await;
     }
 
     /// A command may exit 125 of its own accord — the same number the run

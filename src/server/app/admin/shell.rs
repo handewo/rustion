@@ -1,4 +1,5 @@
 use crate::database::Uuid;
+use crate::database::models::HistoryScope;
 use crate::server::event_log::EventLogger;
 use log::warn;
 use reedline::{
@@ -36,7 +37,12 @@ pub(super) async fn shell<B>(
         .with_menu(ReedlineMenu::EngineCompleter(Box::new(
             ColumnarMenu::default().with_name("completion_menu"),
         )))
-        .with_partial_completions(true);
+        .with_partial_completions(true)
+        .with_history(crate::server::app::history::history(
+            &backend,
+            user_id,
+            HistoryScope::Admin,
+        ).await);
 
     let mut keybindings = default_emacs_keybindings();
     add_menu_keybindings(&mut keybindings);

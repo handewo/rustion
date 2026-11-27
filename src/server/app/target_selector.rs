@@ -1,14 +1,14 @@
 use super::PtyParams;
 use crate::database::Uuid;
-use crate::database::models::TargetSecretName;
+use crate::database::models::{HistoryScope, TargetSecretName};
 use crate::server::app::NextApplication;
 use crate::server::app::error::AppError;
 use bytes::Bytes;
 use crossterm::event::SenderWriter;
 use log::{debug, trace, warn};
 use reedline::{
-    ColumnarMenu, DefaultPrompt, DefaultPromptSegment, Emacs, ExampleHighlighter,
-    FileBackedHistory, MenuBuilder, Reedline, ReedlineMenu, Signal, default_emacs_keybindings,
+    ColumnarMenu, DefaultPrompt, DefaultPromptSegment, Emacs, ExampleHighlighter, MenuBuilder,
+    Reedline, ReedlineMenu, Signal, default_emacs_keybindings,
 };
 use reedline::{KeyCode, KeyModifiers, Keybindings, ReedlineEvent};
 use russh::ChannelId;
@@ -153,9 +153,8 @@ where
             .collect();
 
         // init prompt
-        let history = Box::new(
-            FileBackedHistory::new(0).unwrap_or_else(|_| panic!("[{}] safe capacity", handler_id)),
-        );
+        let history =
+            super::history::history(&backend, user_id, HistoryScope::Selector).await;
 
         let mut line_editor = Reedline::create(tty, SenderWriter::new(send_to_session.clone()))
             .with_quick_completions(true)

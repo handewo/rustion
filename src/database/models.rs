@@ -1,4 +1,5 @@
 pub(crate) mod casbin_rule;
+pub(crate) mod command_history;
 pub(crate) mod command_set;
 pub(crate) mod dependents;
 pub mod event_log;
@@ -11,6 +12,7 @@ pub(crate) use casbin_rule::{
     CasbinName, CasbinRule, CasbinRuleGroup, GroupType, NamePtype, ObjectGroup, PermissionPolicy,
     Ptype, Role,
 };
+pub(crate) use command_history::{CommandHistory, HistoryScope};
 pub(crate) use command_set::CommandSet;
 pub(crate) use dependents::Dependents;
 pub(crate) use event_log::EventKind;

@@ -10,13 +10,15 @@ use crate::database::common::{
     ACT_EXEC, ACT_LOGIN, ACT_SHELL, INTERNAL_ACTIONS, OBJ_ADMIN, OBJ_LOGIN, OBJ_PLAYER,
 };
 use crate::database::entity::{
-    casbin_name, casbin_rule as casbin_rule_entity, command_set, event_log, secret,
-    session_recording, target as target_entity, target_secret as target_secret_entity, user,
+    casbin_name, casbin_rule as casbin_rule_entity, command_history, command_set, event_log,
+    secret, session_recording, target as target_entity, target_secret as target_secret_entity,
+    user,
 };
 use crate::database::error::DatabaseError;
 use crate::database::fixture::{self, *};
 use crate::database::models::{
-    Dependents, EventKind, EventLog, GroupType, NamePtype, Ptype, RecordingStatus, SessionRecording,
+    Dependents, EventKind, EventLog, GroupType, HistoryScope, NamePtype, Ptype, RecordingStatus,
+    SessionRecording,
 };
 use crate::database::{DatabaseRepository, Uuid};
 use sea_orm::ActiveValue::{NotSet, Set, Unchanged};
@@ -2254,4 +2256,198 @@ async fn log_type_is_stored_as_an_integer() {
     assert_eq!(logs.len(), 1);
     assert_eq!(logs[0].log_type, EventKind::Admin);
     assert_eq!(logs[0].log_type.as_str(), "admin");
+}
+
+// ---------------------------------------------------------- command_history
+
+/// A helper that writes one line for `(user, scope)`.
+async fn say(repo: &dyn DatabaseRepository, user: Uuid, scope: HistoryScope, line: &str) {
+    repo.insert_history(command_history::ActiveModel {
+        user_id: Set(user),
+        scope: Set(scope),
+        command_line: Set(line.to_string()),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+}
+
+/// Lines round-trip oldest-first (the order a session preloads them in), ids
+/// ascend with insertion, a stamp left `NotSet` is filled in, a stamp given
+/// survives — it is when the line was accepted, not when the row happened to be
+/// written — and `delete_history` removes exactly one row.
+#[tokio::test]
+async fn history_round_trips_oldest_first_and_keeps_a_given_stamp() {
+    let db = fixture::seed().await;
+    let repo = db.repo();
+    let f = &db.fixture;
+
+    assert!(
+        repo.list_history(f.user(JOHN), HistoryScope::Limited)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    for line in ["cd /var/log", "tail -f messages", "exit"] {
+        say(repo, f.user(JOHN), HistoryScope::Limited, line).await;
+    }
+
+    let rows = repo.list_history(f.user(JOHN), HistoryScope::Limited).await.unwrap();
+    let lines: Vec<&str> = rows.iter().map(|h| h.command_line.as_str()).collect();
+    assert_eq!(lines, ["cd /var/log", "tail -f messages", "exit"]);
+    let ids: Vec<i64> = rows.iter().map(|h| h.id).collect();
+    assert!(ids.windows(2).all(|w| w[0] < w[1]), "ids ascend: {ids:?}");
+    assert!(rows.iter().all(|h| h.created_at != 0), "created_at stamped");
+
+    // A stamp the caller sets is the line's accept time and must not be
+    // overwritten by the write time.
+    repo.insert_history(command_history::ActiveModel {
+        user_id: Set(f.user(JOHN)),
+        scope: Set(HistoryScope::Limited),
+        command_line: Set("an old line replayed".to_string()),
+        created_at: Set(1234567890),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let rows = repo.list_history(f.user(JOHN), HistoryScope::Limited).await.unwrap();
+    assert_eq!(rows.last().unwrap().created_at, 1234567890);
+
+    repo.delete_history(rows[1].id).await.unwrap();
+    let rows = repo.list_history(f.user(JOHN), HistoryScope::Limited).await.unwrap();
+    let lines: Vec<&str> = rows.iter().map(|h| h.command_line.as_str()).collect();
+    assert_eq!(lines, ["cd /var/log", "exit", "an old line replayed"]);
+}
+
+/// The three prompts keep separate lists, and so do different users: every
+/// `(user, scope)` pair sees only its own lines.
+#[tokio::test]
+async fn history_keeps_users_and_scopes_apart() {
+    let db = fixture::seed().await;
+    let repo = db.repo();
+    let f = &db.fixture;
+
+    say(repo, f.user(JOHN), HistoryScope::Limited, "ls -la").await;
+    say(repo, f.user(JOHN), HistoryScope::Limited, "uptime").await;
+    say(repo, f.user(JOHN), HistoryScope::Admin, "users").await;
+    say(repo, f.user(JOHN), HistoryScope::Selector, "mars1").await;
+    say(repo, f.user(MIKE), HistoryScope::Limited, "df -h").await;
+
+    let john_limited = repo.list_history(f.user(JOHN), HistoryScope::Limited).await.unwrap();
+    assert_eq!(john_limited.len(), 2);
+    assert!(john_limited.iter().all(|h| h.command_line != "users"));
+    assert_eq!(
+        repo.list_history(f.user(JOHN), HistoryScope::Admin)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        repo.list_history(f.user(JOHN), HistoryScope::Selector)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    let mike = repo.list_history(f.user(MIKE), HistoryScope::Limited).await.unwrap();
+    assert_eq!(mike.len(), 1);
+    assert_eq!(mike[0].command_line, "df -h");
+}
+
+/// `prune_history` keeps the newest `keep` rows of that `(user, scope)` and
+/// leaves every other pair's rows alone.
+#[tokio::test]
+async fn pruning_keeps_the_newest_rows_for_that_user_and_scope_only() {
+    let db = fixture::seed().await;
+    let repo = db.repo();
+    let f = &db.fixture;
+
+    for line in ["one", "two", "three", "four", "five"] {
+        say(repo, f.user(JOHN), HistoryScope::Limited, line).await;
+        say(repo, f.user(JOHN), HistoryScope::Admin, line).await;
+        say(repo, f.user(MIKE), HistoryScope::Limited, line).await;
+    }
+
+    repo.prune_history(f.user(JOHN), HistoryScope::Limited, 3)
+        .await
+        .unwrap();
+
+    let rows = repo.list_history(f.user(JOHN), HistoryScope::Limited).await.unwrap();
+    let lines: Vec<&str> = rows.iter().map(|h| h.command_line.as_str()).collect();
+    assert_eq!(lines, ["three", "four", "five"], "newest kept");
+    // Untouched neighbours.
+    assert_eq!(
+        repo.list_history(f.user(JOHN), HistoryScope::Admin)
+            .await
+            .unwrap()
+            .len(),
+        5
+    );
+    assert_eq!(
+        repo.list_history(f.user(MIKE), HistoryScope::Limited)
+            .await
+            .unwrap()
+            .len(),
+        5
+    );
+
+    // Keeping more than there is, and keeping nothing, are both fine.
+    repo.prune_history(f.user(JOHN), HistoryScope::Limited, 99)
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.list_history(f.user(JOHN), HistoryScope::Limited)
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+    repo.prune_history(f.user(JOHN), HistoryScope::Limited, 0)
+        .await
+        .unwrap();
+    assert!(
+        repo.list_history(f.user(JOHN), HistoryScope::Limited)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// `clear_history` empties one `(user, scope)` and nothing else.
+#[tokio::test]
+async fn clearing_removes_only_that_user_and_scope() {
+    let db = fixture::seed().await;
+    let repo = db.repo();
+    let f = &db.fixture;
+
+    say(repo, f.user(JOHN), HistoryScope::Selector, "sun").await;
+    say(repo, f.user(JOHN), HistoryScope::Limited, "ps aux").await;
+    say(repo, f.user(MIKE), HistoryScope::Selector, "mars1").await;
+
+    repo.clear_history(f.user(JOHN), HistoryScope::Selector)
+        .await
+        .unwrap();
+
+    assert!(
+        repo.list_history(f.user(JOHN), HistoryScope::Selector)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        repo.list_history(f.user(JOHN), HistoryScope::Limited)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        repo.list_history(f.user(MIKE), HistoryScope::Selector)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
